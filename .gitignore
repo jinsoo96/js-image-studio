@@ -1,0 +1,23 @@
+# 파이썬·도구
+.venv/
+__pycache__/
+*.pyc
+
+# 무거운 결과물·모델은 작업하는 PC 의 D: 에만 둔다(레포에는 만드는 법과 에셋만)
+models/
+exports/
+state/
+series/*/episodes/*/panels_hf/
+series/*/episodes/*/panels/
+series/*/episodes/*/parts/
+series/*/episodes/*/out/
+series/*/episodes/*/review/
+series/*/episodes/*/render_run.log
+series/*/episodes/*/render_status.json
+**/_rejected/
+**/_candidates/
+reader/*/
+
+# 비밀값은 어디에도 두지 않는다
+*.local.md
+.env

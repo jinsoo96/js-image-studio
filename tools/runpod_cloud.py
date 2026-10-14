@@ -1,0 +1,456 @@
+"""RunPod 파드에 ComfyUI 를 띄워 쓴다. 일을 시킬 때만 GPU 가 돌고, 끝나면 내린다.
+
+    python tools/runpod_cloud.py run -- <명령...>
+        파드를 켜고 ComfyUI 가 준비되면 COMFY_URL 을 넣어 <명령>을 실행한 뒤, 성공하든 실패하든 파드를 내린다.
+        예) python tools/runpod_cloud.py run -- python tools/render.py episode series/mudae-dwi/episodes/ep001 --only p003
+    python tools/runpod_cloud.py up        파드를 켜고 준비될 때까지 기다려 URL 을 출력한다(다 쓰면 stop 필수)
+    python tools/runpod_cloud.py stop      켜져 있는 파드를 내린다(keep_pod 면 멈추고, 아니면 지운다)
+    python tools/runpod_cloud.py down      우리 파드(이름이 name_prefix 로 시작)를 전부 지운다(멈춰 둔 것까지)
+    python tools/runpod_cloud.py status    우리 파드 상태·시간당 비용·멈춘 동안 보관비
+
+"내린다"는 keep_pod(cloud/runpod.json) 에 따라 다르다.
+- false(기본): 지운다. 보관비 0, 다음엔 새 파드(2~4.5분). 커뮤니티 GPU 는 멈추면 바로 남이 가져가서 다시 켜기가 자주 실패한다.
+- true: 멈춘다. /workspace 볼륨에 설치·체크포인트가 남고 보관비(volume_gb x 월 $0.20/GB)가 든다.
+  다시 켤 때 그 기계에 빈 GPU 가 없거나 GPU 없이 붙으면 그 파드를 지우고 새로 만든다.
+파드 안에도 안전장치가 있다: 큐가 idle_min 분 비거나 이번 기동 후 max_hours 가 지나면 스스로 내린다.
+
+API 키는 환경변수 RUNPOD_API_KEY. 파드 안 설치·실행은 cloud/runpod_bootstrap.sh, 지금 쓰는 파드 id 는 cloud/pod_state.json.
+"""
+import base64
+import secrets
+import urllib.parse
+import contextlib
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "cloud" / "runpod.json"
+BOOTSTRAP = ROOT / "cloud" / "runpod_bootstrap.sh"
+STATE = ROOT / "cloud" / "pod_state.json"
+API = "https://rest.runpod.io/v1"
+# RunPod API·프록시 앞의 Cloudflare 가 파이썬 기본 User-Agent 를 403(error code 1010)으로 막는다
+UA = {"User-Agent": "webtoon-studio/1.0"}
+
+
+def cfg():
+    return json.loads(CONFIG.read_text(encoding="utf-8"))
+
+
+def load_state():
+    return json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
+
+
+def save_state(**kw):
+    s = {**load_state(), **kw}
+    STATE.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def api(method, path, body=None):
+    key = os.environ.get("RUNPOD_API_KEY")
+    if not key:
+        sys.exit("환경변수 RUNPOD_API_KEY 가 없다")
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(API + path, data=data, method=method,
+                                 headers={**UA, "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"RunPod {method} {path} -> {e.code}: {e.read().decode('utf-8', 'replace')[:500]}") from e
+
+
+def proxy_url(pod_id):
+    return f"https://{pod_id}-8188.proxy.runpod.net"
+
+
+def bootstrap_script():
+    return BOOTSTRAP.read_bytes().replace(b"\r\n", b"\n")
+
+
+def setup_sha():
+    """파드에 구워 넣는 것(부트스트랩·이미지·체크포인트·볼륨)이 바뀌었는지 보는 값. 바뀌면 멈춘 파드를 버리고 새로 만든다."""
+    c = cfg()
+    baked = {k: c.get(k) for k in ("image", "container_disk_gb", "volume_gb", "checkpoint", "comfyui_ref", "custom_nodes",
+                                   "extra_models", "idle_min", "max_hours", "keep_pod")}
+    return hashlib.sha256(bootstrap_script() + json.dumps(baked, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def get_pod(pod_id):
+    try:
+        return api("GET", f"/pods/{pod_id}")
+    except RuntimeError as e:
+        if "-> 404" in str(e) or "-> 400" in str(e):
+            return None
+        raise
+
+
+TOKENS = {}  # 파드 id -> 에이전트 토큰(이 프로세스가 만든 파드)
+
+
+def create_pod(mode="comfy", image=None):
+    """mode: comfy(ComfyUI 를 띄움) | agent(ComfyUI 없이 에이전트만, 학습 등). image 를 주면 runpod.json 의 image 대신 쓴다."""
+    c = cfg()
+    token = secrets.token_hex(16)
+    env = {
+        "MODE": mode,
+        "AGENT_TOKEN": token,
+        "BOOTSTRAP_B64": base64.b64encode(bootstrap_script()).decode("ascii"),
+        "CKPT_URL": c["checkpoint"]["url"],
+        "CKPT_NAME": c["checkpoint"]["name"],
+        "COMFY_REF": c["comfyui_ref"],
+        "CUSTOM_NODES": json.dumps(c.get("custom_nodes", [])),
+        "EXTRA_MODELS": json.dumps(c.get("extra_models", [])),
+        "IDLE_MIN": str(c["idle_min"]),
+        "MAX_HOURS": str(c["max_hours"]),
+        "ON_IDLE": "stop" if c["keep_pod"] else "terminate",
+    }
+    errors = []
+    # 싼 커뮤니티 클라우드부터, GPU 는 목록 순서대로 빈 곳을 찾는다.
+    # RunPod 가 잠깐씩 500("Something went wrong", "machine does not have the resources")을 내서 30초 간격으로 4바퀴 돈다(2026-10-07)
+    # RUNPOD_CLOUD_TYPES=SECURE 로 한 번만 바꿔 켤 수 있다(2026-10-12 커뮤니티 파드 두 대가 연달아 ComfyUI 를 못 띄웠다, 드라이버 580)
+    types = [t for t in os.environ.get("RUNPOD_CLOUD_TYPES", "").split(",") if t] or c["cloud_types"]
+    for cloud_type in [t for _ in range(4) for t in types]:
+        if errors and cloud_type == types[0]:
+            time.sleep(30)
+        body = {
+            "name": f"{c['name_prefix']}-{time.strftime('%m%d-%H%M%S')}",
+            "imageName": image or c["image"],
+            "gpuTypeIds": c["gpu_types"],
+            "gpuCount": 1,
+            # 이미지가 CUDA 12.8 이라 드라이버가 낮은 기계에 붙으면 ComfyUI 가 뜨지 못한다(2026-10-07 30분 대기 후 실패)
+            "allowedCudaVersions": c["allowed_cuda"],
+            "cloudType": cloud_type,
+            "containerDiskInGb": c["container_disk_gb"],
+            "volumeInGb": c["volume_gb"] if c["keep_pod"] else 0,
+            "volumeMountPath": "/workspace",
+            "ports": ["8188/http", "8189/http"],
+            "env": env,
+            # RunPod 는 이 배열을 공백으로 이었다 다시 쪼개는 듯해서(2026-10-06 첫 시험: "bash -c '...'" 가 갈라져 빈 스크립트로 즉시 종료·재시작 반복)
+            # 공백 없이 ${IFS} 로 쓴다. 그대로 넘어가도, 쪼개져도 같은 한 덩어리다
+            "dockerStartCmd": ["bash", "-c", "echo${IFS}$BOOTSTRAP_B64|base64${IFS}-d>/bootstrap.sh&&bash${IFS}/bootstrap.sh"],
+        }
+        try:
+            pod = api("POST", "/pods", body)
+        except RuntimeError as e:
+            errors.append(str(e))
+            continue
+        print(f"파드 생성: {pod['id']} ({cloud_type}, {mode}, 시간당 ${pod.get('costPerHr', '?')})", flush=True)
+        TOKENS[pod["id"]] = token
+        if mode == "comfy":
+            save_state(pod_id=pod["id"], setup_sha=setup_sha(), created=time.strftime("%Y-%m-%d %H:%M"), stopped_at=None)
+        return pod["id"]
+    raise RuntimeError("빈 GPU 를 못 찾았다:\n" + "\n".join(errors))
+
+
+def boot_log(pod_id):
+    """파드 설치·ComfyUI 로그(8189 로 내보낸 /workspace/logs/bootstrap.log). 아직 안 열렸으면 None."""
+    try:
+        req = urllib.request.Request(f"https://{pod_id}-8189.proxy.runpod.net/bootstrap.log", headers=UA)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return None
+
+
+def wait_ready(pod_id, timeout_min, mode="comfy"):
+    """ComfyUI 가 응답하고 GPU(cuda) 를 잡았는지까지 본다. 멈췄다 켠 파드는 GPU 없이 붙을 수 있다.
+    체크포인트까지 받았는데 comfy_start_timeout_min 안에 안 뜨면 ComfyUI 가 죽은 것으로 보고 로그 끝을 찍고 실패한다."""
+    url = proxy_url(pod_id)
+    t0, seen, ckpt_at, req_at = time.time(), 0, None, None
+    lines = []
+    while time.time() - t0 < timeout_min * 60:
+        try:
+            if mode == "agent":
+                if not any("[boot] agent ready" in ln for ln in (boot_log(pod_id) or [])):
+                    raise RuntimeError("not yet")
+                print(f"에이전트 준비됨: {agent_url(pod_id)} ({(time.time() - t0) / 60:.1f}분)", flush=True)
+                return agent_url(pod_id)
+            with urllib.request.urlopen(urllib.request.Request(url + "/system_stats", headers=UA), timeout=10) as r:
+                stats = json.loads(r.read())
+        except Exception:
+            lines = boot_log(pod_id) or lines
+            for line in lines[seen:]:
+                if line.startswith("[boot]") or line.startswith("[watchdog]") or "Error" in line or "Traceback" in line:
+                    print("  " + line[:300], flush=True)
+                if "[boot] checkpoint ready" in line and ckpt_at is None:
+                    ckpt_at = time.time()
+                if "[boot] requirements" in line and req_at is None:
+                    req_at = time.time()
+            seen = len(lines)
+            if ckpt_at and time.time() - ckpt_at > cfg()["comfy_start_timeout_min"] * 60:
+                break
+            # 체크포인트(7GB) 받기는 보통 3분. 네트워크가 느린 기계에 걸리면 버리고 새로 만든다(2026-10-07 16분째 안 끝남)
+            if req_at and not ckpt_at and time.time() - req_at > cfg()["download_timeout_min"] * 60:
+                break
+            time.sleep(15)
+            continue
+        devices = stats.get("devices", [])
+        if not any(d.get("type") == "cuda" for d in devices):
+            raise RuntimeError(f"ComfyUI 는 떴는데 GPU 가 없다: {[d.get('name') for d in devices]}")
+        print(f"ComfyUI 준비됨: {url} ({devices[0].get('name')}, {(time.time() - t0) / 60:.1f}분)", flush=True)
+        return url
+    print("  --- 파드 로그 끝 ---", flush=True)
+    for line in (boot_log(pod_id) or lines)[-40:]:
+        print("  " + line[:300], flush=True)
+    raise TimeoutError(f"ComfyUI 가 뜨지 않았다({(time.time() - t0) / 60:.0f}분): {pod_id}")
+
+
+
+def agent_url(pod_id):
+    return f"https://{pod_id}-8189.proxy.runpod.net"
+
+
+def _agent(pod_id, method, path, data=None, timeout=300):
+    req = urllib.request.Request(agent_url(pod_id) + path, data=data, method=method,
+                                 headers={**UA, "X-Token": TOKENS[pod_id], "Content-Type": "application/octet-stream"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def agent_upload(pod_id, local, remote):
+    """로컬 파일을 파드의 remote(절대 경로)로 올린다."""
+    for attempt in range(3):
+        try:
+            return json.loads(_agent(pod_id, "POST", "/upload?" + urllib.parse.urlencode({"path": remote}), Path(local).read_bytes()))
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(3)
+
+
+def agent_upload_dir(pod_id, local_dir, remote_dir, chunk_mb=150):
+    """폴더를 tar 묶음(최대 chunk_mb)으로 나눠 올려 파드에서 푼다. 파일 1천 개를 하나씩 올리면 20분 넘게 걸렸다(2026-10-11)."""
+    import io
+    import tarfile
+    files = sorted(f for f in Path(local_dir).rglob("*") if f.is_file())
+    batch, size, sent = [], 0, 0
+
+    def flush():
+        nonlocal batch, size, sent
+        if not batch:
+            return
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as t:
+            for f in batch:
+                t.add(f, arcname=str(f.relative_to(local_dir)).replace("\\", "/"))
+        for attempt in range(3):
+            try:
+                _agent(pod_id, "POST", "/untar?" + urllib.parse.urlencode({"dest": remote_dir}), buf.getvalue(), timeout=600)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                time.sleep(5)
+        sent += len(batch)
+        batch, size = [], 0
+
+    for f in files:
+        batch.append(f)
+        size += f.stat().st_size
+        if size >= chunk_mb * 2**20:
+            flush()
+    flush()
+    return sent
+
+
+def agent_run(pod_id, name, cmd, env=None):
+    """파드에서 bash 명령을 뒤에서 돌린다. 출력은 /workspace/logs/job_<name>.log"""
+    return json.loads(_agent(pod_id, "POST", "/run", json.dumps({"name": name, "cmd": cmd, "env": env or {}}).encode()))
+
+
+def agent_wait(pod_id, name, poll=30, show=r"steps:|Error|error|Traceback|saving|epoch"):
+    """작업이 끝날 때까지 기다리며 로그 중 show 에 맞는 새 줄을 찍는다. 종료 코드를 돌려준다."""
+    import re
+    seen = 0
+    while True:
+        time.sleep(poll)
+        try:
+            jobs = json.loads(urllib.request.urlopen(urllib.request.Request(agent_url(pod_id) + "/jobs", headers=UA), timeout=20).read())
+            log = urllib.request.urlopen(urllib.request.Request(f"{agent_url(pod_id)}/job_{name}.log", headers=UA), timeout=30).read()
+        except Exception as e:
+            print(f"  (에이전트 응답 없음: {str(e)[:80]})", flush=True)
+            continue
+        text = log.decode("utf-8", "replace").replace(chr(13), chr(10)).splitlines()
+        hits = [ln for ln in text[seen:] if re.search(show, ln)]
+        if hits:
+            print("  " + hits[-1][-200:], flush=True)
+        seen = len(text)
+        j = jobs.get(name)
+        if j and not j["running"]:
+            return j["rc"]
+
+
+def agent_download(pod_id, remote, local):
+    data = _agent(pod_id, "GET", "/download?" + urllib.parse.urlencode({"path": remote}), timeout=900)
+    Path(local).parent.mkdir(parents=True, exist_ok=True)
+    Path(local).write_bytes(data)
+    return len(data)
+
+
+def upload_models(pod_id, image):
+    """runpod.json 의 upload_models(우리가 학습한 LoRA 등 로컬 파일)를 ComfyUI models 폴더로 올린다."""
+    items = cfg().get("upload_models", [])
+    if not items:
+        return
+    base = "/comfyui/models" if "worker-comfyui" in image else "/workspace/ComfyUI/models"
+    for m in items:
+        src = ROOT / m["src"]
+        if not src.exists():
+            print(f"  올릴 모델이 없다: {src}", flush=True)
+            continue
+        size = src.stat().st_size
+        for attempt in range(3):  # 받은 바이트가 원본과 다르면 다시(2026-10-12 깨진 LoRA 로 D+18 104컷이 전부 회색으로 나왔다)
+            got = agent_upload(pod_id, src, f"{base}/{m['dest']}").get("bytes")
+            if got == size:
+                break
+            print(f"  모델 올림 크기 불일치({got} != {size}), 다시 올림", flush=True)
+        else:
+            raise RuntimeError(f"모델 올리기 실패: {m['dest']}")
+        print(f"  모델 올림: {m['dest']} ({size / 2**20:.0f}MB, 확인)", flush=True)
+
+def terminate(pod_id):
+    try:
+        api("DELETE", f"/pods/{pod_id}")
+        print(f"파드 삭제: {pod_id}", flush=True)
+    except RuntimeError as e:
+        print(f"파드 삭제 실패(직접 확인 필요: status): {pod_id} {e}", flush=True)
+        return
+    if load_state().get("pod_id") == pod_id:
+        STATE.unlink(missing_ok=True)
+
+
+def stop(pod_id):
+    """GPU 과금을 끝낸다. 멈추기에 실패하면 과금이 이어지지 않게 지운다."""
+    try:
+        api("POST", f"/pods/{pod_id}/stop")
+    except RuntimeError as e:
+        print(f"파드 멈춤 실패, 대신 지운다: {e}", flush=True)
+        terminate(pod_id)
+        return
+    save_state(stopped_at=time.strftime("%Y-%m-%d %H:%M"))
+    c = cfg()
+    print(f"파드 멈춤: {pod_id} (GPU 과금 끝. 멈춘 동안 보관비 월 약 ${c['volume_gb'] * c['stopped_storage_usd_per_gb_month']:.1f}, "
+          f"한동안 안 쓸 거면 down)", flush=True)
+
+
+def ensure_pod(mode="comfy", image=None):
+    """쓸 수 있는 파드를 하나 켜서 (pod_id, url) 을 돌려준다. 멈춘 파드가 있으면 다시 켜고, 안 되면 새로 만든다.
+    mode=agent 면 늘 새로 만들고 에이전트 주소를 돌려준다."""
+    c, s = cfg(), load_state()
+    if mode == "agent":
+        s = {}
+    # 지우는 모드(keep_pod false)에선 남의 파드를 건드리지 않는다. 켜져 있는 파드는 다른 작업이 쓰는 중일 수 있다
+    # (2026-10-07 두 묶음을 동시에 돌리자 두 번째가 첫 번째 파드를 지워 첫 번째가 502 로 끊겼다)
+    pod = get_pod(s["pod_id"]) if c["keep_pod"] and s.get("pod_id") else None
+    if pod and s.get("setup_sha") != setup_sha():
+        print("파드 설정(부트스트랩·이미지·체크포인트)이 바뀌어 기존 파드를 지우고 새로 만든다", flush=True)
+        terminate(pod["id"])
+        pod = None
+    if pod:
+        try:
+            if pod.get("desiredStatus") != "RUNNING":
+                api("POST", f"/pods/{pod['id']}/start")
+                print(f"파드 다시 켬: {pod['id']} (시간당 ${pod.get('costPerHr', '?')})", flush=True)
+            save_state(stopped_at=None)
+            return pod["id"], wait_ready(pod["id"], c["resume_timeout_min"])
+        except Exception as e:
+            print(f"다시 켜지 못했다({str(e)[:200]}). 이 파드를 지우고 새로 만든다", flush=True)
+            terminate(pod["id"])
+    # 기계를 잘못 만나면(드라이버·디스크 문제) 그 파드를 지우고 한 번 더 새로 만든다
+    for attempt in (1, 2):
+        pod_id = create_pod(mode, image)
+        try:
+            url = wait_ready(pod_id, c["ready_timeout_min"], mode)
+            if mode == "comfy":
+                upload_models(pod_id, image or c["image"])
+            return pod_id, url
+        except Exception as e:
+            terminate(pod_id)
+            if attempt == 2:
+                raise
+            print(f"파드가 준비되지 않아 새로 만든다: {str(e)[:200]}", flush=True)
+
+
+def release(pod_id):
+    if cfg()["keep_pod"]:
+        stop(pod_id)
+    else:
+        terminate(pod_id)
+
+
+@contextlib.contextmanager
+def session():
+    """파드를 켜서 ComfyUI URL 을 넘겨주고, 블록이 끝나면(예외여도) 멈추거나 지운다."""
+    pod_id, url = ensure_pod()
+    try:
+        yield url
+    finally:
+        release(pod_id)
+
+
+def our_pods():
+    pods = api("GET", "/pods")
+    pods = pods if isinstance(pods, list) else pods.get("pods", pods.get("data", []))
+    return [p for p in pods if str(p.get("name", "")).startswith(cfg()["name_prefix"])]
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        sys.exit(__doc__)
+    cmd = args[0]
+    if cmd == "run":
+        rest = args[args.index("--") + 1:] if "--" in args else args[1:]
+        if not rest:
+            sys.exit("run 뒤에 -- <명령> 을 준다")
+        t0 = time.time()
+        with session() as url:
+            r = subprocess.run(rest, env={**os.environ, "COMFY_URL": url, "PYTHONUTF8": "1"})
+        print(f"총 {(time.time() - t0) / 60:.1f}분", flush=True)
+        sys.exit(r.returncode)
+    elif cmd == "up":
+        pod_id, url = ensure_pod()
+        print(url)
+        print("다 쓰면: python tools/runpod_cloud.py stop")
+    elif cmd == "stop":
+        pods = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
+        for p in pods:
+            release(p["id"])
+        if not pods:
+            print("켜진 파드 없음")
+    elif cmd == "down":
+        pods = our_pods()
+        for p in pods:
+            terminate(p["id"])
+        STATE.unlink(missing_ok=True)
+        if not pods:
+            print("지울 파드 없음")
+    elif cmd == "status":
+        c, s = cfg(), load_state()
+        pods = our_pods()
+        for p in pods:
+            line = f"{p['id']} {p.get('name')} {p.get('desiredStatus')} 켜져 있으면 ${p.get('costPerHr', '?')}/h"
+            if p.get("desiredStatus") != "RUNNING":
+                line += f", 멈춘 동안 보관비 월 약 ${c['volume_gb'] * c['stopped_storage_usd_per_gb_month']:.1f}"
+                if s.get("pod_id") == p["id"] and s.get("stopped_at"):
+                    days = (time.time() - time.mktime(time.strptime(s["stopped_at"], "%Y-%m-%d %H:%M"))) / 86400
+                    line += f", {days:.0f}일째 멈춤"
+                    if days >= c["stale_stopped_days"]:
+                        line += " (오래 안 썼다. 계속 안 쓸 거면 down)"
+            print(line)
+        if not pods:
+            print("파드 없음(보관비도 없음)")
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()

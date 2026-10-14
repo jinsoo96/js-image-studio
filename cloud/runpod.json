@@ -1,0 +1,80 @@
+{
+  "image": "runpod/worker-comfyui:5.10.0-base-cuda12.8.1",
+  "gpu_types": [
+    "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX A5000",
+    "NVIDIA GeForce RTX 3090",
+    "NVIDIA RTX 4000 Ada Generation"
+  ],
+  "cloud_types": [
+    "SECURE",
+    "COMMUNITY"
+  ],
+  "allowed_cuda": [
+    "12.8",
+    "12.9",
+    "13.0"
+  ],
+  "comfyui_ref": "v0.39.0",
+  "comfy_start_timeout_min": 8,
+  "download_timeout_min": 10,
+  "container_disk_gb": 40,
+  "keep_pod": false,
+  "volume_gb": 20,
+  "stopped_storage_usd_per_gb_month": 0.2,
+  "checkpoint": {
+    "name": "NoobAI-XL-v1.1.safetensors",
+    "url": "https://huggingface.co/Laxhar/noobai-XL-1.1/resolve/main/NoobAI-XL-v1.1.safetensors"
+  },
+  "idle_min": 15,
+  "max_hours": 4,
+  "ready_timeout_min": 30,
+  "resume_timeout_min": 10,
+  "stale_stopped_days": 14,
+  "name_prefix": "webtoon",
+  "upload_models": [
+    {
+      "src": "models/loras/d18_chars_v3.safetensors",
+      "dest": "loras/d18_chars_v3.safetensors"
+    },
+    {
+      "src": "models/loras/mdw_chars_v3.safetensors",
+      "dest": "loras/mdw_chars_v3.safetensors"
+    },
+    {
+      "src": "models/loras/mdw_chars_v2.safetensors",
+      "dest": "loras/mdw_chars_v2.safetensors"
+    },
+    {
+      "src": "models/loras/d18_style_v1.safetensors",
+      "dest": "loras/d18_style_v1.safetensors"
+    }
+  ],
+  "_ipadapter_why": "2026-10-09 IP-Adapter plus-face 시험(worklogs/ipface_test_1009.py): NoobAI(애니 계열) 체크포인트와 안 맞아 0.5 에서도 바래고 0.7 은 뭉개짐 → 다시 끔. 인물 얼굴은 기준 그림 img2img 로 학습 세트를 만든다",
+  "custom_nodes_off": [
+    {
+      "dir": "ComfyUI_IPAdapter_plus",
+      "url": "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
+      "ref": "a0f451a5113cf9becb0847b92884cb10cbdec0ef"
+    }
+  ],
+  "extra_models_off": [
+    {
+      "repo": "h94/IP-Adapter",
+      "file": "models/image_encoder/model.safetensors",
+      "dest": "clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    },
+    {
+      "repo": "h94/IP-Adapter",
+      "file": "sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+      "dest": "ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors"
+    },
+    {
+      "repo": "h94/IP-Adapter",
+      "file": "sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "dest": "ipadapter/ip-adapter-plus-face_sdxl_vit-h.safetensors"
+    }
+  ],
+  "custom_nodes": [],
+  "extra_models": []
+}
