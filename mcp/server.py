@@ -5,6 +5,7 @@
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
 - 크레딧을 쓰는 도구(draw_panels·redraw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
+- vast_* 도구는 회사 공용 vast.ai GPU(Qwen Image 2.1)로 크레딧 없이 그린다. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
@@ -39,7 +40,8 @@ SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md"
 
 mcp = FastMCP("webtoon-studio", instructions=(
     "세로 스크롤 웹툰 작업실(D+18·무대 뒤). 처음엔 guide() 로 규칙을 읽고 status() 로 상태를 본다. "
-    "작화는 크레딧(돈)을 쓴다: estimate_draw 로 비용을 보고 사용자에게 확인받은 뒤 draw_panels(confirm_credits=비용). "
+    "힉스필드 작화는 크레딧(돈)을 쓴다: estimate_draw 로 비용을 보고 사용자에게 확인받은 뒤 draw_panels(confirm_credits=비용). "
+    "vast_draw 는 회사 공용 GPU 로 크레딧 없이 그린다(결과는 panels_hf_vast, 본편 채택은 vast_adopt). "
     "오래 걸리는 일은 job_id 를 돌려주니 job_status 로 확인한다. 사용자에게는 한국어로 답한다."))
 
 
@@ -125,7 +127,9 @@ def guide() -> str:
             "3) 새 회차는 new_episode 로 앞 회차 틀을 복사하고, read_file 로 열어 사용자 이야기에 맞게 고친 뒤 write_file 로 쓴다\n"
             "4) prepare_episode → estimate_draw → 사용자에게 비용 확인 → draw_panels(confirm_credits=비용) → job_status\n"
             "5) review_panels 로 그림 검수(그림을 보는 모델이 판정) + contact_sheet 경로를 사용자에게 → 사용자가 동의한 컷만 build_panels.py 고쳐 redraw_panels → compose → job_status(막는 경고 0 확인) → export\n"
-            "크레딧은 개인 결제다. 시안 남발 금지, 재사용 먼저, 끝나면 남은 크레딧을 알린다.")
+            "크레딧은 개인 결제다. 시안 남발 금지, 재사용 먼저, 끝나면 남은 크레딧을 알린다.\n"
+            "vast(크레딧 0, 회사 공용 GPU): vast_status → vast_draw(turbo·expr 기본) → job_status → contact_sheet/review_panels(folder='vast') "
+            "→ 걸린 컷은 seed 바꿔 vast_draw → 사용자가 고른 컷만 vast_adopt → compose. 새 인물이면 vast_make_assets.")
     return (ROOT / "CLAUDE.md").read_text(encoding="utf-8") + tips
 
 
@@ -197,11 +201,22 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
     return "\n".join(out)
 
 
+def _folder(folder: str) -> str:
+    """그림 폴더: 비우면 힉스필드 본편(panels_hf), "vast" 면 vast 판(panels_hf_vast)."""
+    f = (folder or "").strip().lower()
+    if f in ("", "hf", "panels_hf"):
+        return "panels_hf"
+    if f in ("vast", "panels_hf_vast"):
+        return "panels_hf_vast"
+    raise ValueError('folder 는 비우거나(힉스필드 본편) "vast"')
+
+
 @mcp.tool()
-def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "") -> str:
+def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
     """검수용 모아보기 그림(컷 번호 붙임)을 만들고 파일 경로를 돌려준다. ids(쉼표) 또는 scene(장소 이름)으로 고른다.
-    비우면 새로 그린 컷 전부. 사용자에게 경로를 알려 직접 보게 한다."""
+    비우면 새로 그린 컷 전부. folder="vast" 면 vast 로 그린 컷(panels_hf_vast). 사용자에게 경로를 알려 직접 보게 한다."""
     ep = _episode(series, episode)
+    sub = _folder(folder)
     pj = _panels_json(ep)
     want = _ids(ids)
     sel = [p for p in pj if (not want or p["id"] in want) and (not scene or p.get("location") == scene)]
@@ -215,8 +230,9 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "") -> 
     except Exception:
         font = ImageFont.load_default()
     for pid in sel_ids[:24]:
-        f = ep / "panels_hf" / f"{pid}.png"
-        f = f if f.exists() else ep / "panels" / f"{pid}.png"
+        f = ep / sub / f"{pid}.png"
+        if not f.exists() and sub == "panels_hf":  # 재사용·합성 컷은 panels 에만 있다
+            f = ep / "panels" / f"{pid}.png"
         if not f.exists():
             continue
         im = Image.open(f).convert("RGB")
@@ -238,12 +254,15 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "") -> 
 
 
 @mcp.tool()
-def review_panels(series: str, episode: str, ids: str = "", scene: str = "") -> str:
+def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
+    folder="vast" 면 vast 로 그린 컷을 본다(vast 판은 다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
     8컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 사용자에게 보여 주고 동의를 받은 뒤 고칠 점을 build_panels.py 에 반영해 redraw_panels."""
     ep = _episode(series, episode)
     sd = _series(series)
+    sub = _folder(folder)
+    vision_review.DIRS[:] = [sub] if sub != "panels_hf" else ["panels_hf", "panels"]
     try:
         pick = vision_review.pick_ids(ep, ids, scene)
     except ValueError as e:
@@ -259,7 +278,8 @@ def review_panels(series: str, episode: str, ids: str = "", scene: str = "") -> 
                 "(모델 판정이라 틀릴 수 있다. 사용자에게 contact_sheet 경로와 함께 보여 주고 확인받는다)")
     out = ROOT / "state" / "mcp_reviews" / f"{sd.name}_{ep.name}_{time.strftime('%m%d-%H%M%S')}.md"
     job = _start_job("review", ep, [{"label": f"그림 검수 {len(pick)}컷", "cmd": [PY, str(ROOT / "mcp" / "vision_review.py"), str(sd), ep.name,
-                                                                          "--ids", ",".join(pick), "--out", str(out)]}])
+                                                                          "--ids", ",".join(pick), "--out", str(out)]
+                                                                  + (["--folder", sub] if sub != "panels_hf" else [])}])
     return f"작업 시작 {job}: {len(pick)}컷 검수(6컷씩 동시, 약 {max(1, len(pick) // 6) * 5}초). job_status('{job}', tail_lines=80) 로 결과를 본다"
 
 
@@ -456,6 +476,96 @@ def redraw_panels(series: str, episode: str, ids: str, reason: str, confirm_cred
         if f.exists():
             shutil.move(str(f), str(rej / f"{i}_{stamp}.png"))
     return _draw(series, episode, want, confirm_credits, "redraw", note=reason)
+
+
+# ── vast.ai 공용 GPU(크레딧 0) ───────────────────────────────
+# 회사 공용 vast.ai 의 ComfyUI(Qwen Image 2.1)로 그린다. 크레딧은 안 들지만 공용 장비라 한 번에 VAST_MAX 컷까지.
+# 인스턴스 만들기·끄기·지우기 도구는 두지 않는다(vast/README.md).
+VAST = ROOT / "vast"
+VAST_MAX = 80
+
+
+@mcp.tool()
+def vast_status() -> str:
+    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·Qwen Image 2.1 모델이 받아져 있는지. 크레딧 안 씀."""
+    return _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)
+
+
+@mcp.tool()
+def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1) -> str:
+    """컷을 vast GPU 의 Qwen Image 2.1 로 그린다(크레딧 0). 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+    ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
+    expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
+    인원이 하나 더 나오거나 잔상이 끼면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
+    ep = _episode(series, episode)
+    sd = _series(series)
+    pj = [p["id"] for p in _panels_json(ep)]
+    want = _ids(ids) or [i for i in pj if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
+    bad = [i for i in want if i not in pj]
+    if bad:
+        return f"panels.json 에 없는 번호: {', '.join(bad)}(재사용·합성 컷은 그리지 않는다)"
+    if not want:
+        return "그릴 컷이 없다(vast 그림이 다 있다. 다시 그리려면 ids 를 준다)"
+    if len(want) > VAST_MAX:
+        return f"공용 GPU 라 한 번에 {VAST_MAX}컷까지다({len(want)}컷). 나눠서 부른다"
+    if aspect and aspect not in ("9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9"):
+        return "aspect 는 9:16·2:3·3:4·1:1·4:3·3:2·16:9 중 하나"
+    if not (sd / "assets" / "vast_refs").is_dir():
+        return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
+    if _running_job(ep):
+        return "이 회차에 도는 작업이 있다. job_status 로 끝난 뒤 부른다"
+    cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
+    cmd += ["--turbo"] if turbo else []
+    cmd += ["--expr"] if expr else []
+    cmd += ["--aspect", aspect] if aspect else []
+    cmd += ["--seed", str(seed)] if seed >= 0 else []
+    job = _start_job("vast_draw", ep, [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}])
+    per = 30 if turbo else 120
+    return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
+            f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast')")
+
+
+@mcp.tool()
+def vast_make_assets(series: str, character: str = "all", what: str = "both") -> str:
+    """인물 에셋을 vast 로 만든다(크레딧 0): 시트에서 참고 그림 자르기 → 회색 기본복 베이스 몸·센 표정 12가지(오열·고함·경멸 등).
+    character: 인물 id(cast.json) 또는 all. what: base · expr · both. 이미 있는 그림은 건너뛴다. 새 인물 시트를 만든 뒤 한 번 부른다."""
+    sd = _series(series)
+    if what not in ("base", "expr", "both"):
+        return "what 은 base · expr · both"
+    if character != "all" and not (sd / "assets" / f"{character}_sheet.png").exists():
+        return f"{character}_sheet.png 가 없다(인물 시트를 먼저 만든다). 있는 인물: " + ", ".join(
+            sorted(p.name[:-len('_sheet.png')] for p in (sd / "assets").glob("*_sheet.png")))
+    if _running_job(sd):
+        return "이 작품에 도는 에셋 작업이 있다. 끝난 뒤 부른다"
+    steps = [{"label": "시트에서 참고 그림 자르기", "cmd": [PY, str(VAST / "sheet_refs.py"), str(sd)]},
+             {"label": f"에셋 만들기({character}, {what})", "cmd": [PY, str(VAST / "make_assets.py"), str(sd), character, what, "--res", "768"]}]
+    job = _start_job("vast_assets", sd, steps)
+    return f"작업 시작 {job}: 크레딧 0, 장당 약 3~4초(인물 하나 13장). job_status('{job}')"
+
+
+@mcp.tool()
+def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
+    """vast 로 그린 컷을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
+    사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""
+    ep = _episode(series, episode)
+    want = _ids(ids)
+    if not want:
+        return "채택할 컷 번호를 준다"
+    miss = [i for i in want if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
+    if miss:
+        return f"vast 그림이 없는 컷: {', '.join(miss)}(vast_draw 로 먼저 그린다)"
+    if _running_job(ep):
+        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    rej = ep / "panels_hf" / "_rejected"
+    rej.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%m%d%H%M")
+    for i in want:
+        cur = ep / "panels_hf" / f"{i}.png"
+        if cur.exists():
+            shutil.move(str(cur), str(rej / f"{i}_{stamp}_before_vast.png"))
+        shutil.copy2(ep / "panels_hf_vast" / f"{i}.png", cur)
+    job = _start_job("vast_adopt", ep, [{"label": "합성용으로 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]}], reason)
+    return f"{len(want)}컷을 vast 그림으로 바꿨다(원본은 panels_hf/_rejected/*_before_vast.png). 놓기 작업 {job} → 끝나면 compose"
 
 
 # ── 합성·내보내기 ─────────────────────────────────────────────

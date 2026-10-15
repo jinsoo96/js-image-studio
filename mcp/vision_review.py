@@ -73,8 +73,11 @@ def spec_text(series_dir: Path, ep: Path, pid: str) -> str:
     return "\n".join(lines)
 
 
+DIRS = ["panels_hf", "panels"]  # 그림을 찾는 폴더 순서. vast 판 검수는 ["panels_hf_vast"](--folder)
+
+
 def image_of(ep: Path, pid: str):
-    for d in ("panels_hf", "panels"):
+    for d in DIRS:
         f = ep / d / f"{pid}.png"
         if f.exists():
             return f
@@ -185,7 +188,10 @@ if __name__ == "__main__":
     ap.add_argument("--ids", default="")
     ap.add_argument("--scene", default="")
     ap.add_argument("--out", default="")
+    ap.add_argument("--folder", default="", help="그림 폴더(예: panels_hf_vast). 비우면 panels_hf → panels")
     a = ap.parse_args()
+    if a.folder:
+        DIRS[:] = [a.folder]
     sd = Path(a.series_dir)
     ep = sd / "episodes" / a.episode
     ids = pick_ids(ep, a.ids, a.scene)

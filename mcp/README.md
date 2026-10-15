@@ -1,6 +1,6 @@
 # 작업실 MCP 서버(agent app·Qwen 에서 쓰기)
 
-`server.py` 는 작업실 기능을 MCP 도구 18개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
+`server.py` 는 작업실 기능을 MCP 도구 22개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
 
 ## 도구
 | 도구 | 하는 일 | 크레딧 |
@@ -28,7 +28,7 @@
      "command": "D:/webtoon-studio/.venv/Scripts/python.exe", "args": ["D:/webtoon-studio/mcp/server.py"],
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
-3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 18개)인지 본다.
+3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 22개)인지 본다. server.py 를 고친 뒤엔 agent app 를 다시 켜야 새 도구가 보인다.
 4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
    지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
@@ -45,3 +45,13 @@
 - 한 번만 보면 판정이 흔들렸다(같은 호텔 컷을 처음엔 p079, 다음엔 p078 이 걸렸고 p078 은 없는 목걸이를 봤다). 그래서 컷마다 두 번 따로 보고 둘 다 걸린 항목만 '다시', 한 번만 걸린 건 '애매'(사람 눈으로 확인)로 낸다. 그림은 1280px, temperature 0. 그래도 서버가 완전히 같은 답을 주진 않으니 최종 판단은 사람이 한다.
 - 컷 설명(build_panels.py 의 P·CAM·ACT)을 자세히 쓸수록 판정이 정확해진다. 장면 공통 옷과 이 컷 행동이 다르면 행동을 따르게 했다.
 - 그림은 회사 agent platform 게이트웨이로 간다(외부 서비스 아님). 바꾸려면 환경변수 VLM_URL·VLM_MODEL.
+
+## vast 도구(크레딧 0, 회사 공용 GPU, 2026-10-15)
+| 도구 | 하는 일 |
+|---|---|
+| `vast_status` | 인스턴스·남은 VRAM·서버 큐·Qwen 모델이 있는지 |
+| `vast_draw` | 같은 panels.json 을 vast ComfyUI(Qwen Image 2.1)로 그림 → `panels_hf_vast\`. turbo·expr 기본, aspect 로 세로, seed 로 다시. 한 번에 80컷까지 |
+| `vast_make_assets` | 시트에서 참고 그림 자르기 + 베이스 몸·센 표정 12가지 |
+| `vast_adopt` | 사용자가 고른 vast 컷을 본편(panels_hf)으로, 원본은 `_rejected\*_before_vast.png` |
+
+`contact_sheet`·`review_panels` 에 `folder="vast"` 를 주면 vast 그림을 본다. 인스턴스를 켜고 끄는 도구는 두지 않는다. 에이전트 프롬프트(`AGENT_PROMPT.md`) v1.3 에 vast 쓰는 때와 순서를 넣었다("vast 로", "크레딧 없이" 라고 하면 vast_draw).

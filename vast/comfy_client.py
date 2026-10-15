@@ -132,6 +132,18 @@ if __name__ == "__main__":
         data = c.req("/api/userdata/" + urllib.parse.quote("workflows/" + sys.argv[2], safe=""), raw=True)
         Path(sys.argv[3]).write_bytes(data)
         print("받음", sys.argv[3], len(data))
+    elif cmd == "status":  # 가벼운 상태(MCP vast_status 가 부른다): GPU·큐·Qwen 모델
+        s = c.req("/system_stats")
+        d = (s.get("devices") or [{}])[0]
+        q = c.req("/queue")
+        mine = sum(1 for e in q.get("queue_running", []) + q.get("queue_pending", []) if len(e) > 3 and (e[3] or {}).get("client_id") == "webtoon-studio")
+        need = {"diffusion_models": "qwen_image_2.1_bf16.safetensors", "text_encoders": "qwen3vl_8b_int8_convrot.safetensors",
+                "vae": "qwen_image_2.1_vae_bf16.safetensors", "loras": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"}
+        miss = [n for f, n in need.items() if n not in (c.req(f"/models/{f}") or [])]
+        print(f"인스턴스 {c.info['id']} {c.info['gpu_name']} {c.info['actual_status']} · ComfyUI {s['system'].get('comfyui_version')}")
+        print(f"VRAM 남음 {d.get('vram_free', 0) / 1e9:.1f} / {d.get('vram_total', 0) / 1e9:.1f}GB")
+        print(f"서버 큐: 도는 것 {len(q.get('queue_running', []))} · 기다리는 것 {len(q.get('queue_pending', []))} (그중 이 작업실 것 {mine})")
+        print("Qwen Image 2.1 모델: " + ("다 있음" if not miss else "없음 " + ", ".join(miss)))
     elif cmd == "fetch":
         print(sys.argv[3].rsplit("/", 1)[-1], c.fetch_model(sys.argv[2], sys.argv[3]))
     elif cmd == "downloads":
