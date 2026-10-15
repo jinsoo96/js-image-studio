@@ -120,7 +120,7 @@ def guide() -> str:
     """작업실 규칙과 쓰는 순서(CLAUDE.md 전문 + 이 MCP 도구 쓰는 법). 작업을 시작하기 전에 꼭 한 번 읽는다."""
     tips = ("\n\n## 이 MCP 도구로 일하는 순서\n"
             "1) status() 로 작품·회차·크레딧 확인 → 2) read_doc 으로 작품 README·STYLE, LESSONS 해당 장을 읽는다\n"
-            "3) 새 회차는 make_storyboard.py·build_panels.py 를 앞 회차(d-plus-18 ep002_v2)를 본떠 파일로 만든다(파일 쓰기는 agent app 의 파일 도구)\n"
+            "3) 새 회차는 new_episode 로 앞 회차 틀을 복사하고, read_file 로 열어 사용자 이야기에 맞게 고친 뒤 write_file 로 쓴다\n"
             "4) prepare_episode → estimate_draw → 사용자에게 비용 확인 → draw_panels(confirm_credits=비용) → job_status\n"
             "5) contact_sheet 로 장면별 검수 → 걸린 컷만 redraw_panels → compose → job_status(막는 경고 0 확인) → export\n"
             "크레딧은 개인 결제다. 시안 남발 금지, 재사용 먼저, 끝나면 남은 크레딧을 알린다.")
@@ -233,6 +233,113 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "") -> 
     out = SHEETS / f"{_series(series).name}_{ep.name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
     return f"모아보기 {len(tiles)}컷: {out}"
+
+
+# ── 파일 도구(작업실 안에서만) ────────────────────────────────
+TEXT_EXT = {".py", ".json", ".md", ".txt", ".html"}
+BACKUPS = ROOT / "state" / "mcp_backups"
+
+
+def _inside(rel: str) -> Path:
+    p = (ROOT / rel.replace("\\", "/").lstrip("/")).resolve()
+    if ROOT.resolve() not in p.parents and p != ROOT.resolve():
+        raise ValueError("작업실(D:/webtoon-studio) 밖은 다루지 않는다")
+    if any(part in {".git", ".venv", "models"} for part in p.relative_to(ROOT.resolve()).parts):
+        raise ValueError(".git·.venv·models 는 다루지 않는다")
+    return p
+
+
+def _writable(p: Path) -> bool:
+    rel = p.relative_to(ROOT.resolve()).as_posix()
+    if p.suffix.lower() not in TEXT_EXT:
+        return False
+    if re.match(r"series/[^/_][^/]*/", rel):  # 작품 폴더의 글 파일(콘티·컷 설명·문서·프롬프트). 그림 폴더는 확장자에서 걸린다
+        return not re.search(r"/(panels_hf|panels|parts|out|review)/", rel)
+    return rel.startswith("worklogs/") or rel in {"LESSONS.md", "reader/index.html"}
+
+
+@mcp.tool()
+def list_files(path: str = "series") -> str:
+    """작업실 안 폴더의 파일 목록(작업실 기준 경로, 예: series/d-plus-18-hf/episodes/ep002_v2). 그림 폴더는 개수만 센다."""
+    p = _inside(path)
+    if not p.is_dir():
+        return f"폴더가 아니다: {path}"
+    out = []
+    for c in sorted(p.iterdir()):
+        if c.is_dir():
+            n = sum(1 for _ in c.iterdir())
+            out.append(f"[폴더] {c.name}/ ({n}개)")
+        else:
+            out.append(f"{c.name} ({c.stat().st_size // 1024}KB){' · 쓰기 가능' if _writable(c.resolve()) else ''}")
+    return "\n".join(out[:300]) or "(비어 있음)"
+
+
+@mcp.tool()
+def read_file(path: str, offset: int = 0, max_chars: int = 12000) -> str:
+    """작업실 안 글 파일 읽기(작업실 기준 경로). 긴 파일은 offset 으로 이어 읽는다. 콘티(make_storyboard.py)·컷 설명(build_panels.py)·문서를 볼 때."""
+    p = _inside(path)
+    if p.suffix.lower() not in TEXT_EXT:
+        return "글 파일(.py .json .md .txt .html)만 읽는다. 그림은 contact_sheet 로"
+    t = p.read_text(encoding="utf-8")
+    part = t[offset:offset + max_chars]
+    more = f"\n\n(… 전체 {len(t)}자 중 {offset}~{offset + len(part)}. 이어 읽으려면 offset={offset + len(part)})" if offset + len(part) < len(t) else ""
+    return part + more
+
+
+@mcp.tool()
+def write_file(path: str, content: str) -> str:
+    """작업실 글 파일 쓰기(덮어쓰기). 쓸 수 있는 곳: 작품 폴더(series/<작품>-hf/...)의 .py .json .md .txt, worklogs/, LESSONS.md, reader/index.html.
+    도구(tools/)·그림·에셋·.git 은 쓸 수 없다. 덮어쓰기 전 원본은 state/mcp_backups/ 에 남긴다. 파이썬 파일은 쓴 뒤 문법을 검사한다."""
+    p = _inside(path)
+    if not _writable(p):
+        return f"여기는 쓸 수 없다: {path}"
+    if "—" in content:
+        return "em dash(—) 는 쓰지 않는다(작업실 규칙). 쉼표·마침표로 바꿔 다시"
+    note = ""
+    if p.exists():
+        bk = BACKUPS / time.strftime("%Y%m%d-%H%M%S") / p.relative_to(ROOT.resolve())
+        bk.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, bk)
+        note = f" (원본 백업 {bk.relative_to(ROOT)})"
+    if p.suffix == ".py":
+        try:
+            compile(content, str(p), "exec")
+        except SyntaxError as e:
+            return f"파이썬 문법 오류라 쓰지 않았다: {e.msg} (줄 {e.lineno})"
+    if p.suffix == ".json":
+        try:
+            json.loads(content)
+        except ValueError as e:
+            return f"JSON 오류라 쓰지 않았다: {e}"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    return f"썼다 {p.relative_to(ROOT)} ({len(content)}자){note}"
+
+
+@mcp.tool()
+def new_episode(series: str, episode: str, template: str = "") -> str:
+    """새 회차 폴더를 앞 회차 틀로 연다: template 회차(기본 = 그 작품의 가장 최신 회차)의 make_storyboard.py·build_panels.py·trailer.json 을 복사한다.
+    그다음 read_file 로 열어 사용자 이야기에 맞게 고쳐 write_file 로 쓰고 prepare_episode 를 돌린다. 이미 있는 회차 폴더는 건드리지 않는다."""
+    s = _series(series)
+    if not re.fullmatch(r"ep\d{3}(_v\d+)?", episode.strip()):
+        return "회차 이름은 ep003, ep003_v2 같은 꼴이다"
+    dst = s / "episodes" / episode.strip()
+    if dst.exists():
+        return f"이미 있다: {dst.relative_to(ROOT)}"
+    eps = sorted(d.name for d in (s / "episodes").iterdir() if d.is_dir())
+    tpl = template.strip() or eps[-1]
+    src = s / "episodes" / tpl
+    if not src.is_dir():
+        return f"틀 회차가 없다: {tpl}"
+    dst.mkdir(parents=True)
+    copied = []
+    for n in ("make_storyboard.py", "build_panels.py", "trailer.json"):
+        if (src / n).exists():
+            t = (src / n).read_text(encoding="utf-8").replace(f"episodes/{tpl}", f"episodes/{episode}").replace(f"episodes\\{tpl}", f"episodes\\{episode}")
+            (dst / n).write_text(t, encoding="utf-8")
+            copied.append(n)
+    return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사. 이제 이 파일들을 새 이야기에 맞게 고친다. "
+            "틀의 재사용 컷(REUSE)·컷 설명(P)·연기(ACT)는 새 회차에 맞게 지우거나 바꿔야 한다")
 
 
 # ── 준비·비용 ─────────────────────────────────────────────────

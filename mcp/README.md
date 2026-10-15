@@ -1,6 +1,6 @@
 # 작업실 MCP 서버(agent app·Qwen 에서 쓰기)
 
-`server.py` 는 작업실 기능을 MCP 도구 13개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
+`server.py` 는 작업실 기능을 MCP 도구 17개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
 
 ## 도구
 | 도구 | 하는 일 | 크레딧 |
@@ -8,6 +8,8 @@
 | `guide` · `read_doc` | 작업실 규칙(CLAUDE.md)·문서 읽기(긴 문서는 offset) | 0 |
 | `status` · `credits` | 작품·회차·작화·합성 상태, 진행 중 작업, 남은 크레딧 | 0 |
 | `list_panels` · `contact_sheet` | 컷 목록 · 검수용 모아보기 그림(경로를 돌려줌, `state\mcp_sheets\`) | 0 |
+| `list_files` · `read_file` · `write_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절 | 0 |
+| `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
 | `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
 | `estimate_draw` | 그릴 컷과 예상 크레딧 | 0 |
 | `draw_panels` · `redraw_panels` | 힉스필드 작화(작업). `confirm_credits` 가 예상 비용 이상이어야 돈다, 한 번에 40컷. 다시 그리기는 원본을 `_rejected` 로 | 장당 1.25 |
@@ -26,9 +28,10 @@
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
 3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 13개)인지 본다.
-4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용, 도구 노출 방식 Flat(Qwen 은 도구 탐색 단계를 잘 못 돈다).
+4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
+   지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
-2026-10-15 시험(agent app 1.91.0, agent-server, qwen3.8-27b): "상태 알려줘" → status 로 4편·크레딧 정확히 답함. "p079 다시 그려줘 + 모아보기" → guide·estimate_draw·contact_sheet 를 부르고 예상 1.25 크레딧을 보여 준 뒤 확인을 기다림(크레딧 안 씀).
+2026-10-15 시험(agent app 1.91.0, agent-server, qwen3.8-27b): "상태 알려줘" → status 로 4편·크레딧 정확히 답함. "p079 다시 그려줘 + 모아보기" → guide·estimate_draw·contact_sheet 를 부르고 예상 1.25 크레딧을 보여 준 뒤 확인을 기다림(크레딧 안 씀). "2화 v2 콘티 열어 호텔 장면 정리 + 열린 일" → read_file 로 p073~p079 컷·대사 표와 열린 일 3개를 정확히 답함.
 
 ## 알아 둘 것
 - agent app 의 다중 파드 서버에서는 로컬 MCP 도구가 90초 쉬면 안 보일 수 있다. 그러면 agent app 설정 > MCP 에서 껐다 켠다(메모리 `dex-local-mcp-tools-vanish`).
