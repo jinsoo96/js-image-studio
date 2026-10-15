@@ -13,7 +13,9 @@ series\
   mudae-dwi-hf\           무대 뒤(지금 작품). README.md 부터
   _legacy\                옛 ComfyUI 판 글 자료(참고만)
 tools\                    도구(아래 표)
-state\hf_uploads\         힉스필드에 올린 참고 그림 id 기억(계정별 json, 지우면 다시 올릴 뿐)
+mcp\                      작업실 MCP 서버(agent app·Qwen 에서 쓰기, mcp\README.md)
+requirements.txt          파이썬 패키지(정확한 버전)
+state\                    hf_uploads\(힉스필드에 올린 참고 그림 id, 계정별) · mcp_jobs\·mcp_sheets\(MCP 작업 기록·모아보기). 깃에 안 올림
 exports\<날짜>\           사용자에게 넘긴 PDF·epub·예고편
 reader\index.html         열람 페이지 원본(올리는 법은 reader\README.md)
 worklogs\                 OPEN-ISSUES.md · 2026-10-history.md(지난 기록) · 날짜 메모 · acting\GUIDE.md(연기 쓰는 법)
@@ -85,6 +87,16 @@ $ep = "series\d-plus-18-hf\episodes\ep003"
 |---|---|
 | `comfy.py` | 이름은 예전 것이지만 ROOT·load_json 등 공용 함수가 있어 지금 도구들도 읽는다. 지우지 않는다 |
 | `render.py` · `runpod_cloud.py` · `train_lora.py` | ComfyUI 작화·RunPod 파드·LoRA 학습. 쓰려면 `worklogs\2026-10-04-runpod.md`·`2026-10-history.md` 먼저 |
+
+## 다른 PC 에서 시작하기(레포 `github.com/jinsoo96/webtoon-studio`, 비공개)
+1. 받기: `git clone https://github.com/jinsoo96/webtoon-studio.git` (D: 가 아니어도 된다. 경로는 상대 경로로 돈다)
+2. 파이썬: `uv venv .venv --python 3.12` → `uv pip install --python .venv\Scripts\python.exe -r requirements.txt`
+3. 힉스필드 CLI(`hf.exe`)를 깔고 로그인, 위치가 기본값(`D:\.claude\tools\higgsfield\hf.exe`)과 다르면 환경변수 `HF_CLI` 로 준다. 계정이 달라도 참고 그림은 `state\hf_uploads\<계정>.json` 에 새로 쌓인다.
+4. 레포에는 만드는 법(콘티·컷 설명·도구·문서)과 에셋(설정표·옷·표정·장소)만 있다. 그려 놓은 컷·합성본·내보내기·모델은 용량 때문에 처음 PC(D:)에만 있다. 이어 그리면 새 PC 에서 새로 쌓인다.
+5. 얼굴 찾기·배경 지우기 모델(`models\detect`·`models\u2net`)은 레포에 없다. 말풍선 얼굴 피하기·오프닝 표지에 필요하면 처음 PC 에서 복사해 온다.
+
+## agent app·Qwen 에서 쓰기
+`mcp\server.py` 를 agent app 설정의 로컬 MCP 로 붙이면 agent platform 에이전트(사내 vLLM `qwen3.8-27b` 등)가 작업실 도구 13개를 쓴다. 붙이는 법·에이전트 설정·시스템 프롬프트(`mcp\AGENT_PROMPT.md`)는 `mcp\README.md`. 크레딧을 쓰는 도구는 예상 비용 확인 값이 있어야 돈다.
 
 ## 크레딧(힉스필드 Seedream 5.0 Pro, 2026-10-14)
 | 무엇 | 크레딧 |
