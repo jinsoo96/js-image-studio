@@ -1,0 +1,190 @@
+"""vast.ai ComfyUI(Qwen Image 2.1)로 컷 그리기. 힉스필드 판(tools/hf_panel.py)과 같은 컷 설명(panels.json)을 쓴다(크레딧 0, GPU 시간만).
+(2026-10-15 사용자 "vastai 에서 이정도 이미지 수준의 웹툰 만들게 워크플로우 세로로"). 힉스필드 결과는 건드리지 않게 panels_hf_vast/ 에 따로 그린다.
+
+    .venv/Scripts/python vast/comfy_panel.py <series_hf_dir> <panels.json> [--episode ep002_v2] [--only p003,p008] [--aspect 2:3] [--turbo]
+
+먼저 한 번: .venv/Scripts/python vast/sheet_refs.py <series_hf_dir>  (시트에서 인물 머리 참고 그림을 잘라 둔다)
+모델(서버 models/ 에 Model Manager Neo 로 받아 둠, 없으면 comfy_client.py fetch):
+  diffusion_models/qwen_image_2.1_bf16.safetensors · text_encoders/qwen3vl_8b_int8_convrot.safetensors · vae/qwen_image_2.1_vae_bf16.safetensors
+  loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors(--turbo)
+참고 그림은 프롬프트에서 <image1>…<image10> 으로 부른다(Qwen Image 2.1 규칙, 10장까지). 프롬프트·참고 그림을 고른 이유는 qwen_refs 설명.
+RTX 5090 기준 한 컷: 40스텝 약 100~160초, --turbo(8스텝) 약 30~50초.
+"""
+import argparse
+import hashlib
+import json
+import random
+import re
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "vast"))
+from comfy_client import Comfy  # noqa: E402
+
+UNET, CLIP, VAE = "qwen_image_2.1_bf16.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
+TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turbo LoRA: 8스텝 cfg 1(시안용, 모델 카드)
+# 약 2MP(모델 기본 1MP, 최대 2048x2048), 32 배수. 합성 폭 1600 보다 크게
+SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
+         "4:3": (1664, 1248), "3:2": (1760, 1184), "16:9": (1920, 1088)}
+MAX_REFS = 10
+
+
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False):
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "qwen_image", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+        "4": {"class_type": "QwenImage21Cache", "inputs": {"model": ["1", 0], "device": "auto", "dtype": "default"}},
+        "5": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["2", 0], "vae": ["3", 0], "prompt": prompt, "negative_prompt": "", "resolution": ref_res}},
+        "6": {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+        "7": {"class_type": "KSampler", "inputs": {"model": ["4", 0], "positive": ["5", 0], "negative": ["5", 1], "latent_image": ["6", 0], "seed": seed,
+                                                    "steps": steps, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+        "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "webtoon_studio/panel"}},
+    }
+    for k, name in enumerate(ref_names, 1):
+        g[f"1{k:02d}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        g["5"]["inputs"][f"images.image_{k}"] = [f"1{k:02d}", 0]
+    if turbo:
+        g["10"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": TURBO, "strength_model": 1.0}}
+        g["4"]["inputs"]["model"] = ["10", 0]
+    return g
+
+
+def qwen_refs(series, p, episode=None, front=False):
+    """같은 컷 설명(panels.json)으로 Qwen 용 짧은 프롬프트와 참고 그림을 만든다. 2026-10-15 시험에서 정한 것:
+    - 힉스필드 프롬프트(약 4천 자, 맥락·규칙·연기 일반론)를 그대로 쓰면 연기가 묻힌다(p045 울 컷이 무표정, 짧게 쓰니 눈물·입술 깨묾이 나옴)
+      → 컷·연기·동작·옷·카메라를 앞에, 그림체는 뒤에, 규칙은 한 줄
+    - 시트·옷 시트·표정 시트를 통째로 넣으면 그 배치를 베낀다(p003 인물 줄 세움, p045 표정 칸 그대로)
+      → 인물은 시트 정면 전신의 머리만(vast/sheet_refs.py, 무표정·옷 거의 안 보임). 얼굴 칸은 웃음이 섞여 그 표정을 따라 그렸고,
+        상반신·전신은 시트 기본 옷을 입은 사람이 한 명 더 생겼다
+    - 앞 컷(refs_extra)을 넣으면 그 컷 구도를 통째로 가져와 사람이 늘어난다(p008) → 넣지 않는다
+    - 장소를 맨 앞 <image1>(결과 구도가 첫 그림을 따른다)
+    - 글 속 이름 옆에 그림 번호를 붙여 묶는다. 시드에 따라 한 명이 더 생기는 판이 있으니(p003 시드 1234) 이상하면 시드만 바꿔 다시"""
+    from hf_panel import names
+    NAMES = names(series)
+    refs, lines = [], []
+    # 클로즈업은 장소를 맨 뒤로: 맨 앞에 두면 그 방 구도를 따라 넓은 컷이 되고 인물이 한 번 더 나왔다(p079 얼굴 꽉 찬 컷이 방 전경 + 재민 둘)
+    close = "close-up" in (p.get("shot") or "")
+    loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") else None
+    if loc and not close:
+        refs.append(loc)
+        lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")
+    bind = {}
+    for cid in p.get("chars", []):
+        # 상반신(무표정)이 기본. 얼굴 칸 첫 장은 웃음·화남이 섞여 그 표정을 따라 그렸다(p045)
+        kinds = [("bust", "neutral bust portrait (identity only: same face, eyes, hairstyle and hair color)")]
+        if front:
+            kinds.append(("front", "full body (identity and body proportions only, not the outfit)"))
+        for kind, what in kinds:
+            f = series / "assets" / "vast_refs" / f"{cid}_{kind}.png"
+            if f.exists():
+                refs.append(f)
+                bind.setdefault(cid, len(refs))
+                lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s {what}.")
+    if loc and close:
+        refs.append(loc)
+        lines.append(f"<image{len(refs)}> is the place, for the background colors and lighting only: this is a close-up, so only a small, "
+                     "softly blurred part of it shows behind the person. Do not draw the whole room.")
+    chars = p.get("chars", [])
+    n = len(chars)
+    lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
+    action = p["action"]
+    if close:  # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔다(p079)
+        action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
+    for cid, k in bind.items():
+        short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
+        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} (the person in <image{k}>)", action, count=1)
+    outfit = " ".join(f"{NAMES[c]} wears: {o}." for c, o in (p.get("outfit") or {}).items())
+    sp = series / "prompts" / "style.txt"
+    style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
+    extra = series / "prompts" / "rules_extra.txt"
+    count = (f"Exactly {n} {'person' if n == 1 else 'people'} in the panel"
+             + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
+             + (" No other people anywhere in the frame, not even small in the background." if n == 1 and not p.get("camera") else "")
+             if n else "No people in the panel.")
+    parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.",
+             f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
+             action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", count,
+             "REFERENCES: " + " ".join(lines), style,
+             "One single panel: no text, no speech bubbles, no sound effects, no panel border. Adults with realistic proportions."
+             + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "")]
+    return "\n\n".join(x for x in parts if x), refs[:MAX_REFS]
+
+
+def upload(c, path: Path, cache: dict) -> str:
+    """같은 시트를 컷마다 다시 올리지 않게 내용 해시로 이름을 붙인다(서버 input/ 에 webtoon_<해시>.png)."""
+    h = hashlib.sha1(path.read_bytes()).hexdigest()[:12]
+    if h not in cache:
+        cache[h] = c.upload_image(path, f"webtoon_{h}{path.suffix}")
+    return cache[h]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("series_dir")
+    ap.add_argument("panels_json")
+    ap.add_argument("--episode", default="ep001")
+    ap.add_argument("--only")
+    ap.add_argument("--aspect", help="모든 컷을 이 비율로(세로 웹툰 시안은 2:3·9:16). 없으면 컷 설명의 aspect")
+    ap.add_argument("--steps", type=int, help="기본 40(공식 40~50, euler), --turbo 면 8")
+    ap.add_argument("--turbo", action="store_true", help="Turbo LoRA 8스텝 시안(빠름)")
+    ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
+    ap.add_argument("--seed", type=int)
+    ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
+    args = ap.parse_args()
+    series = Path(args.series_dir)
+    panels = json.loads(Path(args.panels_json).read_text(encoding="utf-8"))
+    only = set(args.only.split(",")) if args.only else None
+    out = series / "episodes" / args.episode / f"panels_hf_{args.variant}"
+    pdir = series / "prompts" / "panels" / args.episode / args.variant
+    out.mkdir(parents=True, exist_ok=True)
+    pdir.mkdir(parents=True, exist_ok=True)
+    c = Comfy()
+    have = {f: set(c.req(f"/models/{f}")) for f in ("diffusion_models", "text_encoders", "vae")}
+    miss = [n for f, n in (("diffusion_models", UNET), ("text_encoders", CLIP), ("vae", VAE)) if n not in have[f]]
+    if miss:
+        sys.exit(f"서버에 모델이 없다: {miss} (vast/comfy_client.py downloads 로 받는 중인지 확인)")
+    cache, failed = {}, []
+    for p in panels:
+        if only and p["id"] not in only:
+            continue
+        if p.get("reuse") or not p.get("action"):
+            continue
+        prompt, refs = qwen_refs(series, p)
+        if any(not r.exists() for r in refs):
+            print(f"{p['id']}: 참고 그림 없음 {[str(r) for r in refs if not r.exists()]}")
+            failed.append(p["id"])
+            continue
+        aspect = args.aspect or p.get("aspect", "16:9")
+        w, h = SIZES[aspect]
+        if args.aspect and args.aspect != p.get("aspect"):
+            prompt += f"\n\nFRAMING: this panel is a tall vertical {aspect} webtoon frame; compose the shot for a vertical frame."
+        (pdir / f"{p['id']}.txt").write_text(prompt, encoding="utf-8")
+        seed = args.seed if args.seed is not None else random.randrange(2**48)
+        t0 = time.time()
+        try:
+            names = [upload(c, r, cache) for r in refs]
+            steps = args.steps or (8 if args.turbo else 40)
+            pid = c.queue(graph(prompt, names, w, h, seed, steps, args.ref_res, args.turbo))
+            hist = c.wait(pid, timeout=1200)
+            st = hist.get("status", {})
+            if st.get("status_str") == "error":
+                msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")
+                raise RuntimeError(msg)
+            img = next(i for o in hist["outputs"].values() for i in o.get("images", []))
+            c.download(img, out / f"{p['id']}.png")
+            print(f"{p['id']}: {w}x{h} 참고 {len(refs)}장 {time.time() - t0:.0f}초 → {out / (p['id'] + '.png')}", flush=True)
+        except Exception as e:
+            print(f"{p['id']}: 실패 {str(e)[:300]}", flush=True)
+            failed.append(p["id"])
+    if failed:
+        print("실패한 컷:", ",".join(failed))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
