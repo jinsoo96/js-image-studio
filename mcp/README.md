@@ -27,7 +27,7 @@
      "command": "D:/webtoon-studio/.venv/Scripts/python.exe", "args": ["D:/webtoon-studio/mcp/server.py"],
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
-3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 13개)인지 본다.
+3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 17개)인지 본다.
 4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
    지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
