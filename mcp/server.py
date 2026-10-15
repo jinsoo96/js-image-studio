@@ -56,8 +56,8 @@ def _series(name: str) -> Path:
 
 
 def _episode(series: str, episode: str) -> Path:
-    if not re.fullmatch(r"ep\d{3}(_v\d+)?", episode.strip()):
-        raise ValueError("회차 이름은 ep001, ep002_v2 같은 꼴이다")
+    if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode.strip()):
+        raise ValueError("회차 이름은 ep001, ep002_v2 같은 꼴이다(vast 판 회차는 뒤에 _vast)")
     p = _series(series) / "episodes" / episode.strip()
     if not p.is_dir():
         raise ValueError(f"회차 폴더가 없다: {p.relative_to(ROOT)}")
@@ -568,6 +568,53 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     return f"{len(want)}컷을 vast 그림으로 바꿨다(원본은 panels_hf/_rejected/*_before_vast.png). 놓기 작업 {job} → 끝나면 compose"
 
 
+VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); d=Path(sys.argv[2]); ids=sys.argv[3].split(',')\n"
+             "(d/'panels_hf').mkdir(parents=True,exist_ok=True); n=0\n"
+             "for i in ids:\n"
+             "    f=s/'panels_hf_vast'/(i+'.png')\n"
+             "    if f.exists(): shutil.copy2(f, d/'panels_hf'/(i+'.png')); n+=1\n"
+             "    else: print('vast 그림 없음', i)\n"
+             "print('vast 컷', n, '/', len(ids), '장을 vast 판 회차로 복사')")
+
+
+@mcp.tool()
+def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = True, expr: bool = True) -> str:
+    """vast 컷으로 회차 하나를 1·2화처럼 엮는다(크레딧 0): 본편은 그대로 두고 <회차>_vast 폴더(콘티·대사·재사용 컷은 본편 그대로)를 만들어
+    vast 그림이 없는 컷을 그리고 → 그 회차의 새 컷 자리에 vast 그림을 넣고 → 말풍선 합성·PDF·기계 점검까지. redraw=True 면 새 컷을 전부 다시 그린다.
+    끝나면 job_status 로 '막는 경고 0' 을 확인하고, export(series, '<회차>_vast') 로 PDF·epub 을 exports 로(이름 끝 _vast판, 본편을 덮지 않음).
+    재사용 컷(앞 화 그림을 그대로 쓰는 컷)은 본편 그림 그대로다."""
+    src = _episode(series, episode)
+    if src.name.endswith("_vast"):
+        return "본편 회차 이름을 준다(예: ep002_v2). _vast 폴더는 이 도구가 만든다"
+    sd = _series(series)
+    pj = [p["id"] for p in _panels_json(src)]
+    if not pj:
+        return "panels.json 에 새로 그릴 컷이 없다(prepare_episode 를 먼저)"
+    if len(pj) > VAST_MAX * 2:
+        return f"새 컷이 {len(pj)}개라 너무 많다. 나눠서 vast_draw 한 뒤 다시 부른다"
+    if _running_job(src):
+        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    dst = src.parent / f"{src.name}_vast"
+    if not dst.exists():  # 콘티·대사·컷 설명·재사용·합성 컷은 본편에서. 본편의 그린 컷·결과물·시험 폴더는 빼고
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("out", "review", "panels_hf", "panels_hf_*", "_rejected", "__pycache__",
+                                                                  "render_run.log", "render_status.json"))
+    todo = pj if redraw else [i for i in pj if not (src / "panels_hf_vast" / f"{i}.png").exists()]
+    steps = []
+    if todo:
+        cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(src / "panels.json"), "--episode", src.name, "--only", ",".join(todo), "--variant", "vast"]
+        cmd += (["--turbo"] if turbo else []) + (["--expr"] if expr else [])
+        steps.append({"label": f"vast {len(todo)}컷 그리기(크레딧 0)", "cmd": cmd, "allow_fail": True})
+    steps += [{"label": "vast 컷을 vast 판 회차로", "cmd": [PY, "-c", VAST_COPY, str(src), str(dst), ",".join(pj)]},
+              {"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(dst)]},
+              {"label": "합성·PDF", "cmd": [PY, str(TOOLS / "run_episode.py"), str(dst)]},
+              {"label": "기계 점검", "cmd": [PY, str(TOOLS / "qa_gate.py"), str(dst)], "allow_fail": True},
+              {"label": "말풍선 점검", "cmd": [PY, str(TOOLS / "check_bubbles.py"), str(dst)], "allow_fail": True}]
+    job = _start_job("vast_episode", src, steps)
+    per = 30 if turbo else 120
+    return (f"작업 시작 {job}: {dst.name} 만들기, 새로 그릴 컷 {len(todo)}/{len(pj)}(약 {len(todo) * per // 60}분) + 합성 1~3분, 크레딧 0. "
+            f"job_status('{job}') → 끝나면 export(series, '{dst.name}')")
+
+
 # ── 합성·내보내기 ─────────────────────────────────────────────
 @mcp.tool()
 def compose(series: str, episode: str) -> str:
@@ -590,7 +637,7 @@ def export(series: str, episode: str) -> str:
     ep = _episode(series, episode)
     b = _json(ep / "storyboard.json", {}) or {}
     title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
-    name = f"{b.get('title', _series(series).name)}_{title}".replace(" ", "")
+    name = f"{b.get('title', _series(series).name)}_{title}".replace(" ", "") + ("_vast판" if ep.name.endswith("_vast") else "")  # 본편 내보내기를 덮지 않게
     day = time.strftime("%Y-%m-%d")
     copy = ("import shutil,sys; from pathlib import Path; ep=Path(sys.argv[1]); d=Path(sys.argv[2]); n=sys.argv[3]; d.mkdir(parents=True,exist_ok=True)\n"
             "for src,ext in [(next(ep.glob('out/*.pdf'),None),'.pdf'),(next(ep.glob('out/*.epub'),None),'.epub'),(ep/'out/trailer.mp4','_예고편.mp4'),(ep/'out/trailer.gif','_예고편.gif')]:\n"

@@ -134,9 +134,12 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
                      "softly blurred part of it shows behind the person. Do not draw the whole room.")
     chars = p.get("chars", [])
     n = len(chars)
-    lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
+    if n:
+        lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
     action = p["action"]
-    if close:  # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔다(p079)
+    # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔고(p079),
+    # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
+    if close or p.get("camera"):
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
     for cid, k in bind.items():
         short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
@@ -144,6 +147,8 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     outfit = " ".join(f"{NAMES[c]} wears: {o}." for c, o in (p.get("outfit") or {}).items())
     sp = series / "prompts" / "style.txt"
     style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
+    if not n:  # 사람 없는 컷: 그림체 글의 눈·머리·얼굴·몸 묘사가 사람을 불러냈다(p073 호텔 문 인서트에 여자 둘) → 선·색·빛 문장만
+        style = " ".join(s for s in re.split(r"(?<=\.)\s+", style) if not re.search(r"eye|hair|face|blush|chest|adult|lash|chibi|skin", s, re.I))
     extra = series / "prompts" / "rules_extra.txt"
     count = (f"Exactly {n} {'person' if n == 1 else 'people'} in the panel"
              + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
@@ -152,9 +157,10 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.",
              f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
              action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", count,
-             "REFERENCES: " + " ".join(lines), style,
-             "One single panel: no text, no speech bubbles, no sound effects, no panel border. Adults with realistic proportions."
-             + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "")]
+             ("REFERENCES: " + " ".join(lines)) if lines else "", style,
+             "One single panel: no text, no speech bubbles, no sound effects, no panel border."
+             + (" Adults with realistic proportions." + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "") if n else
+                " An empty scene: no people, no faces, no figures, no silhouettes, no reflections of people.")]
     return "\n\n".join(x for x in parts if x), refs[:MAX_REFS]
 
 

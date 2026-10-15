@@ -11,6 +11,7 @@ series/*/episodes/*/panels_hf/
 series/*/episodes/*/panels_hf_*/
 series/*/assets/vast_refs/
 series/*/prompts/panels/*/vast*/
+series/*/episodes/*_vast/
 series/*/episodes/*/panels/
 series/*/episodes/*/parts/
 series/*/episodes/*/out/
