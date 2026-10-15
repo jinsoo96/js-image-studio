@@ -492,11 +492,12 @@ def vast_status() -> str:
 
 
 @mcp.tool()
-def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1) -> str:
+def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True) -> str:
     """컷을 vast GPU 의 Qwen Image 2.1 로 그린다(크레딧 0). 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
-    인원이 하나 더 나오거나 잔상이 끼면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
+    fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
+    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
     ep = _episode(series, episode)
     sd = _series(series)
     pj = [p["id"] for p in _panels_json(ep)]
@@ -519,6 +520,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--expr"] if expr else []
     cmd += ["--aspect", aspect] if aspect else []
     cmd += ["--seed", str(seed)] if seed >= 0 else []
+    cmd += ["--fix"] if fix else []
     job = _start_job("vast_draw", ep, [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}])
     per = 30 if turbo else 120
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
@@ -578,7 +580,7 @@ VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); 
 
 
 @mcp.tool()
-def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = True, expr: bool = True) -> str:
+def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = True, expr: bool = True, fix: bool = True) -> str:
     """vast 컷으로 회차 하나를 1·2화처럼 엮는다(크레딧 0): 본편은 그대로 두고 <회차>_vast 폴더(콘티·대사·재사용 컷은 본편 그대로)를 만들어
     vast 그림이 없는 컷을 그리고 → 그 회차의 새 컷 자리에 vast 그림을 넣고 → 말풍선 합성·PDF·기계 점검까지. redraw=True 면 새 컷을 전부 다시 그린다.
     끝나면 job_status 로 '막는 경고 0' 을 확인하고, export(series, '<회차>_vast') 로 PDF·epub 을 exports 로(이름 끝 _vast판, 본편을 덮지 않음).
@@ -602,7 +604,7 @@ def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = 
     steps = []
     if todo:
         cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(src / "panels.json"), "--episode", src.name, "--only", ",".join(todo), "--variant", "vast"]
-        cmd += (["--turbo"] if turbo else []) + (["--expr"] if expr else [])
+        cmd += (["--turbo"] if turbo else []) + (["--expr"] if expr else []) + (["--fix"] if fix else [])
         steps.append({"label": f"vast {len(todo)}컷 그리기(크레딧 0)", "cmd": cmd, "allow_fail": True})
     steps += [{"label": "vast 컷을 vast 판 회차로", "cmd": [PY, "-c", VAST_COPY, str(src), str(dst), ",".join(pj)]},
               {"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(dst)]},

@@ -40,6 +40,12 @@ webtoon-studio 의 컷 그리기와 같은 구성. 기준선 image_anima_base_v1
 글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
 
 
+FIX_GUIDE = """**2단 다듬기**: 1단 그림이 그대로 `<image1>` 로 들어온다. 지시는 짧게, 고칠 것만.
+- 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the space with the background. Keep everything else the same.`
+- 연기: `Make her cry: tears streaming down both cheeks, biting her lower lip. Keep everything else the same.`
+2단이 필요 없으면 이 묶음 노드를 우회(Ctrl+B)."""
+
+
 class G:
     def __init__(self):
         self.nodes, self.links, self.groups = [], [], []
@@ -72,7 +78,7 @@ class G:
                 "links": self.links, "groups": self.groups, "config": {}, "extra": {"ds": {"scale": 0.75, "offset": [40, 40]}}, "version": 0.4}
 
 
-def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=None, prefix="webtoon_vertical/panel"):
+def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=None, prefix="webtoon_vertical/panel", fix_prompt=None):
     """화면용 워크플로우. comfy_panel.py 도 컷마다 이걸 결과 그림·서버 기록에 같이 실어 보낸다(그 컷을 그린 그대로 캔버스로 열림).
     size 를 주면 aspect 대신 그 크기, turbo 면 터보 LoRA 노드를 켜 둔다."""
     w, h = size or SIZES[aspect]
@@ -126,6 +132,30 @@ def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=N
     g.link(vae, 0, dec, "vae")
     sv = g.node("SaveImage", (1440, 0), (560, 830), [prefix], inputs=[("images", "IMAGE")])
     g.link(dec, 0, sv, "images")
+    if fix_prompt is not None:  # 2단: 1단 그림을 <image1> 로 받아 Qwen 편집으로 고친다(2026-10-16, 남는 사람 지우기·연기 손보기)
+        g.group("5. 2단 다듬기 (1단 그림 = <image1>, 지시대로 편집)", 2040, 0, 1240, 830, "#8a3f3f")
+        g.node("MarkdownNote", (2060, 40), (560, 150), [FIX_GUIDE], title="2단 쓰는 법")
+        cache2 = g.node("QwenImage21Cache", (2060, 210), (560, 82), ["auto", "default"], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
+                        title="2단 캐시")
+        g.link(lora, 0, cache2, "model")
+        enc2 = g.node("TextEncodeQwenImage21", (2060, 310), (560, 330), [fix_prompt, "", 1024],
+                      inputs=[("clip", "CLIP"), ("vae", "VAE"), ("images.image_1", "IMAGE"), ("images.image_2", "IMAGE")],
+                      outputs=[("CONDITIONING", "CONDITIONING"), ("CONDITIONING", "CONDITIONING"), ("LATENT", "LATENT")], title="다듬기 지시")
+        g.link(clip, 0, enc2, "clip")
+        g.link(vae, 0, enc2, "vae")
+        g.link(dec, 0, enc2, "images.image_1")
+        ks2 = g.node("KSampler", (2060, 560), (560, 262), [seed + 1, "fixed" if seed else "randomize", steps, 1, "euler", "simple", 1],
+                     inputs=[("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
+                     outputs=[("LATENT", "LATENT")], title="2단 KSampler (캔버스 = 1단 그림 크기)")
+        g.link(cache2, 0, ks2, "model")
+        g.link(enc2, 0, ks2, "positive")
+        g.link(enc2, 1, ks2, "negative")
+        g.link(enc2, 2, ks2, "latent_image")
+        dec2 = g.node("VAEDecode", (2660, 40), (600, 46), inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
+        g.link(ks2, 0, dec2, "samples")
+        g.link(vae, 0, dec2, "vae")
+        sv2 = g.node("SaveImage", (2660, 110), (600, 700), [prefix + "_fixed"], inputs=[("images", "IMAGE")], title="2단 결과")
+        g.link(dec2, 0, sv2, "images")
     return g.dump()
 
 
@@ -136,6 +166,7 @@ def main():
     ap.add_argument("--ref", action="append", default=[], help="참고 그림(순서대로 <image1>…), 서버 input/ 에 올린다")
     ap.add_argument("--aspect", default="2:3")
     ap.add_argument("--out", required=True, help="로컬에 남길 사본 경로")
+    ap.add_argument("--fix-prompt", help="주면 2단 다듬기(편집) 노드를 붙인다. 이 글이 기본 지시")
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
@@ -144,7 +175,7 @@ def main():
     c = Comfy()
     cache = {}
     names = [upload(c, Path(r), cache) for r in args.ref]
-    wf = build(Path(args.prompt_file).read_text(encoding="utf-8"), names, args.aspect)
+    wf = build(Path(args.prompt_file).read_text(encoding="utf-8"), names, args.aspect, fix_prompt=args.fix_prompt)
     Path(args.out).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
     print("만듦", args.out, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if args.save:

@@ -182,6 +182,7 @@ def main():
     ap.add_argument("--steps", type=int, help="기본 40(공식 40~50, euler), --turbo 면 8")
     ap.add_argument("--turbo", action="store_true", help="Turbo LoRA 8스텝 시안(빠름)")
     ap.add_argument("--expr", action="store_true", help="연기에 맞는 표정 칸(표정 시트)을 얼굴 참고로(사내 Qwen 이 고름)")
+    ap.add_argument("--fix", action="store_true", help="그린 뒤 남는 사람(중복·낯선 사람)을 그림 보는 사내 Qwen 이 찾아 편집으로 지움(원본은 _stage1/)")
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
@@ -229,6 +230,9 @@ def main():
                 raise RuntimeError(msg)
             img = next(i for o in hist["outputs"].values() for i in o.get("images", []))
             c.download(img, out / f"{p['id']}.png")
+            if args.fix:  # 2단: 남는 사람 지우기(2026-10-16, 무대 뒤 소파 6명 → 3명, D+18 p003 우빈 둘 → 하나)
+                from refine import fix_extras
+                fix_extras(c, cache, out / f"{p['id']}.png", series, p, seed=seed % 100000, log=lambda m: print(m, flush=True))
             print(f"{p['id']}: {w}x{h} 참고 {len(refs)}장 {time.time() - t0:.0f}초 → {out / (p['id'] + '.png')}", flush=True)
         except Exception as e:
             print(f"{p['id']}: 실패 {str(e)[:300]}", flush=True)
