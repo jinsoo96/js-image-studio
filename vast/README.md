@@ -37,6 +37,10 @@
 - 기본은 세로 2:3(1184x1760), 40스텝, cfg 1, euler/simple. "터보 LoRA" 노드를 켜고(Ctrl+B) steps 8 이면 시안.
 - 다시 만들기: `make_workflow.py --prompt-file <컷.txt> --ref <그림> ... --out vast\webtoon_vertical_qwen21.json --save --force`
 
+## 스크립트로 그린 컷을 화면에서 보기
+`comfy_panel.py`·MCP `vast_draw` 는 화면을 거치지 않고 같은 구성의 그래프를 ComfyUI API(`/prompt`)로 보낸다(화면에서 Queue 를 누르는 것과 같음). 그래서 캔버스에는 안 보이고 서버 기록(대기열·기록 창, client_id `webtoon-studio`)과 서버 `output\webtoon_studio\` 에 남는다.
+2026-10-16 부터는 컷마다 그 컷의 화면용 워크플로우(프롬프트·참고 그림·시드·터보 여부 그대로)를 같이 실어 보낸다. 결과 PNG(서버 output 이나 이 PC 의 `panels_hf_vast\`)를 ComfyUI 화면에 끌어다 놓으면 그 컷을 그린 워크플로우가 캔버스로 열린다. 그 전에 그린 그림에는 API 그래프만 들어 있다.
+
 ## 모델(서버 `models\`, HuggingFace `Comfy-Org/Qwen-Image-2.1`)
 | 폴더 | 파일 | 크기 |
 |---|---|---|

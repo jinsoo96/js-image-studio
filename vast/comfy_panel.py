@@ -219,7 +219,9 @@ def main():
         try:
             names = [upload(c, r, cache) for r in refs]
             steps = args.steps or (8 if args.turbo else 40)
-            pid = c.queue(graph(prompt, names, w, h, seed, steps, args.ref_res, args.turbo))
+            from make_workflow import build as ui_build  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
+            ui = ui_build(prompt, names, steps=steps, seed=seed, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
+            pid = c.queue(graph(prompt, names, w, h, seed, steps, args.ref_res, args.turbo), ui)
             hist = c.wait(pid, timeout=1200)
             st = hist.get("status", {})
             if st.get("status_str") == "error":

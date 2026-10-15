@@ -72,8 +72,12 @@ class G:
                 "links": self.links, "groups": self.groups, "config": {}, "extra": {"ds": {"scale": 0.75, "offset": [40, 40]}}, "version": 0.4}
 
 
-def build(prompt, ref_names, aspect="2:3", steps=40):
-    w, h = SIZES[aspect]
+def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=None, prefix="webtoon_vertical/panel"):
+    """화면용 워크플로우. comfy_panel.py 도 컷마다 이걸 결과 그림·서버 기록에 같이 실어 보낸다(그 컷을 그린 그대로 캔버스로 열림).
+    size 를 주면 aspect 대신 그 크기, turbo 면 터보 LoRA 노드를 켜 둔다."""
+    w, h = size or SIZES[aspect]
+    if size:
+        aspect = next((k for k, v in SIZES.items() if v == tuple(size)), f"{w}x{h}")
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 760), [GUIDE], title="사용법")
     g.group("1. 모델 (Qwen Image 2.1)", 0, 0, 380, 590, "#3f789e")
@@ -86,7 +90,7 @@ def build(prompt, ref_names, aspect="2:3", steps=40):
     # 터보: 기본은 우회(꺼짐). 켜면(Ctrl+B) KSampler steps 를 8 로
     lora = g.node("LoraLoaderModelOnly", (20, 380), (340, 82), [TURBO, 1.0], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
                   title="터보 LoRA (켜면 steps 8)", models=[{"name": TURBO, "url": f"{HF}/loras/{TURBO}", "directory": "loras"}])
-    lora["mode"] = 4
+    lora["mode"] = 0 if turbo else 4
     cache = g.node("QwenImage21Cache", (20, 490), (340, 82), ["auto", "default"], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")])
     g.link(unet, 0, lora, "model")
     g.link(lora, 0, cache, "model")
@@ -108,8 +112,9 @@ def build(prompt, ref_names, aspect="2:3", steps=40):
         g.link(ld, 0, enc, f"images.image_{k}")
 
     g.group("4. 세로 캔버스 · 그리기", 1020, 0, 400, 830, "#7a3f8a")
-    lat = g.node("EmptyLatentImage", (1040, 50), (360, 106), [w, h, 1], outputs=[("LATENT", "LATENT")], title=f"세로 캔버스 {aspect} ({w}x{h})")
-    ks = g.node("KSampler", (1040, 190), (360, 262), [0, "randomize", steps, 1, "euler", "simple", 1],
+    lat = g.node("EmptyLatentImage", (1040, 50), (360, 106), [w, h, 1], outputs=[("LATENT", "LATENT")],
+                 title=f"{'세로 ' if h > w else ''}캔버스 {aspect} ({w}x{h})")
+    ks = g.node("KSampler", (1040, 190), (360, 262), [seed, "fixed" if seed else "randomize", steps, 1, "euler", "simple", 1],
                 inputs=[("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
                 outputs=[("LATENT", "LATENT")])
     g.link(cache, 0, ks, "model")
@@ -119,7 +124,7 @@ def build(prompt, ref_names, aspect="2:3", steps=40):
     dec = g.node("VAEDecode", (1040, 490), (360, 46), inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
     g.link(ks, 0, dec, "samples")
     g.link(vae, 0, dec, "vae")
-    sv = g.node("SaveImage", (1440, 0), (560, 830), ["webtoon_vertical/panel"], inputs=[("images", "IMAGE")])
+    sv = g.node("SaveImage", (1440, 0), (560, 830), [prefix], inputs=[("images", "IMAGE")])
     g.link(dec, 0, sv, "images")
     return g.dump()
 

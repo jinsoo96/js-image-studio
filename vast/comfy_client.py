@@ -70,8 +70,13 @@ class Comfy:
             + path.read_bytes() + f"\r\n--{bnd}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{bnd}--\r\n".encode()
         return self.req("/upload/image", body, ctype=f"multipart/form-data; boundary={bnd}")["name"]
 
-    def queue(self, prompt: dict) -> str:
-        return self.req("/prompt", {"prompt": prompt, "client_id": "webtoon-studio"})["prompt_id"]
+    def queue(self, prompt: dict, workflow: dict | None = None) -> str:
+        """workflow(화면용 워크플로우)를 주면 결과 PNG·서버 기록에 같이 남아 ComfyUI 화면에서 그 작업을 캔버스로 연다.
+        (2026-10-15 사용자 "comfyui 보니까 워크플로우를 사용한 느낌이 안 난다": API 그래프만 보내면 화면에서 열리지 않았다)"""
+        body = {"prompt": prompt, "client_id": "webtoon-studio"}
+        if workflow:
+            body["extra_data"] = {"extra_pnginfo": {"workflow": workflow}}
+        return self.req("/prompt", body)["prompt_id"]
 
     def wait(self, pid: str, timeout=900) -> dict:
         t0 = time.time()
