@@ -22,6 +22,8 @@ from PIL import Image, ImageDraw, ImageFont  # 맨 위에서 미리 읽는다(�
 from mcp.server.fastmcp import FastMCP
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "mcp"))
+import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷 그림 + 컷 설명)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
@@ -122,7 +124,7 @@ def guide() -> str:
             "1) status() 로 작품·회차·크레딧 확인 → 2) read_doc 으로 작품 README·STYLE, LESSONS 해당 장을 읽는다\n"
             "3) 새 회차는 new_episode 로 앞 회차 틀을 복사하고, read_file 로 열어 사용자 이야기에 맞게 고친 뒤 write_file 로 쓴다\n"
             "4) prepare_episode → estimate_draw → 사용자에게 비용 확인 → draw_panels(confirm_credits=비용) → job_status\n"
-            "5) contact_sheet 로 장면별 검수 → 걸린 컷만 redraw_panels → compose → job_status(막는 경고 0 확인) → export\n"
+            "5) review_panels 로 그림 검수(그림을 보는 모델이 판정) + contact_sheet 경로를 사용자에게 → 사용자가 동의한 컷만 build_panels.py 고쳐 redraw_panels → compose → job_status(막는 경고 0 확인) → export\n"
             "크레딧은 개인 결제다. 시안 남발 금지, 재사용 먼저, 끝나면 남은 크레딧을 알린다.")
     return (ROOT / "CLAUDE.md").read_text(encoding="utf-8") + tips
 
@@ -233,6 +235,32 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "") -> 
     out = SHEETS / f"{_series(series).name}_{ep.name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
     return f"모아보기 {len(tiles)}컷: {out}"
+
+
+@mcp.tool()
+def review_panels(series: str, episode: str, ids: str = "", scene: str = "") -> str:
+    """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
+    인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
+    8컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 사용자에게 보여 주고 동의를 받은 뒤 고칠 점을 build_panels.py 에 반영해 redraw_panels."""
+    ep = _episode(series, episode)
+    sd = _series(series)
+    try:
+        pick = vision_review.pick_ids(ep, ids, scene)
+    except ValueError as e:
+        return str(e)
+    if not pick:
+        return "검수할 컷이 없다(ids·scene 을 확인)"
+    if len(pick) <= 8:
+        res = vision_review.review(sd, ep, pick)
+        bad = [r["id"] for r in res if r.get("판정") == "다시" or r.get("error")]
+        unsure = [r["id"] for r in res if r.get("판정") == "애매"]
+        return (f"그림 검수 {len(res)}컷(컷마다 두 번 보고 둘 다 걸린 것만 '다시'), 다시 {len(bad)}컷\n" + "\n".join(vision_review.fmt(r) for r in res)
+                + f"\n\n다시 그릴 후보: {', '.join(bad) or '없음'} · 애매(한 번만 걸림, 사람 눈으로 확인): {', '.join(unsure) or '없음'}\n"
+                "(모델 판정이라 틀릴 수 있다. 사용자에게 contact_sheet 경로와 함께 보여 주고 확인받는다)")
+    out = ROOT / "state" / "mcp_reviews" / f"{sd.name}_{ep.name}_{time.strftime('%m%d-%H%M%S')}.md"
+    job = _start_job("review", ep, [{"label": f"그림 검수 {len(pick)}컷", "cmd": [PY, str(ROOT / "mcp" / "vision_review.py"), str(sd), ep.name,
+                                                                          "--ids", ",".join(pick), "--out", str(out)]}])
+    return f"작업 시작 {job}: {len(pick)}컷 검수(6컷씩 동시, 약 {max(1, len(pick) // 6) * 5}초). job_status('{job}', tail_lines=80) 로 결과를 본다"
 
 
 # ── 파일 도구(작업실 안에서만) ────────────────────────────────

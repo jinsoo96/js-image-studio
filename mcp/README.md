@@ -1,6 +1,6 @@
 # 작업실 MCP 서버(agent app·Qwen 에서 쓰기)
 
-`server.py` 는 작업실 기능을 MCP 도구 17개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
+`server.py` 는 작업실 기능을 MCP 도구 18개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
 
 ## 도구
 | 도구 | 하는 일 | 크레딧 |
@@ -8,6 +8,7 @@
 | `guide` · `read_doc` | 작업실 규칙(CLAUDE.md)·문서 읽기(긴 문서는 offset) | 0 |
 | `status` · `credits` | 작품·회차·작화·합성 상태, 진행 중 작업, 남은 크레딧 | 0 |
 | `list_panels` · `contact_sheet` | 컷 목록 · 검수용 모아보기 그림(경로를 돌려줌, `state\mcp_sheets\`) | 0 |
+| `review_panels` | 그림 검수: 그림을 보는 모델(`qwen3.8-27b`, agent platform 공인망 게이트웨이)이 컷 그림 + 컷 설명을 맞대어 인원·좌우·시선·옷·표정·배경 판정과 고칠 점. 8컷 이하는 바로, 더 많으면 작업(`state\mcp_reviews\`). 본체 `vision_review.py`(명령줄로도 돈다) | 0 |
 | `list_files` · `read_file` · `write_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절 | 0 |
 | `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
 | `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
@@ -27,7 +28,7 @@
      "command": "D:/webtoon-studio/.venv/Scripts/python.exe", "args": ["D:/webtoon-studio/mcp/server.py"],
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
-3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 17개)인지 본다.
+3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 18개)인지 본다.
 4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
    지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
@@ -37,3 +38,10 @@
 - agent app 의 다중 파드 서버에서는 로컬 MCP 도구가 90초 쉬면 안 보일 수 있다. 그러면 agent app 설정 > MCP 에서 껐다 켠다(메모리 `dex-local-mcp-tools-vanish`).
 - Qwen 은 처음에 인자를 빠뜨리고 부르기도 한다. 도구가 오류 문장을 돌려주면 대개 스스로 고쳐 다시 부른다.
 - 작업실 파일을 직접 고치는 일(새 회차 make_storyboard.py 쓰기 등)은 agent app 채팅의 "폴더"로 `D:\webtoon-studio` 를 연결하면 에이전트가 파일·셸 도구로 할 수 있다.
+
+## 그림 검수(review_panels) 알아 둘 것
+- Qwen 에이전트는 그림을 못 보지만, 같은 qwen3.8-27b 를 그림 입력으로 부르면 그림을 본다(2026-10-15 확인: 호텔 컷의 인원·좌우·시선·옷·표정을 정확히 읽음). 그래서 검수를 도구 안에서 따로 부른다.
+- 시험(D+18 2화 v2): 호텔 6컷 5.5초(p079 "재민 시선이 정면" 지적), 식당 21컷 작업 18초(다시 후보 3컷 중 1컷은 타당, 2컷은 컷 설명이 덜 적혀 생긴 과민 판정). 판정은 참고용이고 사용자가 고른다.
+- 한 번만 보면 판정이 흔들렸다(같은 호텔 컷을 처음엔 p079, 다음엔 p078 이 걸렸고 p078 은 없는 목걸이를 봤다). 그래서 컷마다 두 번 따로 보고 둘 다 걸린 항목만 '다시', 한 번만 걸린 건 '애매'(사람 눈으로 확인)로 낸다. 그림은 1280px, temperature 0. 그래도 서버가 완전히 같은 답을 주진 않으니 최종 판단은 사람이 한다.
+- 컷 설명(build_panels.py 의 P·CAM·ACT)을 자세히 쓸수록 판정이 정확해진다. 장면 공통 옷과 이 컷 행동이 다르면 행동을 따르게 했다.
+- 그림은 회사 agent platform 게이트웨이로 간다(외부 서비스 아님). 바꾸려면 환경변수 VLM_URL·VLM_MODEL.

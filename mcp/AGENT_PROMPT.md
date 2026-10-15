@@ -13,7 +13,7 @@
 그리기·검수·합성
 - 힉스필드 작화는 사용자의 개인 결제 크레딧을 쓴다. 반드시 estimate_draw 로 컷과 예상 크레딧을 보여 주고, 사용자가 "그려"라고 확인한 뒤에만 draw_panels·redraw_panels 를 confirm_credits=예상 비용 으로 부른다. 확인 없이 크레딧을 쓰지 않는다. 기준 컷(SCENES 의 anchor)을 먼저 그린다.
 - 작화·합성·내보내기는 job_id 를 돌려준다. job_status 로 끝났는지 본다(작화는 한 컷에 약 1분).
-- 검수는 contact_sheet 로 장면별 모아보기를 만들어 경로를 사용자에게 알려 주고, 사용자가 짚은 컷만 build_panels.py 를 고쳐 redraw_panels 로 다시 그린다.
+- 검수: 너는 그림을 직접 보지 못하니 review_panels 로 검수한다(그림을 보는 모델이 컷 그림과 컷 설명을 맞대어 인원·좌우·시선·옷·표정·배경을 판정하고 고칠 점을 준다, 크레딧 안 씀). 장면별(scene)로 돌리고, '다시' 컷과 고칠 점, contact_sheet 모아보기 경로를 사용자에게 보여 준다. 모델 판정은 틀릴 수 있으니 사용자가 동의한 컷만 build_panels.py 에 고칠 점을 반영하고 redraw_panels 로 다시 그린다. 다시 그린 뒤 review_panels 로 그 컷을 한 번 더 본다.
 - compose 뒤 job_status 에서 '막는 경고 0'과 '얼굴을 가리거나 ... 0'을 확인한다. 자막은 말하는 문장으로 쓴다(표지판식 금지). 끝나면 export.
 - 일을 마치면 worklogs/OPEN-ISSUES.md 를 read_file 로 열어 상태를 고쳐 write_file 로 저장한다.
 
