@@ -17,6 +17,7 @@ import random
 import re
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,34 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False):
     return g
 
 
-def qwen_refs(series, p, episode=None, front=False):
+LLM_URL = "https://judge-gateway.invalid/v1"  # 사내 vLLM(키 없음). 그림 검수(mcp/vision_review.py)와 같은 곳
+
+
+def pick_expr(series, cid, name, text):
+    """컷 연기 글에 가장 가까운 표정 칸 번호(1~12)를 사내 Qwen 이 고른다. 이 인물 얘기가 없거나 맞는 칸이 없으면 None.
+    (2026-10-15 사용자 "연기 강도 강하게": Qwen Image 는 참고 얼굴의 표정을 그대로 따라 그린다 → 맞는 칸을 넣으면 그 연기가 나온다)"""
+    jf = series / "assets" / "vast_refs" / f"{cid}_expr.json"
+    if not jf.exists() or not text:
+        return None
+    labels = json.loads(jf.read_text(encoding="utf-8"))["labels"]
+    ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
+           + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
+           + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits.")
+    body = {"model": "qwen3.8-27b", "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
+            "messages": [{"role": "user", "content": ask}]}
+    req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            m = re.search(r"\d+", json.loads(r.read().decode())["choices"][0]["message"]["content"])
+    except Exception as e:
+        print(f"  표정 고르기 실패({cid}): {str(e)[:80]}")
+        return None
+    k = int(m.group()) if m else 0
+    return (k, labels[k - 1]) if 1 <= k <= len(labels) else None
+
+
+def qwen_refs(series, p, episode=None, front=False, expr=False):
     """같은 컷 설명(panels.json)으로 Qwen 용 짧은 프롬프트와 참고 그림을 만든다. 2026-10-15 시험에서 정한 것:
     - 힉스필드 프롬프트(약 4천 자, 맥락·규칙·연기 일반론)를 그대로 쓰면 연기가 묻힌다(p045 울 컷이 무표정, 짧게 쓰니 눈물·입술 깨묾이 나옴)
       → 컷·연기·동작·옷·카메라를 앞에, 그림체는 뒤에, 규칙은 한 줄
@@ -75,7 +103,15 @@ def qwen_refs(series, p, episode=None, front=False):
         lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")
     bind = {}
     for cid in p.get("chars", []):
-        # 상반신(무표정)이 기본. 얼굴 칸 첫 장은 웃음·화남이 섞여 그 표정을 따라 그렸다(p045)
+        # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
+        pk = pick_expr(series, cid, NAMES[cid], p.get("acting") or p["action"]) if expr else None
+        if pk:
+            refs.append(series / "assets" / "vast_refs" / f"{cid}_expr_{pk[0]:02d}.png")
+            bind[cid] = len(refs)
+            lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s face with the expression to act in this panel ({pk[1]}): give {NAMES[cid]} this exact "
+                         "facial expression (eyebrows, eyelids, eyes, mouth, tears, blush) and the same face and hair, but not its crop, background or outfit.")
+            print(f"  {p['id']} {cid}: 표정 칸 {pk[0]} {pk[1]}", flush=True)
+            continue
         kinds = [("bust", "neutral bust portrait (identity only: same face, eyes, hairstyle and hair color)")]
         if front:
             kinds.append(("front", "full body (identity and body proportions only, not the outfit)"))
@@ -132,6 +168,7 @@ def main():
     ap.add_argument("--aspect", help="모든 컷을 이 비율로(세로 웹툰 시안은 2:3·9:16). 없으면 컷 설명의 aspect")
     ap.add_argument("--steps", type=int, help="기본 40(공식 40~50, euler), --turbo 면 8")
     ap.add_argument("--turbo", action="store_true", help="Turbo LoRA 8스텝 시안(빠름)")
+    ap.add_argument("--expr", action="store_true", help="연기에 맞는 표정 칸(표정 시트)을 얼굴 참고로(사내 Qwen 이 고름)")
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
@@ -154,7 +191,7 @@ def main():
             continue
         if p.get("reuse") or not p.get("action"):
             continue
-        prompt, refs = qwen_refs(series, p)
+        prompt, refs = qwen_refs(series, p, expr=args.expr)
         if any(not r.exists() for r in refs):
             print(f"{p['id']}: 참고 그림 없음 {[str(r) for r in refs if not r.exists()]}")
             failed.append(p["id"])

@@ -5,6 +5,8 @@
     .venv/Scripts/python vast/sheet_refs.py <series_hf_dir> [인물 ...]
 결과: <series>/assets/vast_refs/<id>_bust.png(무표정 상반신, 기본 참고) · <id>_face.png · <id>_front.png (시트가 바뀌면 다시 만든다)
 """
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -70,11 +72,33 @@ def crop_refs(sheet: Path):
     return front, face, bust
 
 
+def expr_tiles(series: Path, out: Path):
+    """표정 시트(4x3, 12칸)를 칸마다 잘라 <id>_expr_01..12.png, 칸 이름은 시트를 만든 프롬프트(prompts/expr_<id>.txt)의 표정 목록 순서 그대로 <id>_expr.json.
+    (2026-10-15 사용자 "연기 강도 강하게": Qwen 은 참고 얼굴의 표정을 그대로 따라 그리니, 컷 연기에 맞는 칸을 골라 넣는다)"""
+    for s in sorted((series / "assets").glob("*_expressions.png")):
+        cid = s.name[: -len("_expressions.png")]
+        pf = series / "prompts" / f"expr_{cid}.txt"
+        m = re.search(r":\s*([^:]+?)\.\s*$", pf.read_text(encoding="utf-8").strip(), re.S) if pf.exists() else None  # 마지막 콜론 뒤 목록(두 작품 형식이 다름)
+        labels = [x.strip() for x in m.group(1).split(",")] if m else []
+        if len(labels) != 12:
+            print(cid, "표정 이름 12개를 못 읽음", len(labels))
+            continue
+        im = Image.open(s).convert("RGB")
+        tw, th = im.width / 4, im.height / 3
+        for k in range(12):
+            r, c = divmod(k, 4)
+            x0, y0 = c * tw, r * th  # 칸 가장자리는 옆 칸이 묻어날 수 있어 4% 안쪽만
+            im.crop((int(x0 + tw * 0.04), int(y0 + th * 0.04), int(x0 + tw * 0.96), int(y0 + th * 0.96))).save(out / f"{cid}_expr_{k + 1:02d}.png")
+        (out / f"{cid}_expr.json").write_text(json.dumps({"labels": labels}, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(cid, "표정 12칸", labels)
+
+
 def main():
     series = Path(sys.argv[1])
     want = set(sys.argv[2:])
     out = series / "assets" / "vast_refs"
     out.mkdir(parents=True, exist_ok=True)
+    expr_tiles(series, out)
     for s in sorted((series / "assets").glob("*_sheet.png")):
         cid = s.name[: -len("_sheet.png")]
         if want and cid not in want:

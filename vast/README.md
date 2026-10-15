@@ -25,6 +25,7 @@
 .venv\Scripts\python vast\comfy_panel.py series\d-plus-18-hf series\d-plus-18-hf\episodes\ep002_v2\panels.json --episode ep002_v2 --only p003,p045 --turbo
 .venv\Scripts\python vast\comfy_panel.py ... --aspect 2:3 --variant vast_v   # 세로 컷(9:16·2:3·3:4)
 .venv\Scripts\python vast\comfy_panel.py ... --seed 7                        # 사람이 하나 더 나오거나 잔상이 끼면 시드만 바꿔 다시
+.venv\Scripts\python vast\comfy_panel.py ... --expr                          # 연기에 맞는 표정 칸을 얼굴 참고로(연기가 세짐)
 ```
 본편에 쓰려면 검수 뒤 그 컷을 `panels_hf\` 로 옮기고(원본은 `_rejected\`) `tools\hf_place.py` 로 `panels\` 에 놓는다.
 
@@ -54,6 +55,6 @@ DiT bf16 + 글 인코더 int8 이면 둘 다 32GB VRAM 에 같이 올라간다. 
 - 장소는 넓은 컷이면 맨 앞, 클로즈업이면 맨 뒤(배경만). 클로즈업에선 장면 배치 문장(SPACE)을 뺀다.
 
 ## 아직 힉스필드보다 약한 것
-- 연기 강도: 컷 설명의 `acting` 을 보이는 사실로 쓰면 낫다("눈물이 두 뺨을 타고 흐름, 아랫입술을 깨묾"). "울컥한다" 같은 말은 약하게 그린다.
+- 연기 강도: `--expr` 로 표정 칸을 넣으면 세진다(사내 Qwen 이 연기 글에 맞는 칸을 고름, 표정 시트가 있는 인물만: D+18 3명·무대 뒤 5명). 그래도 힉스필드보다는 약하다. 컷 설명의 `acting` 을 보이는 사실로 쓰면 더 낫다("눈물이 두 뺨을 타고 흐름, 아랫입술을 깨묾"). 칸 고르기가 가끔 빗나간다(가볍게 웃는 컷에 차가운 시선).
 - 시드에 따라 인물이 하나 더 나오거나 머리 잔상이 낀다 → 그린 뒤 인원을 세고 시드만 바꿔 다시.
 - 옷 시트를 못 쓴다 → 옷은 글(`outfit`)로만. 아직 한 화를 통째로 그려 합성까지 해 본 적은 없다.
