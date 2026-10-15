@@ -14,6 +14,7 @@
 |---|---|
 | `comfy_client.py` | 접속(주소·토큰을 vast API 로 매번 읽음, 인스턴스를 다시 만들어도 됨) · 모델·워크플로우 목록 · 모델 받기 · 큐에 넣고 결과 받기 |
 | `sheet_refs.py` | 캐릭터 시트에서 Qwen 용 참고 그림 자르기 → `series\<작품>\assets\vast_refs\`(`<id>_bust.png` 무표정 머리가 기본), 표정 시트 12칸 `<id>_expr_01..12.png` + 칸 이름 `<id>_expr.json`(`--expr` 용) |
+| `make_assets.py` | 인물 에셋 늘리기(Qwen 편집. 큐에 한꺼번에 넣고 768 이면 장당 약 3.5초, 한 장씩 1024 면 12초): 회색 기본복 베이스 몸 `<id>_base.png`, 시트에 없는 센 표정 12가지 `<id>_xp_01..12.png`(오열·이 악물고 울기·고함·경멸·경악·씁쓸한 웃음 등, `<id>_expr.json` 의 extra). 맨몸은 만들지 않는다 |
 | `comfy_panel.py` | 컷 그리기: `panels.json` → `episodes\<회차>\panels_hf_vast\`(힉스필드 `panels_hf\` 는 안 건드림) |
 | `make_workflow.py` | 서버 화면에서 손으로 돌리는 세로 워크플로우를 만들어 저장 |
 | `webtoon_vertical_qwen21.json` | 서버에 저장한 그 워크플로우의 사본 |
@@ -22,6 +23,8 @@
 ```
 .venv\Scripts\python vast\comfy_client.py info                     # GPU·남은 VRAM·노드 수
 .venv\Scripts\python vast\sheet_refs.py series\d-plus-18-hf          # 시트가 새로 생기거나 바뀌면 한 번
+.venv\Scripts\python vast\make_assets.py series\d-plus-18-hf woobin both --res 768   # 새 인물이면: 베이스 몸 + 센 표정 12가지(--expr 가 같이 고른다)
+.venv\Scripts\python vast\make_assets.py series\mudae-dwi-hf all both --res 768      # 작품 전체. 이미 있는 건 건너뛴다(끊겨도 다시 돌리면 이어짐)
 .venv\Scripts\python vast\comfy_panel.py series\d-plus-18-hf series\d-plus-18-hf\episodes\ep002_v2\panels.json --episode ep002_v2 --only p003,p045 --turbo
 .venv\Scripts\python vast\comfy_panel.py ... --aspect 2:3 --variant vast_v   # 세로 컷(9:16·2:3·3:4)
 .venv\Scripts\python vast\comfy_panel.py ... --seed 7                        # 사람이 하나 더 나오거나 잔상이 끼면 시드만 바꿔 다시

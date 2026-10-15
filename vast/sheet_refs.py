@@ -50,6 +50,12 @@ def crop_refs(sheet: Path):
         return max(0, x0 - pad), max(0, ya - pad), min(w, x1 + pad), min(h, yb + pad)
 
     fx0, fx1 = cols[0]
+    # 정면·반측면 전신이 팔끝으로 붙으면 한 덩어리로 잡혀 두 명이 같이 잘린다(무대 뒤 dancer·rapper, 베이스·표정에 둘씩 나옴)
+    # → 사람 하나 폭(시트 폭의 약 17%)보다 넓으면 가운데쯤 잉크가 가장 적은 열에서 가른다
+    if fx1 - fx0 > 0.22 * w:
+        prof = ink[:, fx0:fx1].mean(axis=0)
+        lo, hi = int((fx1 - fx0) * 0.3), int((fx1 - fx0) * 0.7)
+        fx1 = fx0 + lo + int(np.argmin(prof[lo:hi]))
     front = im.crop(box(fx0, fx1))
     # 머리(정면 전신의 위 19%): 표정이 늘 무표정이라 얼굴 참고로 쓴다. 얼굴 칸 첫 장은 인물마다 웃음·화남이라 그 표정을 따라 그렸다(p045 우는 컷이 웃음).
     # 30% 상반신은 시트의 기본 옷(우빈 파란 셔츠)이 보여 그 옷을 입은 사람이 한 명 더 생겼다(p003)

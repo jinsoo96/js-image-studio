@@ -33,7 +33,8 @@ SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": 
 MAX_REFS = 10
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False):
+    """edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시)."""
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "qwen_image", "device": "default"}},
@@ -52,6 +53,9 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False):
     if turbo:
         g["10"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": TURBO, "strength_model": 1.0}}
         g["4"]["inputs"]["model"] = ["10", 0]
+    if edit:
+        del g["6"]
+        g["7"]["inputs"]["latent_image"] = ["5", 2]
     return g
 
 
@@ -64,7 +68,10 @@ def pick_expr(series, cid, name, text):
     jf = series / "assets" / "vast_refs" / f"{cid}_expr.json"
     if not jf.exists() or not text:
         return None
-    labels = json.loads(jf.read_text(encoding="utf-8"))["labels"]
+    meta = json.loads(jf.read_text(encoding="utf-8"))
+    # 표정 시트 12칸 + make_assets.py 로 늘린 센 표정(extra)
+    files = [f"{cid}_expr_{k:02d}.png" for k in range(1, len(meta["labels"]) + 1)] + [x["file"] for x in meta.get("extra", [])]
+    labels = meta["labels"] + [x["label"] for x in meta.get("extra", [])]
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits.")
@@ -79,7 +86,7 @@ def pick_expr(series, cid, name, text):
         print(f"  표정 고르기 실패({cid}): {str(e)[:80]}")
         return None
     k = int(m.group()) if m else 0
-    return (k, labels[k - 1]) if 1 <= k <= len(labels) else None
+    return (files[k - 1], labels[k - 1]) if 1 <= k <= len(labels) else None
 
 
 def qwen_refs(series, p, episode=None, front=False, expr=False):
@@ -106,7 +113,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
         pk = pick_expr(series, cid, NAMES[cid], p.get("acting") or p["action"]) if expr else None
         if pk:
-            refs.append(series / "assets" / "vast_refs" / f"{cid}_expr_{pk[0]:02d}.png")
+            refs.append(series / "assets" / "vast_refs" / pk[0])
             bind[cid] = len(refs)
             lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s face with the expression to act in this panel ({pk[1]}): give {NAMES[cid]} this exact "
                          "facial expression (eyebrows, eyelids, eyes, mouth, tears, blush) and the same face and hair, but not its crop, background or outfit.")
