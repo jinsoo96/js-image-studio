@@ -87,3 +87,15 @@ DiT bf16 + 글 인코더 int8 이면 둘 다 32GB VRAM 에 같이 올라간다. 
 - agent app 의 Qwen 에이전트도 쓸 수 있다: MCP 도구 `vast_status`·`vast_draw`·`vast_make_assets`·`vast_adopt`·`vast_episode`(`mcp\README.md`). 한 화를 PDF 까지는 `vast_episode` 하나로(본편은 그대로, `<회차>_vast` 폴더).
 - 옷 시트를 못 쓴다 → 옷은 글(`outfit`)로만.
 - 한 화 통째: D+18 2화 v2 를 `ep002_v2_vast` 로 그려 PDF·epub·예고편까지 냈다(2026-10-16, `exports\2026-10-16\*_vast판.*`). 새 컷 31개 중 4개가 걸려 다시 그렸다(LESSONS 16). 재사용 컷 35개는 힉스필드 그림 그대로라 한 화 안에 두 엔진 그림이 섞여 있다.
+
+## agent platform 에서 바로 그리기(ComfyUI 노드 · 이미지 생성 카탈로그, 2026-10-16)
+팀장 피드백: "이미지 스튜디오로, 내부에 웹툰 템플릿, ComfyUI + 스킬, 핵심 코어는 ComfyUI 워크플로우" · "컨티뉴얼 생성 파이프라인을 잘 만들어 두면 agent platform 에서 ComfyUI 를 연결해 만드는 것도".
+agent platform 캔버스에는 ComfyUI 노드가 있고, 관리자 이미지 생성 카탈로그에 [ComfyUI 주소 + 워크플로우 + 열어 둘 입력]을 등록하면 그 노드가 에이전트 도구가 된다. 이 PC·agent app 없이 agent platform 서버가 vast ComfyUI 를 바로 부른다.
+- `xgen_catalog.py assets`: 참고 그림 라이브러리를 ComfyUI input 에 올림(`studio_<작품>_<인물>.png` 22개, `studio_<작품>_loc_<장소>.png` 39개). 이름이 같으면 덮어씀
+- `xgen_catalog.py validate · test <key> '<json>' · apply · list`: 카탈로그 항목 3개(`studio_webtoon_panel_1` 인물 1명, `studio_webtoon_panel_2` 인물 2명, `studio_image_free` 자유 생성). 입력 = 프롬프트 · 장소 · 인물(허용값 목록) · 크기 · 시드
+- `xgen_studio_agent.py apply`: agent platform 워크플로우 「이미지 스튜디오 (Qwen)」(`wf_image_studio_qwen`) = Agent Geny + ComfyUI 노드 3개, 시스템 프롬프트에 웹툰 템플릿 스킬(이어 그리기 규칙)과 인물·장소 이름 목록
+- 시험: agent app 에서 "우빈 밤거리 두 컷 이어서" → 두 컷 모두 같은 얼굴·같은 밤거리, 2분 49초, 결과는 agent platform 파일 저장소 '결과물'
+- 권한: 처음에 `role_allowlist []` + 이 계정 번호로 묶었더니 실행 사용자가 노드에 안 넘어오는 경로(agent app)에서 "권한 없음"으로 막혔다 → agent-server 사용자 전체(None), 기존 test_anima 항목과 같은 설정
+- 장소 이름을 에이전트가 짐작해 틀렸다("nightstreet") → 시스템 프롬프트에 정확한 이름 목록을 넣으니 맞게 골랐다
+- vast 인스턴스를 다시 만들면 주소·토큰이 바뀐다 → `xgen_catalog.py assets` 와 `apply` 를 다시 돌린다
+- 문서: `exports/2026-10-16/이미지스튜디오/` (파이프라인 · 시스템 구조 PDF)
