@@ -118,6 +118,77 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
     return changed
 
 
+EDITABLE = {"표정연기", "옷"}  # 편집으로 고칠 수 있는 것. 좌우·시선·배경·인원은 구도라 다시 그린다
+
+
+def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
+    """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만)로 이 그림을 본다. (결과, 걸린 항목)"""
+    sys.path.insert(0, str(ROOT / "mcp"))
+    import vision_review as V
+    V.DIRS[:] = [img_path.parent.name]
+    r = V.review(series, ep_dir, [pid], workers=2)[0]
+    return r, (set(V._probs(r)) if r.get("판정") == "다시" else set())
+
+
+def staging_edit_prompt(series, p, r, probs) -> str:
+    from hf_panel import names
+    NAMES = names(series)
+    parts = []
+    if "표정연기" in probs:
+        parts.append(f"Change only the facial expressions and body language to match this acting: {p.get('acting') or p['action']} "
+                     "Make the emotion strong and instantly readable like a Korean webtoon.")
+    if "옷" in probs:
+        wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
+        if wear:
+            parts.append(f"Change the clothes to match: {wear}.")
+    if r.get("고칠점"):
+        parts.append(f"Note: {r['고칠점']}")
+    parts.append("Keep everything else in <image1> exactly the same: who is in the panel, their positions and facing directions, faces, hair, "
+                 "the room, lighting, camera angle and framing.")
+    return " ".join(parts)
+
+
+def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, retries=1, log=print):
+    """3단 연출 확인(2026-10-16 사용자 "시점·표정·공간 자각·카메라 각도를 잘 고려해야").
+    표정·옷만 틀리면 편집으로 고치고, 좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시 그린다. 더 나빠지면 나은 판으로 되돌린다."""
+    pid = p["id"]
+    best = None
+    attempt = 0
+    while True:
+        r, probs = staging_check(series, ep_dir, dst, pid)
+        if best is None or len(probs) < best[0]:
+            best = (len(probs), dst.read_bytes(), probs)
+        if not probs:
+            log(f"  {pid}: 연출 확인 통과" + (f" (애매, 사람 눈으로: {r.get('기타', '')[:120]})" if r.get("판정") == "애매" else ""))
+            return
+        log(f"  {pid}: 연출 확인 걸림 {sorted(probs)} {str(r.get('고칠점', ''))[:120]}")
+        if probs <= EDITABLE:
+            before = dst.read_bytes()
+            keep = dst.parent / "_stage1"
+            keep.mkdir(exist_ok=True)
+            (keep / f"{pid}_before_check.png").write_bytes(before)
+            g = graph(staging_edit_prompt(series, p, r, probs), [upload(c, dst, cache)], 0, 0, seed % 100000 + 17, 8, 1024, turbo=True, edit=True)
+            g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/checked"
+            hist = c.wait(c.queue(g), 600)
+            c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+            r2, p2 = staging_check(series, ep_dir, dst, pid)
+            if len(p2) > len(probs):
+                dst.write_bytes(before)
+                log(f"  {pid}: 편집 뒤 더 나빠져 되돌림 {sorted(p2)}")
+            else:
+                log(f"  {pid}: 편집으로 손봄 → {'통과' if not p2 else '남음 ' + str(sorted(p2))}")
+            return
+        if attempt >= retries:
+            break
+        attempt += 1
+        render(seed + 7919 * attempt)
+        log(f"  {pid}: 다시 그림({attempt}회)")
+    if best and best[1] != dst.read_bytes() and best[0] < len(probs):
+        dst.write_bytes(best[1])
+        log(f"  {pid}: 가장 나은 판으로 되돌림")
+    log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("series_dir")

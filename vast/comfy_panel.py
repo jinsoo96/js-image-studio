@@ -183,6 +183,9 @@ def main():
     ap.add_argument("--turbo", action="store_true", help="Turbo LoRA 8스텝 시안(빠름)")
     ap.add_argument("--expr", action="store_true", help="연기에 맞는 표정 칸(표정 시트)을 얼굴 참고로(사내 Qwen 이 고름)")
     ap.add_argument("--fix", action="store_true", help="그린 뒤 남는 사람(중복·낯선 사람)을 그림 보는 사내 Qwen 이 찾아 편집으로 지움(원본은 _stage1/)")
+    ap.add_argument("--check", action="store_true", help="연출 확인: 그림 검수(인원·좌우시선·옷·표정연기·배경)로 보고, 표정·옷만 틀리면 편집, "
+                                                         "좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시(나은 쪽을 남김)")
+    ap.add_argument("--retries", type=int, default=1, help="--check 에서 다시 그리는 횟수")
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
@@ -217,23 +220,31 @@ def main():
         (pdir / f"{p['id']}.txt").write_text(prompt, encoding="utf-8")
         seed = args.seed if args.seed is not None else random.randrange(2**48)
         t0 = time.time()
-        try:
+        dst = out / f"{p['id']}.png"
+        log = lambda m: print(m, flush=True)  # noqa: E731
+
+        def render(sd):
             names = [upload(c, r, cache) for r in refs]
             steps = args.steps or (8 if args.turbo else 40)
             from make_workflow import build as ui_build  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
-            ui = ui_build(prompt, names, steps=steps, seed=seed, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
-            pid = c.queue(graph(prompt, names, w, h, seed, steps, args.ref_res, args.turbo), ui)
-            hist = c.wait(pid, timeout=1200)
+            ui = ui_build(prompt, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
+            hist = c.wait(c.queue(graph(prompt, names, w, h, sd, steps, args.ref_res, args.turbo), ui), timeout=1200)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")
                 raise RuntimeError(msg)
             img = next(i for o in hist["outputs"].values() for i in o.get("images", []))
-            c.download(img, out / f"{p['id']}.png")
+            c.download(img, dst)
             if args.fix:  # 2단: 남는 사람 지우기(2026-10-16, 무대 뒤 소파 6명 → 3명, D+18 p003 우빈 둘 → 하나)
                 from refine import fix_extras
-                fix_extras(c, cache, out / f"{p['id']}.png", series, p, seed=seed % 100000, log=lambda m: print(m, flush=True))
-            print(f"{p['id']}: {w}x{h} 참고 {len(refs)}장 {time.time() - t0:.0f}초 → {out / (p['id'] + '.png')}", flush=True)
+                fix_extras(c, cache, dst, series, p, seed=sd % 100000, log=log)
+
+        try:
+            render(seed)
+            if args.check:  # 3단: 연출 확인(시점·좌우·시선·표정·배경·인원). 2026-10-16 사용자 "시점·표정·공간 자각·카메라 각도를 잘 고려해야"
+                from refine import staging_pass
+                staging_pass(c, cache, dst, series, out.parent, p, seed, render, args.retries, log)
+            print(f"{p['id']}: {w}x{h} 참고 {len(refs)}장 {time.time() - t0:.0f}초 → {dst}", flush=True)
         except Exception as e:
             print(f"{p['id']}: 실패 {str(e)[:300]}", flush=True)
             failed.append(p["id"])
