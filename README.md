@@ -99,7 +99,7 @@ $ep = "series\d-plus-18-hf\episodes\ep003"
 5. 얼굴 찾기·배경 지우기 모델(`models\detect`·`models\u2net`)은 레포에 없다. 말풍선 얼굴 피하기·오프닝 표지에 필요하면 처음 PC 에서 복사해 온다.
 
 ## agent app·Qwen 에서 쓰기
-`mcp\server.py` 를 agent app 설정의 로컬 MCP 로 붙이면 agent platform 에이전트(사내 vLLM `qwen3.8-27b` 등)가 작업실 도구 29개를 쓴다(vast 로 크레딧 없이 그리고 한 화를 PDF 까지 엮는 vast_draw·vast_episode 등 5개 포함). 붙이는 법·에이전트 설정·시스템 프롬프트(`mcp\AGENT_PROMPT.md`)는 `mcp\README.md`. 크레딧을 쓰는 도구는 예상 비용 확인 값이 있어야 돈다.
+`mcp\server.py` 를 agent app 설정의 로컬 MCP 로 붙이면 agent platform 에이전트(사내 vLLM `qwen3.8-27b` 등)가 작업실 도구 30개를 쓴다(vast 로 크레딧 없이 그리고 한 화를 PDF 까지 엮는 vast_draw·vast_episode 등 5개 포함). 붙이는 법·에이전트 설정·시스템 프롬프트(`mcp\AGENT_PROMPT.md`)는 `mcp\README.md`. 크레딧을 쓰는 도구는 예상 비용 확인 값이 있어야 돈다.
 
 ## vast.ai GPU(ComfyUI)에서 그리기
 회사 공용 vast.ai(RTX 5090)의 ComfyUI 에 Qwen Image 2.1 을 받아 두고, 같은 `panels.json` 으로 컷을 그린다(`vast\comfy_panel.py`, 크레딧 0, 터보 컷당 약 30~50초). 서버 화면용 세로 워크플로우는 `webtoon_vertical_qwen21`. 공용 장비라 조회·그리기만 하고 기준선 워크플로우는 건드리지 않는다. 쓰는 법·지킬 것은 `vast\README.md`.

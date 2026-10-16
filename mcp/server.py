@@ -470,20 +470,92 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     dst = s / "episodes" / episode.strip()
     if dst.exists():
         return f"이미 있다: {dst.relative_to(ROOT)}"
-    eps = sorted(d.name for d in (s / "episodes").iterdir() if d.is_dir())
+    eps = sorted(d.name for d in (s / "episodes").iterdir() if d.is_dir() and not d.name.endswith("_vast"))
     tpl = template.strip() or eps[-1]
     src = s / "episodes" / tpl
     if not src.is_dir():
         return f"틀 회차가 없다: {tpl}"
     dst.mkdir(parents=True)
     copied = []
-    for n in ("make_storyboard.py", "build_panels.py", "trailer.json"):
+    for n in ("make_storyboard.py", "trailer.json"):
         if (src / n).exists():
             t = (src / n).read_text(encoding="utf-8").replace(f"episodes/{tpl}", f"episodes/{episode}").replace(f"episodes\\{tpl}", f"episodes\\{episode}")
             (dst / n).write_text(t, encoding="utf-8")
             copied.append(n)
-    return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사. 이제 이 파일들을 새 이야기에 맞게 고친다. "
-            "틀의 재사용 컷(REUSE)·컷 설명(P)·연기(ACT)는 새 회차에 맞게 지우거나 바꿔야 한다")
+    # 컷 설명은 코드(build_panels.py)를 쓰지 않고 표(panels_spec.json)를 set_panels 로 채운다(2026-10-16 agent app 시험)
+    (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
+    (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사, 컷 설명 표(panels_spec.json) 준비. "
+            "make_storyboard.py 를 새 이야기로 고친 뒤(start_file·append_file·check_file) prepare_episode 로 storyboard.json 을 만들고, "
+            "컷 설명은 set_panels 로 몇 컷씩 채운다(틀 회차의 컷 설명 예시는 read_file 로 그 회차 build_panels.py 를 본다)")
+
+
+SPEC_STUB = '''"""컷 설명은 panels_spec.json(MCP set_panels 로 채움). 이 파일은 공용 변환기 tools/panels_from_spec.py 를 부른다."""
+import runpy
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.argv = ["panels_from_spec.py", str(HERE)]
+runpy.run_path(str(HERE.parents[3] / "tools" / "panels_from_spec.py"), run_name="__main__")
+'''
+
+
+@mcp.tool()
+def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", reuse: str = "") -> str:
+    """컷 설명 표(panels_spec.json)를 채운다. 코드를 쓰지 않고 컷 몇 개씩(5~8컷) 나눠 여러 번 불러도 된다(같은 번호는 덮어씀).
+    panels: JSON 객체 {"p003": {"chars": ["jaemin"], "outfit": {"jaemin": "white dress shirt, navy slacks"}, "location": "office",
+      "shot": "wide shot", "action": "영어로 이 컷에서 일어나는 일", "acting": "영어로 표정·눈썹·입·몸짓", "camera": "대화 컷이면 어깨 너머 숏 설명"}}
+      chars 는 cast.json 의 인물 id, location 은 assets/locations 의 장소 이름. 인물이 있는 컷은 acting 을 꼭 쓴다.
+      넓은 컷은 양옆 배치, 대화 컷은 듣는 사람 어깨 너머 숏(camera), 혼자 클로즈업은 한 사람만, 화면 좌우는 장면 내내 같게.
+    scenes: JSON {"office": "그 장소의 장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}. reuse: JSON {"p010": "episodes/ep001/panels_hf/p012.png"}.
+    끝나면 prepare_episode 로 panels.json 을 만들고 '빠진 컷'·'연기 없는 인물 컷'이 비었는지 본다."""
+    ep = _episode(series, episode)
+    sd = _series(series)
+    f = ep / "panels_spec.json"
+    spec = _json(f, {}) or {}
+    spec.setdefault("scenes", {}), spec.setdefault("reuse", {}), spec.setdefault("panels", {})
+    notes = []
+    try:
+        add_p = json.loads(panels) if panels.strip() else {}
+        add_s = json.loads(scenes) if scenes.strip() else {}
+        add_r = json.loads(reuse) if reuse.strip() else {}
+    except ValueError as e:
+        return f"JSON 오류: {e}. 큰따옴표 JSON 객체로 다시"
+    if isinstance(add_p, list):  # [{"id": "p003", ...}] 도 받는다
+        add_p = {x.pop("id"): x for x in add_p if isinstance(x, dict) and x.get("id")}
+    cast = _json(sd / "cast.json", {}) or {}
+    locs = {p.stem for p in (sd / "assets" / "locations").glob("*.png")}
+    for pid, sp in add_p.items():
+        if not isinstance(sp, dict):
+            return f"{pid}: 컷 설명은 JSON 객체여야 한다"
+        pid = _ids(pid)[0]
+        if "—" in json.dumps(sp, ensure_ascii=False):
+            return "em dash(—) 는 쓰지 않는다. 쉼표·마침표로 바꿔 다시"
+        bad = [c for c in sp.get("chars", []) if c not in cast]
+        if bad:
+            return f"{pid}: cast.json 에 없는 인물 {bad}. 있는 인물: {', '.join(k for k in cast if not k.startswith('_'))}"
+        if not sp.get("action"):
+            return f"{pid}: action(이 컷에서 일어나는 일)이 비었다"
+        if sp.get("location") and sp["location"] not in locs:
+            notes.append(f"{pid}: 장소 '{sp['location']}' 그림이 아직 없다(make_episode 가 시안을 만들고 멈춘다. 있는 장소: {', '.join(sorted(locs))})")
+        if sp.get("chars") and not sp.get("acting"):
+            notes.append(f"{pid}: acting 이 비었다(인물 컷은 연기를 쓴다)")
+        spec["panels"][pid] = sp
+    spec["scenes"].update(add_s)
+    spec["reuse"].update({_ids(k)[0]: v for k, v in add_r.items()})
+    f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
+    if (ep / "build_panels.py").read_text(encoding="utf-8") != SPEC_STUB:  # 코드로 된 build_panels 가 있으면 백업하고 표를 쓰게 바꾼다
+        bk = BACKUPS / time.strftime("%Y%m%d-%H%M%S") / (ep / "build_panels.py").relative_to(ROOT.resolve())
+        bk.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ep / "build_panels.py", bk)
+        (ep / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
+        notes.append(f"이 회차의 build_panels.py 는 표를 쓰게 바꿨다(원본 백업 {bk.relative_to(ROOT)})")
+    board = _json(ep / "storyboard.json", {}) or {}
+    need = [p["id"] for p in board.get("panels", []) if not p.get("composite") and p["id"] not in spec["panels"] and p["id"] not in spec["reuse"]]
+    return (f"컷 설명 {len(add_p)}개 넣음(지금 표에 {len(spec['panels'])}컷, 장면 배치 {len(spec['scenes'])}, 재사용 {len(spec['reuse'])}). "
+            + (f"아직 설명이 없는 콘티 컷: {', '.join(need)}. " if board else "storyboard.json 이 아직 없다(prepare_episode 를 먼저). ")
+            + ("\n" + "\n".join(notes) if notes else ""))
 
 
 # ── 준비·비용 ─────────────────────────────────────────────────

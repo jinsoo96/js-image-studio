@@ -7,9 +7,10 @@
 1. new_episode(작품, 회차) 로 앞 회차 틀을 복사한다(가장 최신 본보기는 d-plus-18 의 ep002_v2).
 2. read_file 로 새 회차의 make_storyboard.py 를 열어, 사용자 이야기대로 컷(add·chat 줄)과 대사를 새로 쓴다. 이미 나온 설정(연대·호칭·직급·장소·옷)과 맞추고, 바꾼 곳은 사용자에게 알린다.
    파일이 길어(한 화 콘티 약 16KB, 컷 설명 약 22KB) write_file 한 번에 다 못 쓴다: start_file(첫 조각) → append_file(4천 자 안팎씩, 장면 단위로) → check_file(문법) 으로 나눠 쓰고, 일부만 고칠 땐 edit_file 을 쓴다. check_file 이 오류를 보여 주면 edit_file 로 그 줄을 고친다.
-3. build_panels.py 도 고친다: 새로 그릴 컷의 P(인물·옷·장소·구도·행동), ACT(연기), 대화 컷의 CAM(어깨 너머 숏), 장면 배치 SCENES, 앞 화 컷을 그대로 쓰는 REUSE. 넓은 컷은 양옆, 대화 컷은 어깨 너머, 화면 좌우는 장면 내내 같게, 감정은 장면 끝까지 이어 적는다.
-4. prepare_episode 를 돌려 '빠진 컷'과 '연기 없는 인물 컷'이 비어 있는지 본다. 오류가 나면 파일을 고쳐 다시.
+3. prepare_episode 로 storyboard.json 을 만든 뒤, 컷 설명은 build_panels.py 코드를 쓰지 말고 set_panels 로 표를 채운다(5~8컷씩 나눠 여러 번). 컷마다 chars(cast.json id)·outfit·location(장소 그림 이름)·shot·action(영어)·acting(영어, 인물 컷은 필수)·camera(대화 컷의 어깨 너머 숏). 장소마다 scenes 에 장면 배치 한 문장, 앞 화 그림을 그대로 쓸 컷은 reuse. 넓은 컷은 양옆, 대화 컷은 어깨 너머, 화면 좌우는 장면 내내 같게, 감정은 장면 끝까지 이어 적는다. 예시가 필요하면 read_file 로 d-plus-18-hf 의 ep002_v2/build_panels.py 를 본다.
+4. prepare_episode 를 다시 돌려 '빠진 컷'과 '연기 없는 인물 컷'이 비어 있는지 본다. 남았으면 set_panels 로 채운다.
 5. "콘티까지"만 하라고 했으면 여기서 컷 목록(list_panels)을 보여 주고 멈춘다.
+6. 그다음 make_episode(작품, 회차) 를 부르면 그리기·합성·PDF 까지 간다. 긴 작업이라 기다리지 말고 작업 번호와 예상 시간(새 컷당 약 1~2분 + 합성 3분)을 알리고 답을 끝낸다.
 
 그리기·검수·합성
 - 힉스필드 작화는 사용자의 개인 결제 크레딧을 쓴다. 반드시 estimate_draw 로 컷과 예상 크레딧을 보여 주고, 사용자가 "그려"라고 확인한 뒤에만 draw_panels·redraw_panels 를 confirm_credits=예상 비용 으로 부른다. 확인 없이 크레딧을 쓰지 않는다. 기준 컷(SCENES 의 anchor)을 먼저 그린다.
