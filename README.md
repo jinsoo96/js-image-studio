@@ -1,8 +1,8 @@
 # 이미지 스튜디오 작업실 (`webtoon-studio`)
 
-템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 지금 템플릿은 웹툰(D+18 · 무대 뒤). 스킬은 `skills\`, agent platform 에서 바로 그리는 길은 `vast\README.md`.
+템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 핵심 코어는 ComfyUI 워크플로우이고, agent platform 이 그 워크플로우를 캔버스 노드로 붙여 쓴다. 지금 템플릿은 웹툰(D+18 · 무대 뒤). 스킬은 `skills\`, agent platform 에서 바로 그리는 길은 `vast\README.md`.
 
-세로 스크롤 웹툰을 만드는 작업실. 사용자가 이야기를 주면 콘티 → 힉스필드 작화(Seedream 5.0 Pro) → 말풍선 합성 → PDF·epub·예고편까지 만든다.
+세로 스크롤 웹툰을 만드는 작업실. 사용자가 이야기를 주면 콘티 → ComfyUI 작화(vast, Qwen Image 2.1) → 말풍선 합성 → PDF·epub·예고편까지 만든다. 힉스필드(Seedream 5.0 Pro)는 1·2화 정본과 ComfyUI 로 안 되는 컷에만 쓴다.
 세션 규칙은 `CLAUDE.md`, 사용자가 짚은 문제와 막는 법은 `LESSONS.md`, 지금 상태는 `worklogs\OPEN-ISSUES.md`.
 
 ## 폴더 지도
