@@ -1,4 +1,4 @@
-"""웹툰 작업실 MCP 서버(stdio). agent app(agent platform 데스크톱)의 로컬 MCP 로 붙여 agent platform 에이전트(Qwen 등)가 작업실을 다루게 한다.
+"""이미지 스튜디오 작업실 MCP 서버(stdio, id 는 webtoon-studio 그대로). agent app(agent platform 데스크톱)의 로컬 MCP 로 붙여 agent platform 에이전트(Qwen 등)가 작업실을 다루게 한다.
 
     D:\\webtoon-studio\\.venv\\Scripts\\python.exe D:\\webtoon-studio\\mcp\\server.py
 
@@ -39,7 +39,7 @@ DOCS = {"CLAUDE": "CLAUDE.md", "README": "README.md", "LESSONS": "LESSONS.md", "
 SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md", "ASSETS": "ASSETS.md"}
 
 mcp = FastMCP("webtoon-studio", instructions=(
-    "세로 스크롤 웹툰 작업실(D+18·무대 뒤). 처음엔 guide() 로 규칙을 읽고 status() 로 상태를 본다. "
+    "이미지 스튜디오 작업실(지금 템플릿: 세로 스크롤 웹툰, D+18·무대 뒤). 처음엔 guide() 로 규칙을 읽고 status() 로 상태를 본다. "
     "힉스필드 작화는 크레딧(돈)을 쓴다: estimate_draw 로 비용을 보고 사용자에게 확인받은 뒤 draw_panels(confirm_credits=비용). "
     "vast_draw 는 회사 공용 GPU 로 크레딧 없이 그린다(결과는 panels_hf_vast, 본편 채택은 vast_adopt). "
     "오래 걸리는 일은 job_id 를 돌려주니 job_status 로 확인한다. 사용자에게는 한국어로 답한다."))

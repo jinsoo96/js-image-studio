@@ -29,7 +29,7 @@
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
 3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 30개)인지 본다. server.py 를 고친 뒤엔 agent app 를 다시 켜야 새 도구가 보인다.
-4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
+4. 새 채팅 → 새 에이전트: 이름 "이미지 스튜디오 작업실 (Qwen)"(옛 이름 "웹툰 작업실 (Qwen)"), AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
    지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
 2026-10-15 시험(agent app 1.91.0, agent-server, qwen3.8-27b): "상태 알려줘" → status 로 4편·크레딧 정확히 답함. "p079 다시 그려줘 + 모아보기" → guide·estimate_draw·contact_sheet 를 부르고 예상 1.25 크레딧을 보여 준 뒤 확인을 기다림(크레딧 안 씀). "2화 v2 콘티 열어 호텔 장면 정리 + 열린 일" → read_file 로 p073~p079 컷·대사 표와 열린 일 3개를 정확히 답함.
@@ -59,7 +59,7 @@
 `contact_sheet`·`review_panels` 에 `folder="vast"` 를 주면 vast 그림을 본다. 인스턴스를 켜고 끄는 도구는 두지 않는다. 에이전트 프롬프트(`AGENT_PROMPT.md`) v1.4 에 vast 쓰는 때와 순서를 넣었다("vast 로", "크레딧 없이" 라고 하면 vast_draw).
 
 ## agent-server 에 저장되는 것(2026-10-15 확인)
-- 에이전트 "웹툰 작업실 (Qwen)" 자체가 agent-server 워크플로우다(`wf_1792023050405_k5kq9b2`, Agent Geny 노드 하나 + 시스템 프롬프트). 웹·agent app 어디서 열어도 같은 에이전트.
+- 에이전트 "이미지 스튜디오 작업실 (Qwen)"(옛 이름 "웹툰 작업실 (Qwen)") 자체가 agent-server 워크플로우다(`wf_1792023050405_k5kq9b2`, Agent Geny 노드 하나 + 시스템 프롬프트). 웹·agent app 어디서 열어도 같은 에이전트.
 - 작업실 도구는 워크플로우 안에 저장되지 않는다. 대화할 때 이 PC 의 agent app 가 로컬 MCP 로 붙여 준다. 그래서 그림·합성은 이 PC 에서 agent app 가 켜져 있을 때만 된다.
 - 캔버스의 "MCP Tool Loader" 노드는 서버에 떠 있는 MCP 세션을 고르는 노드인데 agent-server 세션 목록(`/api/mcp/sessions`)이 비어 있고, 팀 방향도 서버 호스팅 MCP 를 없애고 로컬 MCP → agent app → agent platform 이다. 로컬 도구를 노드로 박은 고정 파이프라인은 지금은 못 만든다.
 - 나눌 수는 있다: "Workflow Tool" 노드로 다른 저장 워크플로우(예: 콘티 에이전트, 작화·검수 에이전트)를 도구로 부르는 관리자-작업자 구성.

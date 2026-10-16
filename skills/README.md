@@ -1,8 +1,8 @@
 # skills : 이미지 스튜디오 스킬
 
-agent platform 이미지 스튜디오의 구조(2026-10-16 팀장 방향): **템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식**, 핵심 코어는 ComfyUI 워크플로우.
+이미지 스튜디오의 구조(2026-10-16 팀장 방향): **템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식**, 핵심 코어는 ComfyUI 워크플로우.
 스킬은 "무엇을 어떤 순서·규칙으로 할지"를 적은 설명서(SKILL.md)와, 그 스킬이 부르는 도구(작업실 스크립트·MCP 도구·agent platform ComfyUI 노드)로 이뤄진다.
-에이전트(Claude Code · agent app 의 Qwen · agent platform 이미지 스튜디오 에이전트)는 작업에 맞는 스킬을 읽고 따른다.
+에이전트(Claude Code · agent app 의 Qwen · 이미지 스튜디오 에이전트)는 작업에 맞는 스킬을 읽고 따른다.
 
 ## 템플릿
 | 템플릿 | 파일 | 상태 |

@@ -1,4 +1,6 @@
-# webtoon-studio
+# 이미지 스튜디오 작업실 (`webtoon-studio`)
+
+템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 지금 템플릿은 웹툰(D+18 · 무대 뒤). 스킬은 `skills\`, agent platform 에서 바로 그리는 길은 `vast\README.md`.
 
 세로 스크롤 웹툰을 만드는 작업실. 사용자가 이야기를 주면 콘티 → 힉스필드 작화(Seedream 5.0 Pro) → 말풍선 합성 → PDF·epub·예고편까지 만든다.
 세션 규칙은 `CLAUDE.md`, 사용자가 짚은 문제와 막는 법은 `LESSONS.md`, 지금 상태는 `worklogs\OPEN-ISSUES.md`.
