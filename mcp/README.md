@@ -69,3 +69,4 @@
 - 에이전트가 회차를 "1화", 컷을 "30" 으로 불렀다 → 둘 다 받아 준다(ep001, p030).
 - agent app 의 Qwen 은 한 번에 약 8천 토큰까지 쓴다. 한 화 콘티(약 16KB)·컷 설명(약 22KB)은 write_file 한 번에 못 담는다 → `start_file`·`append_file`·`edit_file`·`check_file` 로 나눠 쓰고 고친다.
 - Qwen 이 콘티(make_storyboard.py)는 잘 썼지만 컷 설명(build_panels.py)을 코드로 쓰다 잘리고 작업실에 없는 함수를 지어냈다 → 컷 설명은 표(panels_spec.json)를 `set_panels` 로 몇 컷씩 채우고, 공용 변환기 `tools/panels_from_spec.py` 가 panels.json 을 만든다. new_episode 는 이제 표 방식으로 연다.
+- 시나리오 한 줄로 시험 회차를 끝까지 시켰다: 콘티 작성(56줄, 문법 통과) → 컷 설명 5개 표로 채움 → make_episode(5컷 그리기, 연출 확인에서 1컷 다시) → 기계 점검이 표지판식 자막 1개를 막음 → 에이전트가 edit_file 로 고쳐 다시 합성(막는 경고 0) → 내보내기. 결과물은 다 나왔지만 한 대화에서 도구 44번·36분을 끌자 마지막 답이 사내 모델 시간 초과(180초)로 실패했다 → 긴 작업은 부르고 바로 답을 끝내고, 한 화는 콘티 → 그리기 → 결과 확인으로 답을 나눠 진행한다(AGENT_PROMPT).

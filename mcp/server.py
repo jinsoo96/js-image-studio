@@ -766,8 +766,11 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
     cmd = [PY, str(TOOLS / "make_episode.py"), str(_series(series)), ep.name, "--until", until]
     cmd += (["--accept-new"] if accept_new else []) + ([] if check else ["--no-check"])
     job = _start_job("make_episode", ep, [{"label": f"한 화 만들기({ep.name}, ~{until})", "cmd": cmd}])
-    return (f"작업 시작 {job}: {ep.name}. 새 컷 수에 따라 컷당 약 1분(연출 확인 포함) + 합성 3분, 크레딧 0. "
-            f"job_status('{job}', tail_lines=60) 로 본다(새 에셋이 필요하면 '확인 필요'로 멈춘다).")
+    n = len(_panels_json(ep))
+    # 2026-10-16 agent app 시험: 이 작업을 같은 대화에서 기다리다 대화가 36분·도구 44번으로 길어져, 사내 모델이 마지막 답을 180초 안에 시작하지 못했다
+    return (f"작업 시작 {job}: {ep.name}, 새 컷 약 {n}개, 예상 {max(3, n * 2 + 3)}분 안팎, 크레딧 0. "
+            f"기다리지 말고 지금 사용자에게 작업 번호 {job} 와 예상 시간을 알리고 답을 끝낸다. "
+            f"사용자가 '다 됐어?' 하면 job_status('{job}', tail_lines=60) 한 번(새 에셋이 필요하면 '확인 필요'로 멈춰 있다).")
 
 
 @mcp.tool()
