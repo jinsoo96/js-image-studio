@@ -126,6 +126,7 @@ def _ids(text: str) -> list:
 def guide() -> str:
     """작업실 규칙과 쓰는 순서(CLAUDE.md 전문 + 이 MCP 도구 쓰는 법). 작업을 시작하기 전에 꼭 한 번 읽는다."""
     tips = ("\n\n## 이 MCP 도구로 일하는 순서\n"
+            "0) 이미지 스튜디오 구조: 템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 일을 시작하기 전에 read_skill() 로 목록을 보고, 그 일의 스킬(read_skill('continuity') 등)을 읽고 따른다\n"
             "1) status() 로 작품·회차·크레딧 확인 → 2) read_doc 으로 작품 README·STYLE, LESSONS 해당 장을 읽는다\n"
             "3) 새 회차는 new_episode 로 앞 회차 틀을 복사하고, read_file 로 열어 사용자 이야기에 맞게 고친 뒤 write_file 로 쓴다\n"
             "4) prepare_episode → estimate_draw → 사용자에게 비용 확인 → draw_panels(confirm_credits=비용) → job_status\n"
@@ -153,6 +154,24 @@ def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000
     part = t[offset:offset + max_chars]
     more = f"\n\n(… 전체 {len(t)}자 중 {offset}~{offset + len(part)}. 이어 읽으려면 offset={offset + len(part)})" if offset + len(part) < len(t) else ""
     return part + more
+
+
+@mcp.tool()
+def read_skill(name: str = "") -> str:
+    """이미지 스튜디오 스킬(작업 노하우 설명서 skills/<이름>/SKILL.md)을 읽는다. 비우면 스킬 목록과 웹툰 템플릿.
+    스킬: storyboard(콘티) · panel-spec(컷 설명) · continuity(이어 그리기) · asset(에셋) · staging-review(연출 검수) · lettering-publish(식자·출판).
+    그 일을 시작하기 전에 해당 스킬을 읽고 순서·규칙대로 한다."""
+    sk = ROOT / "skills"
+    n = (name or "").strip().lower()
+    if not n:
+        return (sk / "README.md").read_text(encoding="utf-8") + "\n\n---\n\n" + (sk / "webtoon" / "TEMPLATE.md").read_text(encoding="utf-8")
+    if n in ("webtoon", "template", "웹툰"):
+        return (sk / "webtoon" / "TEMPLATE.md").read_text(encoding="utf-8")
+    f = sk / n / "SKILL.md"
+    if not re.fullmatch(r"[a-z-]+", n) or not f.exists():
+        have = sorted(d.name for d in sk.iterdir() if (d / "SKILL.md").exists())
+        return f"스킬이 없다: {name}. 있는 스킬: {', '.join(have)}"
+    return f.read_text(encoding="utf-8")
 
 
 @mcp.tool()

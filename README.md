@@ -13,6 +13,7 @@ series\
   mudae-dwi-hf\           무대 뒤(지금 작품). README.md 부터
   _legacy\                옛 ComfyUI 판 글 자료(참고만)
 tools\                    도구(아래 표)
+skills\                   이미지 스튜디오 스킬(SKILL.md 6개 + 웹툰 템플릿). 작업 노하우의 정본
 mcp\                      작업실 MCP 서버(agent app·Qwen 에서 쓰기, mcp\README.md)
 vast\                     회사 vast.ai GPU 의 ComfyUI(Qwen Image 2.1)로 컷 그리기·세로 워크플로우(vast\README.md)
 requirements.txt          파이썬 패키지(정확한 버전)
