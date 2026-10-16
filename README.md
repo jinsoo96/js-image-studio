@@ -47,6 +47,8 @@ episodes\epNNN\
 ```
 
 ## 한 화 만드는 순서
+**한 번에(새 화의 기본, 작품을 가리지 않음)**: 콘티(`make_storyboard.py`·`build_panels.py`)를 쓴 뒤
+`.venv\Scripts\python tools\make_episode.py series\<작품>-hf <회차>` 한 줄. 콘티 준비 → 에셋 점검(처음 나오는 장소·인물은 vast 로 시안을 만들고 멈춤, 고른 뒤 `--accept-new`) → vast 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기. agent app·Qwen 에서는 MCP `make_episode`. 아래는 힉스필드로 손으로 할 때의 단계.
 ```powershell
 $py = "D:\webtoon-studio\.venv\Scripts\python.exe"; $env:PYTHONUTF8 = 1; $env:PYTHONIOENCODING = "utf-8"
 $ep = "series\d-plus-18-hf\episodes\ep003"

@@ -14,6 +14,7 @@
 |---|---|
 | `comfy_client.py` | 접속(주소·토큰을 vast API 로 매번 읽음, 인스턴스를 다시 만들어도 됨) · 모델·워크플로우 목록 · 모델 받기 · 큐에 넣고 결과 받기 |
 | `sheet_refs.py` | 캐릭터 시트에서 Qwen 용 참고 그림 자르기 → `series\<작품>\assets\vast_refs\`(`<id>_bust.png` 무표정 머리가 기본), 표정 시트 12칸 `<id>_expr_01..12.png` + 칸 이름 `<id>_expr.json`(`--expr` 용) |
+| `new_assets.py` | 새 장소·새 인물 시트 시안(`assets\_candidates\`, 고른 뒤 `--accept`). 장소는 남는 사람 지우기까지. 프롬프트는 작품의 `prompts\loc_*`·`sheet_*` |
 | `make_assets.py` | 인물 에셋 늘리기(Qwen 편집. 큐에 한꺼번에 넣고 768 이면 장당 약 3.5초, 한 장씩 1024 면 12초): 회색 기본복 베이스 몸 `<id>_base.png`, 시트에 없는 센 표정 12가지 `<id>_xp_01..12.png`(오열·이 악물고 울기·고함·경멸·경악·씁쓸한 웃음 등, `<id>_expr.json` 의 extra). 맨몸은 만들지 않는다 |
 | `comfy_panel.py` | 컷 그리기: `panels.json` → `episodes\<회차>\panels_hf_vast\`(힉스필드 `panels_hf\` 는 안 건드림) |
 | `make_workflow.py` | 서버 화면에서 손으로 돌리는 세로 워크플로우를 만들어 저장 |

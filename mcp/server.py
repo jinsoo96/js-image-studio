@@ -582,6 +582,27 @@ VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); 
 
 
 @mcp.tool()
+def make_episode(series: str, episode: str, accept_new: bool = False, until: str = "export", check: bool = True) -> str:
+    """한 화를 끝까지 한 번에(어느 작품이든, 크레딧 0): 콘티 준비 → 에셋 점검 → vast 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기.
+    콘티(make_storyboard.py·build_panels.py)는 먼저 써 둔다(new_episode 로 틀을 열고 이야기대로 고침).
+    이 화에 처음 나오는 장소·인물이 있으면 vast 로 시안을 만들어 assets/_candidates/ 에 두고 멈춘다(job 이 '실패'로 끝나고 로그에 '확인 필요').
+    그때 사용자에게 시안 경로를 보여 주고, 고르면 accept_new=True 로 다시 부른다. 본편 그림(panels_hf)이 이미 있는 컷은 건드리지 않는다.
+    until: assets · draw · compose · export. 끝나면 job_status 로그의 '사람 눈으로 확인할 컷'을 사용자에게 알린다."""
+    ep = _episode(series, episode)
+    if until not in ("assets", "draw", "compose", "export"):
+        return "until 은 assets · draw · compose · export"
+    if not (ep / "make_storyboard.py").exists() or not (ep / "build_panels.py").exists():
+        return "콘티 파일이 없다. new_episode 로 틀을 열고 이야기대로 make_storyboard.py·build_panels.py 를 고친 뒤 부른다"
+    if _running_job(ep):
+        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    cmd = [PY, str(TOOLS / "make_episode.py"), str(_series(series)), ep.name, "--until", until]
+    cmd += (["--accept-new"] if accept_new else []) + ([] if check else ["--no-check"])
+    job = _start_job("make_episode", ep, [{"label": f"한 화 만들기({ep.name}, ~{until})", "cmd": cmd}])
+    return (f"작업 시작 {job}: {ep.name}. 새 컷 수에 따라 컷당 약 1분(연출 확인 포함) + 합성 3분, 크레딧 0. "
+            f"job_status('{job}', tail_lines=60) 로 본다(새 에셋이 필요하면 '확인 필요'로 멈춘다).")
+
+
+@mcp.tool()
 def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = True, expr: bool = True, fix: bool = True, check: bool = True) -> str:
     """vast 컷으로 회차 하나를 1·2화처럼 엮는다(크레딧 0): 본편은 그대로 두고 <회차>_vast 폴더(콘티·대사·재사용 컷은 본편 그대로)를 만들어
     vast 그림이 없는 컷을 그리고 → 그 회차의 새 컷 자리에 vast 그림을 넣고 → 말풍선 합성·PDF·기계 점검까지. redraw=True 면 새 컷을 전부 다시 그린다.

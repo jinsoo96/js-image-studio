@@ -148,7 +148,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     sp = series / "prompts" / "style.txt"
     style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
     if not n:  # 사람 없는 컷: 그림체 글의 눈·머리·얼굴·몸 묘사가 사람을 불러냈다(p073 호텔 문 인서트에 여자 둘) → 선·색·빛 문장만
-        style = " ".join(s for s in re.split(r"(?<=\.)\s+", style) if not re.search(r"eye|hair|face|blush|chest|adult|lash|chibi|skin", s, re.I))
+        style = " ".join(s for s in re.split(r"(?<=\.)\s+", style) if not re.search(r"^(Eyes|Hair)\b|face|blush|chest|adult|lash|chibi", s, re.I))
     extra = series / "prompts" / "rules_extra.txt"
     count = (f"Exactly {n} {'person' if n == 1 else 'people'} in the panel"
              + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
