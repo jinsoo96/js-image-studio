@@ -1,6 +1,6 @@
 # 작업실 MCP 서버(agent app·Qwen 에서 쓰기)
 
-`server.py` 는 작업실 기능을 MCP 도구 24개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
+`server.py` 는 작업실 기능을 MCP 도구 29개로 묶은 stdio 서버다. agent app(agent platform 데스크톱) 설정의 로컬 MCP 로 붙이면, agent platform 서버의 에이전트(사내 vLLM Qwen 등)가 이 PC 의 작업실을 다룬다(로컬 MCP → agent app → agent platform).
 
 ## 도구
 | 도구 | 하는 일 | 크레딧 |
@@ -28,7 +28,7 @@
      "command": "D:/webtoon-studio/.venv/Scripts/python.exe", "args": ["D:/webtoon-studio/mcp/server.py"],
      "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}, "enabled": true}]
    ```
-3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 24개)인지 본다. server.py 를 고친 뒤엔 agent app 를 다시 켜야 새 도구가 보인다.
+3. agent app 를 켜고 설정 > MCP 에서 webtoon-studio 가 연결(도구 29개)인지 본다. server.py 를 고친 뒤엔 agent app 를 다시 켜야 새 도구가 보인다.
 4. 새 채팅 → 새 에이전트: 이름 "웹툰 작업실 (Qwen)", AI 제공사 vLLM(사내), 모델 `qwen3.8-27b`, 세부설정의 시스템 프롬프트에 `AGENT_PROMPT.md` 내용. 도구 노출은 기본(hierarchy)으로도 도구를 잘 찾았다.
    지금 있는 에이전트: agent-server 계정 (redacted)(사용자 번호 49 "김진수", 관리자 권한이 붙어 있을 뿐 본인 계정), 워크플로우 `wf_1792023050405_k5kq9b2`. 프롬프트를 바꾸면 `D:\dex-gaps\tools\xgen_agent_prompt.py set <id> AGENT_PROMPT.md` 로 다시 저장한다.
 
@@ -63,3 +63,8 @@
 - 작업실 도구는 워크플로우 안에 저장되지 않는다. 대화할 때 이 PC 의 agent app 가 로컬 MCP 로 붙여 준다. 그래서 그림·합성은 이 PC 에서 agent app 가 켜져 있을 때만 된다.
 - 캔버스의 "MCP Tool Loader" 노드는 서버에 떠 있는 MCP 세션을 고르는 노드인데 agent-server 세션 목록(`/api/mcp/sessions`)이 비어 있고, 팀 방향도 서버 호스팅 MCP 를 없애고 로컬 MCP → agent app → agent platform 이다. 로컬 도구를 노드로 박은 고정 파이프라인은 지금은 못 만든다.
 - 나눌 수는 있다: "Workflow Tool" 노드로 다른 저장 워크플로우(예: 콘티 에이전트, 작화·검수 에이전트)를 도구로 부르는 관리자-작업자 구성.
+
+## agent app 시험에서 고친 것(2026-10-16)
+- 그림은 2분 만에 다 그려졌는데, 에이전트가 job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려 결과를 보고하지 못했다 → `job_wait`(최대 25초씩 기다림) 추가, job_status 에 걸린 시간·끝난 컷 수·사람 눈으로 확인할 컷. 고친 뒤 같은 요청이 끝까지 보고됐다.
+- 에이전트가 회차를 "1화", 컷을 "30" 으로 불렀다 → 둘 다 받아 준다(ep001, p030).
+- agent app 의 Qwen 은 한 번에 약 8천 토큰까지 쓴다. 한 화 콘티(약 16KB)·컷 설명(약 22KB)은 write_file 한 번에 못 담는다 → `start_file`·`append_file`·`edit_file`·`check_file` 로 나눠 쓰고 고친다.

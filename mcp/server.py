@@ -56,6 +56,8 @@ def _series(name: str) -> Path:
 
 
 def _episode(series: str, episode: str) -> Path:
+    m = re.fullmatch(r"\s*(\d+)\s*화\s*", episode or "")  # "1화" 도 받는다(agent app 시험에서 에이전트가 이렇게 불렀다)
+    episode = f"ep{int(m.group(1)):03d}" if m else episode
     if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode.strip()):
         raise ValueError("회차 이름은 ep001, ep002_v2 같은 꼴이다(vast 판 회차는 뒤에 _vast)")
     p = _series(series) / "episodes" / episode.strip()
@@ -115,7 +117,8 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
 
 
 def _ids(text: str) -> list:
-    return [x for x in re.split(r"[,\s]+", text or "") if x]
+    """컷 번호 목록. "30" 처럼 숫자만 주면 p030 으로 읽는다(agent app 시험에서 에이전트가 숫자만 넣었다)."""
+    return [f"p{int(x):03d}" if x.isdigit() else x for x in re.split(r"[,\s]+", text or "") if x]
 
 
 # ── 읽기 도구 ─────────────────────────────────────────────────
@@ -362,6 +365,99 @@ def write_file(path: str, content: str) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"썼다 {p.relative_to(ROOT)} ({len(content)}자){note}"
+
+
+# 한 번에 약 8천 토큰까지만 쓰는 모델(agent app 의 Qwen)도 한 화 콘티(약 16KB)·컷 설명(약 22KB)을 쓸 수 있게:
+# start_file → append_file 여러 번 → check_file, 고칠 땐 edit_file. 문법 검사는 다 쓴 뒤 check_file 에서(조각마다는 못 함). 2026-10-16
+def _guard(path: str, content: str):
+    p = _inside(path)
+    if not _writable(p):
+        raise ValueError(f"여기는 쓸 수 없다: {path}")
+    if "—" in content:
+        raise ValueError("em dash(—) 는 쓰지 않는다(작업실 규칙). 쉼표·마침표로 바꿔 다시")
+    return p
+
+
+def _backup(p: Path) -> str:
+    if not p.exists():
+        return ""
+    bk = BACKUPS / time.strftime("%Y%m%d-%H%M%S") / p.relative_to(ROOT.resolve())
+    bk.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(p, bk)
+    return f" (원본 백업 {bk.relative_to(ROOT)})"
+
+
+@mcp.tool()
+def start_file(path: str, content: str) -> str:
+    """긴 파일을 나눠 쓰기 시작한다: 첫 조각으로 새로 쓴다(있으면 백업 뒤 덮어씀). 이어서 append_file 로 나머지 조각을 붙이고 마지막에 check_file.
+    한 화 콘티·컷 설명처럼 한 번에 다 못 쓰는 파일에 쓴다. 조각은 4천 자 안팎으로."""
+    try:
+        p = _guard(path, content)
+    except ValueError as e:
+        return str(e)
+    note = _backup(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    return f"시작 {p.relative_to(ROOT)} ({len(content)}자){note}. append_file 로 이어 쓰고 끝나면 check_file"
+
+
+@mcp.tool()
+def append_file(path: str, content: str) -> str:
+    """start_file 로 시작한 파일 끝에 조각을 붙인다(줄바꿈은 content 에 넣는다). 지금까지 길이를 돌려준다."""
+    try:
+        p = _guard(path, content)
+    except ValueError as e:
+        return str(e)
+    if not p.exists():
+        return "파일이 없다. start_file 로 먼저 시작한다"
+    with p.open("a", encoding="utf-8") as f:
+        f.write(content)
+    return f"붙였다 {p.relative_to(ROOT)} (지금 {p.stat().st_size}바이트)"
+
+
+@mcp.tool()
+def edit_file(path: str, old: str, new: str) -> str:
+    """파일에서 old 글을 new 로 바꾼다(old 는 파일에 정확히 한 번 있어야 한다). 컷 하나·대사 한 줄처럼 일부만 고칠 때. 파이썬이면 바꾼 뒤 문법 검사."""
+    try:
+        p = _guard(path, new)
+    except ValueError as e:
+        return str(e)
+    if not p.exists():
+        return "파일이 없다"
+    t = p.read_text(encoding="utf-8")
+    n = t.count(old)
+    if n != 1:
+        return f"바꿀 글이 {n}번 나온다(정확히 한 번이어야 한다). read_file 로 확인하고 더 길게 잡는다"
+    t2 = t.replace(old, new, 1)
+    if p.suffix == ".py":
+        try:
+            compile(t2, str(p), "exec")
+        except SyntaxError as e:
+            return f"바꾸면 파이썬 문법 오류라 안 바꿨다: {e.msg} (줄 {e.lineno})"
+    note = _backup(p)
+    p.write_text(t2, encoding="utf-8")
+    return f"고쳤다 {p.relative_to(ROOT)}{note}"
+
+
+@mcp.tool()
+def check_file(path: str) -> str:
+    """나눠 쓴 파일을 검사한다: .py 는 파이썬 문법, .json 은 JSON. 오류면 줄 번호와 그 근처를 보여 준다(edit_file 로 고친다)."""
+    p = _inside(path)
+    if not p.exists():
+        return "파일이 없다"
+    t = p.read_text(encoding="utf-8")
+    try:
+        if p.suffix == ".py":
+            compile(t, str(p), "exec")
+        elif p.suffix == ".json":
+            json.loads(t)
+    except SyntaxError as e:
+        ls = t.splitlines()
+        near = "\n".join(f"{i + 1}: {ls[i]}" for i in range(max(0, (e.lineno or 1) - 3), min(len(ls), (e.lineno or 1) + 2)))
+        return f"파이썬 문법 오류: {e.msg} (줄 {e.lineno})\n{near}"
+    except ValueError as e:
+        return f"JSON 오류: {e}"
+    return f"문법 통과 {p.relative_to(ROOT)} ({len(t)}자, {t.count(chr(10)) + 1}줄)"
 
 
 @mcp.tool()
@@ -684,8 +780,40 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
     if spec is None:
         return f"작업이 없다: {job_id}"
     log = JOBS / f"{job_id}.log"
-    tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-tail_lines:]) if log.exists() else "(로그 없음)"
-    return f"{job_id} {spec.get('kind')} | {json.dumps(st or {'state': 'starting'}, ensure_ascii=False)}\n--- 로그 끝 ---\n{tail}"
+    lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
+    tail = "\n".join(lines[-tail_lines:]) if lines else "(로그 없음)"
+    done = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
+    head = f"{job_id} {spec.get('kind')} | {(st or {}).get('state', 'starting')}"
+    if st and st.get("started"):
+        try:
+            fmt = "%Y-%m-%d %H:%M:%S"
+            end = time.mktime(time.strptime(st["finished"], fmt)) if st.get("finished") else time.time()
+            el = end - time.mktime(time.strptime(st["started"], fmt))
+            head += f" | {'걸린 시간' if st.get('finished') else '경과'} {int(el // 60)}분 {int(el % 60)}초"
+        except ValueError:
+            pass
+    if done:
+        head += f" | 끝난 컷 {done}"
+    look = [ln.strip() for ln in lines if "사람 눈으로 확인" in ln]
+    if look:
+        head += "\n사람 눈으로 확인할 컷: " + " / ".join(look)
+    return f"{head}\n{json.dumps(st or {'state': 'starting'}, ensure_ascii=False)}\n--- 로그 끝 ---\n{tail}"
+
+
+@mcp.tool()
+def job_wait(job_id: str, seconds: int = 25, tail_lines: int = 30) -> str:
+    """작업이 끝날 때까지 최대 seconds 초(25초까지) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
+    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 6번까지(약 2분 반). 그래도 running 이면 사용자에게 작업 번호·끝난 컷 수·예상 시간을 알리고 답을 끝낸다
+    (사용자가 '다 됐어?' 하면 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다. sleep 같은 다른 도구로 기다리지 않는다.
+    (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
+    if not re.fullmatch(r"[\w-]+", job_id):
+        return "job_id 꼴이 아니다"
+    end = time.time() + max(1, min(int(seconds), 25))
+    while time.time() < end:
+        if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "running"):
+            break
+        time.sleep(2)
+    return job_status(job_id, tail_lines)
 
 
 if __name__ == "__main__":
