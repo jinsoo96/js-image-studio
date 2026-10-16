@@ -1,0 +1,1011 @@
+{
+ "id": "676c8b43-f62a-4061-b74d-8e7a3161a2a2",
+ "revision": 0,
+ "last_node_id": 17,
+ "last_link_id": 22,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "MarkdownNote",
+   "pos": [
+    -470,
+    0
+   ],
+   "size": [
+    420,
+    760
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "# 시안: 새 장소 (Qwen Image 2.1, 40스텝, 16:9)\n새 화에 처음 나오는 장소을 만든다. 사용자가 보고 고르면 작품 assets 에 넣는다.\n장소 글은 작품 prompts/loc_<이름>.txt. 얼굴·눈 같은 사람 문장은 빼고 '앞·가운데는 비어 있음'을 붙인다(사람을 그려 넣는다). 그래도 사람이 남으면 5번 2단 묶음이 지운다.\n작업실에서는 `vast/new_assets.py <작품> location <이름>` 이 같은 구성으로 돌리고, tools/make_episode.py 가 새 장소을 만나면 이걸 부르고 멈춘다."
+   ],
+   "title": "사용법"
+  },
+  {
+   "id": 2,
+   "type": "UNETLoader",
+   "pos": [
+    20,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_bf16.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_bf16.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "CLIPLoader",
+   "pos": [
+    20,
+    160
+   ],
+   "size": [
+    340,
+    106
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      3,
+      13
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen3vl_8b_int8_convrot.safetensors",
+    "qwen_image",
+    "default"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "VAELoader",
+   "pos": [
+    20,
+    295
+   ],
+   "size": [
+    340,
+    58
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      4,
+      10,
+      14,
+      21
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "directory": "vae"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_vae_bf16.safetensors"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    380
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 4,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      2,
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly",
+    "models": [
+     {
+      "name": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "directory": "loras"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+    1.0
+   ],
+   "title": "터보 LoRA (켜면 steps 8)"
+  },
+  {
+   "id": 6,
+   "type": "QwenImage21Cache",
+   "pos": [
+    20,
+    490
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21Cache"
+   },
+   "widgets_values": [
+    "auto",
+    "default"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "TextEncodeQwenImage21",
+   "pos": [
+    440,
+    50
+   ],
+   "size": [
+    520,
+    760
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 3
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 4
+    },
+    {
+     "name": "images.image_1",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "images.image_2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "images.image_3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "images.image_4",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      7
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "TextEncodeQwenImage21"
+   },
+   "widgets_values": [
+    "ART STYLE (identical in every image): high-quality Japanese anime key-visual style adapted for a Korean webtoon. Thin, clean, dark lineart with delicate hand-drawn weight variation. Soft cel shading with smooth gradient shadows and a gentle bloom; warm golden key light from one side with a soft rim light on hair and shoulders; airy, slightly muted colors with natural skin tones; subtle paper grain texture over the whole image. IMAGE: background art for a Korean webtoon, an empty location with NO people, wide establishing view, eye level, detailed but clean, same soft anime illustration style and warm light as described, no text, no signs with readable letters, no logos. LOCATION: a Gangnam back street at night seen from across the road: the warm glowing window of a wine bistro, string lights, wet pavement reflecting light, parked bicycles.\n\nNobody in the foreground or middle ground: every table, seat and doorway near the camera is empty. At most tiny, blurred background figures, and only if the location text asks for them.",
+    "",
+    1024
+   ],
+   "title": "컷 설명 (<imageN> 으로 참고 그림 부르기)"
+  },
+  {
+   "id": 8,
+   "type": "EmptyLatentImage",
+   "pos": [
+    1040,
+    50
+   ],
+   "size": [
+    360,
+    106
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "EmptyLatentImage"
+   },
+   "widgets_values": [
+    1920,
+    1088,
+    1
+   ],
+   "title": "캔버스 16:9 (1920x1088)"
+  },
+  {
+   "id": 9,
+   "type": "KSampler",
+   "pos": [
+    1040,
+    190
+   ],
+   "size": [
+    360,
+    262
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 5
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 6
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 7
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "randomize",
+    40,
+    1,
+    "euler",
+    "simple",
+    1
+   ]
+  },
+  {
+   "id": 10,
+   "type": "VAEDecode",
+   "pos": [
+    1040,
+    490
+   ],
+   "size": [
+    360,
+    46
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 9
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      11,
+      15
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 11,
+   "type": "SaveImage",
+   "pos": [
+    1440,
+    0
+   ],
+   "size": [
+    560,
+    830
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 11
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "webtoon_studio/new_location"
+   ]
+  },
+  {
+   "id": 12,
+   "type": "MarkdownNote",
+   "pos": [
+    2060,
+    40
+   ],
+   "size": [
+    560,
+    150
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "**2단 다듬기**: 1단 그림이 그대로 `<image1>` 로 들어온다. 지시는 짧게, 고칠 것만.\n- 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the space with the background. Keep everything else the same.`\n- 연기: `Make her cry: tears streaming down both cheeks, biting her lower lip. Keep everything else the same.`\n2단이 필요 없으면 이 묶음 노드를 우회(Ctrl+B)."
+   ],
+   "title": "2단 쓰는 법"
+  },
+  {
+   "id": 13,
+   "type": "QwenImage21Cache",
+   "pos": [
+    2060,
+    210
+   ],
+   "size": [
+    560,
+    82
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      16
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21Cache"
+   },
+   "widgets_values": [
+    "auto",
+    "default"
+   ],
+   "title": "2단 캐시"
+  },
+  {
+   "id": 14,
+   "type": "TextEncodeQwenImage21",
+   "pos": [
+    2060,
+    310
+   ],
+   "size": [
+    560,
+    330
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 13
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 14
+    },
+    {
+     "name": "images.image_1",
+     "type": "IMAGE",
+     "link": 15
+    },
+    {
+     "name": "images.image_2",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      17
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      18
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      19
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "TextEncodeQwenImage21"
+   },
+   "widgets_values": [
+    "Remove every person from <image1>. Fill the empty space with the matching background. Keep everything else in <image1> exactly the same: the place, lighting and framing.",
+    "",
+    1024
+   ],
+   "title": "다듬기 지시"
+  },
+  {
+   "id": 15,
+   "type": "KSampler",
+   "pos": [
+    2060,
+    560
+   ],
+   "size": [
+    560,
+    262
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 16
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 17
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 18
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 19
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      20
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    1,
+    "randomize",
+    40,
+    1,
+    "euler",
+    "simple",
+    1
+   ],
+   "title": "2단 KSampler (캔버스 = 1단 그림 크기)"
+  },
+  {
+   "id": 16,
+   "type": "VAEDecode",
+   "pos": [
+    2660,
+    40
+   ],
+   "size": [
+    600,
+    46
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 20
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 21
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      22
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 17,
+   "type": "SaveImage",
+   "pos": [
+    2660,
+    110
+   ],
+   "size": [
+    600,
+    700
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 22
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "webtoon_studio/new_location_fixed"
+   ],
+   "title": "2단 결과"
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   5,
+   0,
+   6,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   3,
+   0,
+   7,
+   0,
+   "CLIP"
+  ],
+  [
+   4,
+   4,
+   0,
+   7,
+   1,
+   "VAE"
+  ],
+  [
+   5,
+   6,
+   0,
+   9,
+   0,
+   "MODEL"
+  ],
+  [
+   6,
+   7,
+   0,
+   9,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   7,
+   7,
+   1,
+   9,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   8,
+   8,
+   0,
+   9,
+   3,
+   "LATENT"
+  ],
+  [
+   9,
+   9,
+   0,
+   10,
+   0,
+   "LATENT"
+  ],
+  [
+   10,
+   4,
+   0,
+   10,
+   1,
+   "VAE"
+  ],
+  [
+   11,
+   10,
+   0,
+   11,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   5,
+   0,
+   13,
+   0,
+   "MODEL"
+  ],
+  [
+   13,
+   3,
+   0,
+   14,
+   0,
+   "CLIP"
+  ],
+  [
+   14,
+   4,
+   0,
+   14,
+   1,
+   "VAE"
+  ],
+  [
+   15,
+   10,
+   0,
+   14,
+   2,
+   "IMAGE"
+  ],
+  [
+   16,
+   13,
+   0,
+   15,
+   0,
+   "MODEL"
+  ],
+  [
+   17,
+   14,
+   0,
+   15,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   18,
+   14,
+   1,
+   15,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   19,
+   14,
+   2,
+   15,
+   3,
+   "LATENT"
+  ],
+  [
+   20,
+   15,
+   0,
+   16,
+   0,
+   "LATENT"
+  ],
+  [
+   21,
+   4,
+   0,
+   16,
+   1,
+   "VAE"
+  ],
+  [
+   22,
+   16,
+   0,
+   17,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1. 모델 (Qwen Image 2.1)",
+   "bounding": [
+    0,
+    0,
+    380,
+    590
+   ],
+   "color": "#3f789e",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2. 참고 그림 (넣은 순서 = <image1>, <image2> …)",
+   "bounding": [
+    0,
+    620,
+    380,
+    370
+   ],
+   "color": "#8a6a3f",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "3. 컷 설명",
+   "bounding": [
+    420,
+    0,
+    560,
+    830
+   ],
+   "color": "#3f8a5a",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 4,
+   "title": "4. 세로 캔버스 · 그리기",
+   "bounding": [
+    1020,
+    0,
+    400,
+    830
+   ],
+   "color": "#7a3f8a",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 5,
+   "title": "5. 2단 다듬기 (1단 그림 = <image1>, 지시대로 편집)",
+   "bounding": [
+    2040,
+    0,
+    1240,
+    830
+   ],
+   "color": "#8a3f3f",
+   "font_size": 22,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.75,
+   "offset": [
+    40,
+    40
+   ]
+  }
+ },
+ "version": 0.4
+}

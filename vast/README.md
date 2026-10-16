@@ -40,6 +40,16 @@
 - 기본은 세로 2:3(1184x1760), 40스텝, cfg 1, euler/simple. "터보 LoRA" 노드를 켜고(Ctrl+B) steps 8 이면 시안.
 - 다시 만들기: `make_workflow.py --prompt-file <컷.txt> --ref <그림> ... --out vast\webtoon_vertical_qwen21.json --save --force`
 
+저장 워크플로우 한 벌(스크립트가 큐에 넣는 그래프와 같은 구성을 화면에서 열어 고칠 수 있게 펼친 것, 예시 그림은 D+18 우빈):
+| 종류 | 워크플로우 | 스크립트로는 |
+|---|---|---|
+| 생성 | `webtoon_vertical_qwen21` · `webtoon_panel_2stage_qwen21`(그리기 → 편집 다듬기) | `comfy_panel.py` |
+| 편집 | `webtoon_edit_qwen21`(남는 사람 지우기 · 연기 · 옷) | `refine.py`(--fix · --check) |
+| 에셋 | `webtoon_asset_expression_qwen21`(표정 은행) · `webtoon_asset_base_qwen21`(기본복) | `make_assets.py` |
+| 시안 | `webtoon_candidate_location_qwen21`(장소, 2단 사람 지우기) · `webtoon_candidate_sheet_qwen21`(인물 시트) | `new_assets.py` |
+
+편집·에셋·시안 다섯 개는 `make_workflow.py library [--force]` 가 한꺼번에 만들어 저장한다(사본도 `vast\` 에). 프롬프트는 그 스크립트의 것(make_assets 의 STRONG·BASE, new_assets 의 candidate_prompt)을 그대로 가져온다.
+
 ## 2단 다듬기(2026-10-16)
 1단만으로는 남는 사람(같은 인물 둘, 낯선 사람, 뒤쪽 작은 사람)이 남는 컷이 있었다. `--fix`(MCP `vast_draw`·`vast_episode` 는 기본으로 켬)면 그린 직후:
 1. 그림을 보는 사내 Qwen(qwen3.8-27b)에게 "컷 설명에 없는 사람"을 옷·자리로 한 줄씩 묻는다(없으면 끝, 멀쩡한 컷은 GPU 를 안 씀)

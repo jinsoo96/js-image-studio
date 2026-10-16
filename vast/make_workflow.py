@@ -159,7 +159,118 @@ def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=N
     return g.dump()
 
 
+def build_edit(prompt, image_name, guide, steps=8, seed=0, prefix="webtoon_studio/edit", title="고칠 그림"):
+    """편집 워크플로우(화면용): <image1> 그림을 지시대로 고친다. 캔버스는 그 그림 크기(인코더가 내주는 잠재), 터보 8스텝.
+    refine.py(남는 사람 지우기·연출 손보기)와 make_assets.py(표정·기본복)가 큐에 넣는 그래프와 같은 구성(comfy_panel.graph edit=True)."""
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 640), [guide], title="사용법")
+    g.group("1. 모델 (Qwen Image 2.1 · 터보)", 0, 0, 380, 590, "#3f789e")
+    unet = g.node("UNETLoader", (20, 50), (340, 82), [UNET, "default"], outputs=[("MODEL", "MODEL")],
+                  models=[{"name": UNET, "url": f"{HF}/diffusion_models/{UNET}", "directory": "diffusion_models"}])
+    clip = g.node("CLIPLoader", (20, 160), (340, 106), [CLIP, "qwen_image", "default"], outputs=[("CLIP", "CLIP")],
+                  models=[{"name": CLIP, "url": f"{HF}/text_encoders/{CLIP}", "directory": "text_encoders"}])
+    vae = g.node("VAELoader", (20, 295), (340, 58), [VAE], outputs=[("VAE", "VAE")],
+                 models=[{"name": VAE, "url": f"{HF}/vae/{VAE}", "directory": "vae"}])
+    lora = g.node("LoraLoaderModelOnly", (20, 380), (340, 82), [TURBO, 1.0], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
+                  title="터보 LoRA (steps 8)", models=[{"name": TURBO, "url": f"{HF}/loras/{TURBO}", "directory": "loras"}])
+    cache = g.node("QwenImage21Cache", (20, 490), (340, 82), ["auto", "default"], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")])
+    g.link(unet, 0, lora, "model")
+    g.link(lora, 0, cache, "model")
+    g.group("2. 고칠 그림 = <image1>", 0, 620, 380, 380, "#8a6a3f")
+    ld = g.node("LoadImage", (20, 670), (340, 310), [image_name, "image"], outputs=[("IMAGE", "IMAGE"), ("MASK", "MASK")], title=title)
+    g.group("3. 고칠 것 (짧게, 고칠 것만)", 420, 0, 560, 830, "#3f8a5a")
+    enc = g.node("TextEncodeQwenImage21", (440, 50), (520, 500), [prompt, "", 1024],
+                 inputs=[("clip", "CLIP"), ("vae", "VAE"), ("images.image_1", "IMAGE"), ("images.image_2", "IMAGE")],
+                 outputs=[("CONDITIONING", "CONDITIONING"), ("CONDITIONING", "CONDITIONING"), ("LATENT", "LATENT")], title="지시")
+    g.link(clip, 0, enc, "clip")
+    g.link(vae, 0, enc, "vae")
+    g.link(ld, 0, enc, "images.image_1")
+    g.group("4. 그리기 (캔버스 = <image1> 크기)", 1020, 0, 400, 830, "#7a3f8a")
+    ks = g.node("KSampler", (1040, 50), (360, 262), [seed, "fixed" if seed else "randomize", steps, 1, "euler", "simple", 1],
+                inputs=[("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
+                outputs=[("LATENT", "LATENT")])
+    g.link(cache, 0, ks, "model")
+    g.link(enc, 0, ks, "positive")
+    g.link(enc, 1, ks, "negative")
+    g.link(enc, 2, ks, "latent_image")
+    dec = g.node("VAEDecode", (1040, 350), (360, 46), inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
+    g.link(ks, 0, dec, "samples")
+    g.link(vae, 0, dec, "vae")
+    sv = g.node("SaveImage", (1440, 0), (560, 830), [prefix], inputs=[("images", "IMAGE")])
+    g.link(dec, 0, sv, "images")
+    return g.dump()
+
+
+EDIT_GUIDE = """# 편집: 그린 컷 손보기 (Qwen Image 2.1)
+고칠 그림을 `<image1>` 에 넣고, 지시는 짧게 고칠 것만 쓴다. 긴 지시는 엉뚱한 곳을 바꾼다(LESSONS 16).
+- 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the empty space with the matching background. Keep everything else in <image1> exactly the same.`
+- 연기: `Make him cry: tears streaming down both cheeks, biting his lower lip. Keep everything else the same.`
+- 옷: `Change only his jacket to a navy padded jacket. Keep everything else the same.`
+작업실에서는 vast/refine.py 가 사내 Qwen 으로 남는 사람·어긋난 연출을 찾아 이 지시를 자동으로 만든다(--fix · --check). 결과는 output/webtoon_studio/edit"""
+
+ASSET_GUIDE = """# 에셋: 표정 은행 · 기본복 (Qwen Image 2.1 편집)
+인물 얼굴(또는 정면 전신)을 `<image1>` 에 넣고 바꿀 것 하나만 바꾼다. 얼굴·머리·그림체는 그대로.
+- 표정 은행: 기본 지시 그대로 표정 문장만 바꾼다. 센 표정 12가지 목록은 vast/make_assets.py 의 STRONG.
+- 기본복(옷 갈아입히기 출발점): 정면 전신을 넣고 아래 지시.
+`{base}`
+작업실에서는 `vast/make_assets.py <작품> <인물> expr|base` 가 한꺼번에 돌린다. 결과는 output/webtoon_studio/asset"""
+
+CAND_GUIDE = """# 시안: 새 {what} (Qwen Image 2.1, 40스텝, 16:9)
+새 화에 처음 나오는 {what}을 만든다. 사용자가 보고 고르면 작품 assets 에 넣는다.
+{how}
+작업실에서는 `vast/new_assets.py <작품> {kind} <이름>` 이 같은 구성으로 돌리고, tools/make_episode.py 가 새 {what}을 만나면 이걸 부르고 멈춘다."""
+
+
+def library(force=False):
+    """저장 워크플로우 한 벌(생성 · 편집 · 에셋 · 시안)을 서버에 저장한다. 그림은 예시 D+18 우빈 밤거리. 있는 이름은 force 없이는 덮지 않는다."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from make_assets import BASE, STRONG, expr_prompt
+    from new_assets import SHEET_HEAD, candidate_prompt
+    c, cache = Comfy(), {}
+    s = ROOT / "series" / "d-plus-18-hf"
+    vr = s / "assets" / "vast_refs"
+    face, front = upload(c, vr / "woobin_bust.png", cache), upload(c, vr / "woobin_front.png", cache)
+    panel = upload(c, s / "episodes" / "ep002_v2_vast" / "panels_hf" / "p043.png", cache)  # 편집 예시: 2화 vast 판 밤거리 우빈 클로즈업
+    loc_prompt, _ = candidate_prompt(s, "location", "night_street")
+    sheet_prompt, sheet_refs = candidate_prompt(s, "sheet", "teamlead")
+    sheet_ref = upload(c, sheet_refs[0], cache)
+    remove = ("Remove every person from <image1>. Fill the empty space with the matching background. "
+              "Keep everything else in <image1> exactly the same: the place, lighting and framing.")
+    wfs = {
+        "webtoon_edit_qwen21.json": build_edit("Make him look heartbroken: eyes welling up with tears, trembling pressed lips. Keep everything else in "
+                                               "<image1> exactly the same.", panel, EDIT_GUIDE, title="고칠 그림 <image1>"),
+        "webtoon_asset_expression_qwen21.json": build_edit(expr_prompt(STRONG[1]), face, ASSET_GUIDE.format(base=BASE),
+                                                           prefix="webtoon_studio/asset", title="인물 얼굴 <image1>"),
+        "webtoon_asset_base_qwen21.json": build_edit(BASE, front, ASSET_GUIDE.format(base=BASE), prefix="webtoon_studio/asset",
+                                                     title="인물 정면 전신 <image1>"),
+        "webtoon_candidate_location_qwen21.json": build(loc_prompt, [], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_location",
+                                                        fix_prompt=remove),
+        "webtoon_candidate_sheet_qwen21.json": build(sheet_prompt, [sheet_ref], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_sheet"),
+    }
+    notes = {
+        "webtoon_candidate_location_qwen21.json": CAND_GUIDE.format(what="장소", kind="location", how=(
+            "장소 글은 작품 prompts/loc_<이름>.txt. 얼굴·눈 같은 사람 문장은 빼고 '앞·가운데는 비어 있음'을 붙인다(사람을 그려 넣는다). "
+            "그래도 사람이 남으면 5번 2단 묶음이 지운다.")),
+        "webtoon_candidate_sheet_qwen21.json": CAND_GUIDE.format(what="인물 시트", kind="sheet", how=(
+            "`<image1>` 은 시트 모양·그림체 본보기(다른 사람)다. 글 맨 앞에 아래 머리말을 두고, 나이를 못 박는다(중년이 젊게 나왔다).\n`"
+            + SHEET_HEAD.strip() + "`")),
+    }
+    have = c.req("/api/userdata?dir=workflows")
+    for name, wf in wfs.items():
+        if name in notes:  # 생성 워크플로우의 사용법 칸을 시안 설명으로 바꾼다
+            wf["nodes"][0]["widgets_values"] = [notes[name]]
+        if name in have and not force:
+            print("있음(건너뜀)", name)
+            continue
+        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
+        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        print("서버 저장", name, "노드", len(wf["nodes"]))
+    print("지금 목록:", c.req("/api/userdata?dir=workflows"))
+
+
 def main():
+    if sys.argv[1:2] == ["library"]:
+        return library("--force" in sys.argv)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", default="webtoon_vertical_qwen21.json")
     ap.add_argument("--prompt-file", required=True)

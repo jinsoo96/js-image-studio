@@ -1,0 +1,643 @@
+{
+ "id": "1ddeae81-6dc5-4f7b-bce7-799a8857bca4",
+ "revision": 0,
+ "last_node_id": 11,
+ "last_link_id": 12,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "MarkdownNote",
+   "pos": [
+    -470,
+    0
+   ],
+   "size": [
+    420,
+    640
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "# 에셋: 표정 은행 · 기본복 (Qwen Image 2.1 편집)\n인물 얼굴(또는 정면 전신)을 `<image1>` 에 넣고 바꿀 것 하나만 바꾼다. 얼굴·머리·그림체는 그대로.\n- 표정 은행: 기본 지시 그대로 표정 문장만 바꾼다. 센 표정 12가지 목록은 vast/make_assets.py 의 STRONG.\n- 기본복(옷 갈아입히기 출발점): 정면 전신을 넣고 아래 지시.\n`Change only the clothes of the person in <image1>: a plain fitted heather-gray crew-neck short-sleeve t-shirt and plain gray knee-length shorts, barefoot, nothing else, no accessories. Keep exactly the same person, face, hairstyle, hair color, body proportions, height, standing pose, framing, plain background and art style. Neutral face.`\n작업실에서는 `vast/make_assets.py <작품> <인물> expr|base` 가 한꺼번에 돌린다. 결과는 output/webtoon_studio/asset"
+   ],
+   "title": "사용법"
+  },
+  {
+   "id": 2,
+   "type": "UNETLoader",
+   "pos": [
+    20,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_bf16.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_bf16.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "CLIPLoader",
+   "pos": [
+    20,
+    160
+   ],
+   "size": [
+    340,
+    106
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen3vl_8b_int8_convrot.safetensors",
+    "qwen_image",
+    "default"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "VAELoader",
+   "pos": [
+    20,
+    295
+   ],
+   "size": [
+    340,
+    58
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      4,
+      11
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "directory": "vae"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_vae_bf16.safetensors"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    380
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      2
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly",
+    "models": [
+     {
+      "name": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "directory": "loras"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+    1.0
+   ],
+   "title": "터보 LoRA (steps 8)"
+  },
+  {
+   "id": 6,
+   "type": "QwenImage21Cache",
+   "pos": [
+    20,
+    490
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21Cache"
+   },
+   "widgets_values": [
+    "auto",
+    "default"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "LoadImage",
+   "pos": [
+    20,
+    670
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "MASK",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "webtoon_eec340c288a4.png",
+    "image"
+   ],
+   "title": "인물 얼굴 <image1>"
+  },
+  {
+   "id": 8,
+   "type": "TextEncodeQwenImage21",
+   "pos": [
+    440,
+    50
+   ],
+   "size": [
+    520,
+    500
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 3
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 4
+    },
+    {
+     "name": "images.image_1",
+     "type": "IMAGE",
+     "link": 5
+    },
+    {
+     "name": "images.image_2",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      8
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      9
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "TextEncodeQwenImage21"
+   },
+   "widgets_values": [
+    "Change only the facial expression of the person in <image1> to: crying silently: tears running down the cheeks, biting the lower lip, eyebrows twisted up in pain, red wet eyes. Strong, instantly readable Korean webtoon acting: eyebrows, eyelids, eyes, mouth and cheeks all change together; webtoon expression marks are welcome when they fit. Keep exactly the same person, face shape, hairstyle, hair color, outfit, framing, plain background and art style. Keep the face attractive and on-model (no chibi, no gag face).",
+    "",
+    1024
+   ],
+   "title": "지시"
+  },
+  {
+   "id": 9,
+   "type": "KSampler",
+   "pos": [
+    1040,
+    50
+   ],
+   "size": [
+    360,
+    262
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 7
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 8
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      10
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "randomize",
+    8,
+    1,
+    "euler",
+    "simple",
+    1
+   ]
+  },
+  {
+   "id": 10,
+   "type": "VAEDecode",
+   "pos": [
+    1040,
+    350
+   ],
+   "size": [
+    360,
+    46
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 10
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 11,
+   "type": "SaveImage",
+   "pos": [
+    1440,
+    0
+   ],
+   "size": [
+    560,
+    830
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 12
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "webtoon_studio/asset"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   5,
+   0,
+   6,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   3,
+   0,
+   8,
+   0,
+   "CLIP"
+  ],
+  [
+   4,
+   4,
+   0,
+   8,
+   1,
+   "VAE"
+  ],
+  [
+   5,
+   7,
+   0,
+   8,
+   2,
+   "IMAGE"
+  ],
+  [
+   6,
+   6,
+   0,
+   9,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   8,
+   0,
+   9,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   8,
+   8,
+   1,
+   9,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   9,
+   8,
+   2,
+   9,
+   3,
+   "LATENT"
+  ],
+  [
+   10,
+   9,
+   0,
+   10,
+   0,
+   "LATENT"
+  ],
+  [
+   11,
+   4,
+   0,
+   10,
+   1,
+   "VAE"
+  ],
+  [
+   12,
+   10,
+   0,
+   11,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1. 모델 (Qwen Image 2.1 · 터보)",
+   "bounding": [
+    0,
+    0,
+    380,
+    590
+   ],
+   "color": "#3f789e",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2. 고칠 그림 = <image1>",
+   "bounding": [
+    0,
+    620,
+    380,
+    380
+   ],
+   "color": "#8a6a3f",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "3. 고칠 것 (짧게, 고칠 것만)",
+   "bounding": [
+    420,
+    0,
+    560,
+    830
+   ],
+   "color": "#3f8a5a",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 4,
+   "title": "4. 그리기 (캔버스 = <image1> 크기)",
+   "bounding": [
+    1020,
+    0,
+    400,
+    830
+   ],
+   "color": "#7a3f8a",
+   "font_size": 22,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.75,
+   "offset": [
+    40,
+    40
+   ]
+  }
+ },
+ "version": 0.4
+}

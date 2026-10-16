@@ -41,15 +41,15 @@ def style_ref(series: Path, name: str) -> Path:
     raise SystemExit("본보기로 쓸 인물 시트가 하나도 없다")
 
 
-def make(series: Path, kind: str, name: str, seed=None) -> Path:
-    prompt_f, cand, _ = paths(series, kind, name)
+def candidate_prompt(series: Path, kind: str, name: str):
+    """시안 프롬프트와 참고 그림(로컬 경로) 목록. vast/make_workflow.py 의 저장 워크플로우(시안)도 이걸 쓴다."""
+    prompt_f = paths(series, kind, name)[0]
     if not prompt_f.exists():
         raise SystemExit(f"프롬프트가 없다: {prompt_f}({'make_location_prompts.py 의 LOC' if kind == 'location' else 'make_sheet_prompts.py'} 에 한 줄 넣고 돌린다)")
     prompt = prompt_f.read_text(encoding="utf-8").strip()
-    c, cache = Comfy(), {}
     refs = []
     if kind == "sheet":
-        refs = [upload(c, style_ref(series, name), cache)]
+        refs = [style_ref(series, name)]
         # 2026-10-16 시험: 중년 오 팀장이 젊은 미남으로 나왔다 → 나이를 못 박는다
         prompt = SHEET_HEAD + prompt + "\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described."
     else:
@@ -58,6 +58,14 @@ def make(series: Path, kind: str, name: str, seed=None) -> Path:
         # 장소 글 자체에 "뒤쪽 손님들"이 있는 곳(호프집)은 "아무도 없음"과 부딪혀 앞 테이블에 사람을 앉혔다 → 앞·가운데만 비우게
         prompt += ("\n\nNobody in the foreground or middle ground: every table, seat and doorway near the camera is empty. "
                    "At most tiny, blurred background figures, and only if the location text asks for them.")
+    return prompt, refs
+
+
+def make(series: Path, kind: str, name: str, seed=None) -> Path:
+    cand = paths(series, kind, name)[1]
+    prompt, ref_paths = candidate_prompt(series, kind, name)
+    c, cache = Comfy(), {}
+    refs = [upload(c, r, cache) for r in ref_paths]
     # 오래 쓰는 그림이라 터보 없이 40스텝, 16:9
     g = graph(prompt, refs, 1920, 1088, seed if seed is not None else random.randrange(2**48), 40, 1024, turbo=False)
     g["9"]["inputs"]["filename_prefix"] = f"webtoon_studio/new_{kind}"
