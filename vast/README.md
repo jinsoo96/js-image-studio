@@ -17,6 +17,7 @@
 | `new_assets.py` | 새 장소·새 인물 시트 시안(`assets\_candidates\`, 고른 뒤 `--accept`). 장소는 남는 사람 지우기까지. 프롬프트는 작품의 `prompts\loc_*`·`sheet_*` |
 | `make_assets.py` | 인물 에셋 늘리기(Qwen 편집. 큐에 한꺼번에 넣고 768 이면 장당 약 3.5초, 한 장씩 1024 면 12초): 회색 기본복 베이스 몸 `<id>_base.png`, 시트에 없는 센 표정 12가지 `<id>_xp_01..12.png`(오열·이 악물고 울기·고함·경멸·경악·씁쓸한 웃음 등, `<id>_expr.json` 의 extra). 맨몸은 만들지 않는다 |
 | `comfy_panel.py` | 컷 그리기: `panels.json` → `episodes\<회차>\panels_hf_vast\`(힉스필드 `panels_hf\` 는 안 건드림) |
+| `saved_workflow.py` | 서버 저장 워크플로우(생성·편집)를 불러 API 형식으로 바꾸고 입력값만 채움. 그리는 스크립트가 모두 이걸 거친다(`comfy_panel.graph`) |
 | `make_workflow.py` | 서버 화면에서 손으로 돌리는 세로 워크플로우를 만들어 저장 |
 | `webtoon_vertical_qwen21.json` | 서버에 저장한 그 워크플로우의 사본 |
 | `refine.py` | 2단 다듬기: 그림 보는 사내 Qwen 이 컷 설명에 없는 사람을 옷·자리로 짚고, Qwen 편집으로 그 사람만 지운다(`--fix`, 원본은 `_stage1\`). 긴 다듬기 지시 실험도 이 파일 |
@@ -41,7 +42,7 @@
 - 다시 만들기: `make_workflow.py --prompt-file <컷.txt> --ref <그림> ... --out vast\webtoon_vertical_qwen21.json --save --force`
 
 저장 워크플로우 한 벌(스크립트가 큐에 넣는 그래프와 같은 구성을 화면에서 열어 고칠 수 있게 펼친 것, 예시 그림은 D+18 우빈):
-| 종류 | 워크플로우 | 스크립트로는 |
+| 종류 | 워크플로우 | 같은 일을 하는 스크립트 |
 |---|---|---|
 | 생성 | `webtoon_vertical_qwen21` · `webtoon_panel_2stage_qwen21`(그리기 → 편집 다듬기) | `comfy_panel.py` |
 | 편집 | `webtoon_edit_qwen21`(남는 사람 지우기 · 연기 · 옷) | `refine.py`(--fix · --check) |
@@ -49,6 +50,12 @@
 | 시안 | `webtoon_candidate_location_qwen21`(장소, 2단 사람 지우기) · `webtoon_candidate_sheet_qwen21`(인물 시트) | `new_assets.py` |
 
 편집·에셋·시안 다섯 개는 `make_workflow.py library [--force]` 가 한꺼번에 만들어 저장한다(사본도 `vast\` 에). 프롬프트는 그 스크립트의 것(make_assets 의 STRONG·BASE, new_assets 의 candidate_prompt)을 그대로 가져온다.
+
+**도구는 저장 워크플로우를 불러 쓴다**(2026-10-17, `saved_workflow.py`). 그리는 스크립트(comfy_panel · refine · make_assets · new_assets, 그래서 agent app MCP 도구도)는 그릴 때마다 서버의 `webtoon_vertical_qwen21`(생성)·`webtoon_edit_qwen21`(편집)을 불러 API 형식으로 바꾸고 프롬프트·참고 그림·크기·시드·스텝·터보만 채운다. 에셋·시안 워크플로우는 이 둘과 같은 구성에 그 일의 기본 프롬프트를 넣은 손 작업용이다.
+- 화면에서 두 워크플로우를 고치면(모델·LoRA·샘플러·cfg·네거티브, 노드 추가) 다음 그리기부터 작업실·agent app 가 따른다. agent platform 카탈로그는 등록할 때 사본을 떠 가므로 `xgen_catalog.py apply` 를 다시 돌린다.
+- 화면에서 고친 뒤 `make_workflow.py ... --save --force`·`library --force` 를 돌리면 고친 것을 덮는다.
+- 서버에서 못 불러오면 같은 구성을 코드로 짜서 그리고 경고를 한 번 찍는다(`comfy_panel._graph_code`).
+- 확인: 같은 시드로 저장 워크플로우 판과 코드 판을 그려 생성·편집 모두 픽셀이 같았다.
 
 ## 2단 다듬기(2026-10-16)
 1단만으로는 남는 사람(같은 인물 둘, 낯선 사람, 뒤쪽 작은 사람)이 남는 컷이 있었다. `--fix`(MCP `vast_draw`·`vast_episode` 는 기본으로 켬)면 그린 직후:

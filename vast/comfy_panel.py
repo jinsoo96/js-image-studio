@@ -33,8 +33,26 @@ SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": 
 MAX_REFS = 10
 
 
+_SAVED_WARNED = False
+
+
 def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False):
-    """edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시)."""
+    """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
+    화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
+    edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시)."""
+    global _SAVED_WARNED
+    try:
+        from saved_workflow import EDIT, GEN, fill, load_ui, to_api
+        return fill(to_api(load_ui(EDIT if edit else GEN), turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
+    except Exception as e:  # noqa: BLE001
+        if not _SAVED_WARNED:
+            print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
+            _SAVED_WARNED = True
+        return _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo, edit)
+
+
+def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False):
+    """저장 워크플로우와 같은 구성을 코드로 짠 것(서버 워크플로우를 못 불러올 때만)."""
     g = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "qwen_image", "device": "default"}},
