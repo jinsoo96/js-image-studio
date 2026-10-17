@@ -52,7 +52,7 @@
 편집·에셋·시안 다섯 개는 `make_workflow.py library [--force]` 가 한꺼번에 만들어 저장한다(사본도 `vast\` 에). 프롬프트는 그 스크립트의 것(make_assets 의 STRONG·BASE, new_assets 의 candidate_prompt)을 그대로 가져온다.
 
 **도구는 저장 워크플로우를 불러 쓴다**(2026-10-17, `saved_workflow.py`). 그리는 스크립트(comfy_panel · refine · make_assets · new_assets, 그래서 agent app MCP 도구도)는 그릴 때마다 서버의 `webtoon_vertical_qwen21`(생성)·`webtoon_edit_qwen21`(편집)을 불러 API 형식으로 바꾸고 프롬프트·참고 그림·크기·시드·스텝·터보만 채운다. 에셋·시안 워크플로우는 이 둘과 같은 구성에 그 일의 기본 프롬프트를 넣은 손 작업용이다.
-- 화면에서 두 워크플로우를 고치면(모델·LoRA·샘플러·cfg·네거티브, 노드 추가) 다음 그리기부터 작업실·agent app 가 따른다. agent platform 카탈로그는 등록할 때 사본을 떠 가므로 `xgen_catalog.py apply` 를 다시 돌린다.
+- 화면에서 두 워크플로우를 고치면(모델·LoRA·샘플러·cfg·네거티브, 노드 추가) 다음 그리기부터 작업실·agent app 가 따른다. agent platform 카탈로그는 등록할 때 사본을 떠 가는데, 예약 작업 `WebtoonStudio-XgenCatalogSync`(10분마다 `xgen_catalog_sync.cmd` → `xgen_catalog.py sync`)가 워크플로우·참고 그림·vast 주소가 바뀐 것을 알아채고 다시 올린다. 바뀐 게 없으면 agent platform 에 로그인하지 않고, 로그인이 한 번 실패하면 `state\xgen_catalog_sync.json` 에 멈춤 표시를 남긴다(지우면 다시 돈다). 기록은 `state\logs\xgen_catalog_sync.log`(바뀔 때만).
 - 화면에서 고친 뒤 `make_workflow.py ... --save --force`·`library --force` 를 돌리면 고친 것을 덮는다.
 - 서버에서 못 불러오면 같은 구성을 코드로 짜서 그리고 경고를 한 번 찍는다(`comfy_panel._graph_code`).
 - 확인: 같은 시드로 저장 워크플로우 판과 코드 판을 그려 생성·편집 모두 픽셀이 같았다.
