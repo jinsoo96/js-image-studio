@@ -20,6 +20,9 @@ def add(pid, shot, scene, chars, *dlg, aspect=None, **kw):
     chars: 인물 id 목록, dlg: (종류, 대사, 자리[, 모양]) 여럿."""
     d = []
     for x in dlg:
+        if isinstance(x, dict):  # 칸을 더 주는 줄: {"type": "monologue", "text": …, "font": "hand"} · {"type": "narration", …, "box": True}(네모 캡션)
+            d.append(x)
+            continue
         item = {"type": x[0], "text": x[1]}
         if len(x) > 2 and x[2]:
             item["pos"] = x[2]

@@ -310,6 +310,100 @@ def kind_blocked(spec, ep):
     return img
 
 
+def kind_search(spec, ep):
+    """검색 화면. spec: {"query": "삐삐 음성사서함 확인", "results": [{"title": "...", "text": "..."}]}
+    첫 결과가 답을 말하는 장면(2026-10-18 추몽 p072 '서비스 종료')."""
+    W, H = 832, 1216
+    img = room_bg(W, H)
+    sx0, sy0, sx1, sy1 = phone_frame(img, (126, 70, 706, 1160))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([sx0, sy0, sx1, sy1], radius=44, fill=(250, 250, 252))
+    status_bar(d, sx0, sy0, sx1)
+    d.rounded_rectangle([sx0 + 26, sy0 + 76, sx1 - 26, sy0 + 130], radius=27, fill=(238, 240, 244), outline=(210, 214, 222), width=2)
+    d.text((sx0 + 52, sy0 + 103), spec.get("query", ""), font=f(24), fill=(30, 30, 34), anchor="lm")
+    y = sy0 + 170
+    for k, r in enumerate(spec.get("results", [])):
+        d.text((sx0 + 34, y), r.get("title", ""), font=f(27 if k == 0 else 24), fill=(26, 70, 160), anchor="lm")
+        y += 40
+        for ln in wrap_px(d, r.get("text", ""), f(21, bold=False), sx1 - sx0 - 68):
+            d.text((sx0 + 34, y), ln, font=f(21, bold=False), fill=(90, 90, 98), anchor="lm")
+            y += 30
+        y += 26
+        d.line([sx0 + 30, y - 12, sx1 - 30, y - 12], fill=(230, 230, 236), width=1)
+    return img
+
+
+def kind_notice(spec, ep):
+    """잠금 화면 알림 여러 개가 쌓인 장면. spec: {"time": "23:41", "notices": [{"app": "메신저", "title": "은성고 97졸 (43)", "text": "..."}]}
+    (2026-10-18 추몽 p007·p009·p082: 단톡 공지·문자가 연달아 뜸)."""
+    W, H = 832, 1216
+    img = room_bg(W, H)
+    sx0, sy0, sx1, sy1 = phone_frame(img, (126, 70, 706, 1160))
+    d = ImageDraw.Draw(img)
+    for y in range(sy0, sy1):  # 어두운 잠금 화면
+        t = (y - sy0) / (sy1 - sy0)
+        d.line([(sx0, y), (sx1, y)], fill=(int(40 - 18 * t), int(48 - 20 * t), int(66 - 24 * t)))
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([sx0, sy0, sx1, sy1], radius=44, fill=255)
+    bg = img.copy()
+    img.paste(room_bg(W, H), (0, 0))
+    img.paste(bg, (0, 0), mask)
+    phone_frame(img, (126, 70, 706, 1160))
+    d = ImageDraw.Draw(img)
+    d.text(((sx0 + sx1) / 2, sy0 + 150), spec.get("time", ""), font=f(84, bold=False), fill=(236, 240, 248), anchor="mm")
+    y = sy0 + 260
+    for n in spec.get("notices", []):
+        lines = wrap_px(d, n.get("text", ""), f(22, bold=False), sx1 - sx0 - 90)
+        h = 74 + 30 * len(lines)
+        d.rounded_rectangle([sx0 + 22, y, sx1 - 22, y + h], radius=22, fill=(236, 238, 244))
+        d.text((sx0 + 44, y + 24), n.get("app", ""), font=f(18, bold=False), fill=(110, 112, 122), anchor="lm")
+        d.text((sx0 + 44, y + 52), n.get("title", ""), font=f(23), fill=(24, 24, 28), anchor="lm")
+        ty = y + 84
+        for ln in lines:
+            d.text((sx0 + 44, ty), ln, font=f(22, bold=False), fill=(54, 54, 60), anchor="lm")
+            ty += 30
+        y += h + 14
+    return img
+
+
+def kind_band(spec, ep):
+    """시대·화자가 바뀌는 곳의 색 띠(위 색 → 아래 색), 가운데 짧은 글. spec: {"top": "#5b6878", "bottom": "#a8865a", "text": "1996년 7월", "h": 900}
+    (2026-10-18 추몽 p023: 블루그레이에서 세피아로 넘어가는 여백)."""
+    W, H = 1344, int(spec.get("h", 900))
+    a = tuple(int(spec.get("top", "#5b6878")[i:i + 2], 16) for i in (1, 3, 5))
+    b = tuple(int(spec.get("bottom", "#a8865a")[i:i + 2], 16) for i in (1, 3, 5))
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / (H - 1)
+        d.line([(0, y), (W, y)], fill=tuple(round(a[k] + (b[k] - a[k]) * t) for k in range(3)))
+    if spec.get("text"):
+        d.text((W / 2, H / 2), spec["text"], font=f(46), fill=(250, 246, 238), anchor="mm")
+    return img
+
+
+def wrap_px(d, text, fnt, max_w):
+    """글자 폭 기준 줄 바꿈(한글은 띄어쓰기 단위, 넘치면 글자 단위)."""
+    out, cur = [], ""
+    for word in text.split(" "):
+        cand = (cur + " " + word).strip()
+        if d.textlength(cand, font=fnt) <= max_w:
+            cur = cand
+            continue
+        if cur:
+            out.append(cur)
+        cur = word
+        while d.textlength(cur, font=fnt) > max_w:
+            k = len(cur)
+            while k > 1 and d.textlength(cur[:k], font=fnt) > max_w:
+                k -= 1
+            out.append(cur[:k])
+            cur = cur[k:]
+    if cur:
+        out.append(cur)
+    return out
+
+
 def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
@@ -318,7 +412,8 @@ def main():
     panel = next(p for p in board["panels"] if p["id"] == pid)
     spec = panel["composite"]
     img = {"title": kind_title, "profile": kind_profile, "chat": kind_chat, "calendar": kind_calendar,
-           "insta": kind_insta, "calls": kind_calls, "blocked": kind_blocked}[spec["kind"]](spec, ep)
+           "insta": kind_insta, "calls": kind_calls, "blocked": kind_blocked, "search": kind_search,
+           "notice": kind_notice, "band": kind_band}[spec["kind"]](spec, ep)
     out = ep / "panels" / f"{pid}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)

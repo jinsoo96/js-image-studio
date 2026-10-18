@@ -69,7 +69,7 @@ def main():
             action = f"{action} SPACE (identical in every panel of this scene): {scenes[loc]}"
         e = {"id": pid, "chars": chars, "outfit": sp.get("outfit", {}), "location": loc, "shot": norm_shot(sp.get("shot", "medium shot")),
              "aspect": sp.get("aspect") or ASPECT.get(by_id[pid].get("aspect", "landscape"), "3:2"), "action": action}
-        for k in ("acting", "camera", "refs_extra", "outfit_sheets"):
+        for k in ("acting", "camera", "refs_extra", "outfit_sheets", "extras", "text_in_image", "look"):
             if sp.get(k):
                 e[k] = sp[k]
         panels.append(e)

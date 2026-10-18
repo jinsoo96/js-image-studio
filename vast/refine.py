@@ -67,6 +67,7 @@ def find_extras(img_path: Path, series, p) -> list:
     who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" (wears {wear[c]})" if c in wear else "") for c in chars) or "nobody"
     ask = (f"This webtoon panel should show exactly {len(chars)} {'person' if len(chars) == 1 else 'people'}: {who}."
            + (" An over-the-shoulder figure seen from behind in the foreground is also expected and is NOT extra." if p.get("camera") else "")
+           + (f" These unnamed people are also expected and are NOT extra: {p['extras']}." if p.get("extras") else "")
            + "\nLook at the image. List every EXTRA person who should not be there: duplicates of the same person (keep the one whose clothes match), "
            "strangers, and small background figures. Describe each extra person in one short phrase by clothes and position "
            "(e.g. 'the old woman in a red coat standing at the far left'). "
@@ -121,13 +122,52 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
 EDITABLE = {"표정연기", "옷"}  # 편집으로 고칠 수 있는 것. 좌우·시선·배경·인원은 구도라 다시 그린다
 
 
+LIMB_ASK = ("Look only at the bodies. For each fully visible person (ignore people seen only from behind at the frame edge), count their arms "
+            "and hands that are actually drawn, following each arm from the shoulder. Crossed arms count as two arms. If a person has an extra "
+            "arm or hand (for example arms crossed AND another hand raised), say so. "
+            'Answer only JSON: {"people": [{"who": "short description", "arms": N, "hands": N, "extra_limb": true|false}]}')
+
+
+def extra_limbs(img_path: Path) -> list:
+    """팔·손이 남는 사람(짧은 질문 하나로 따로 묻는다). 여러 항목을 함께 묻는 검수에선 '팔 셋'을 놓쳤고, 이것만 물으니 잡았다
+    (2026-10-18 낙제생과 조교 p003: 팔짱 + 든 손). 실패하면 빈 목록."""
+    import base64
+    import io
+    import urllib.request
+    from PIL import Image
+    img = Image.open(img_path).convert("RGB")
+    img.thumbnail((1280, 1280))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=90)
+    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
+                {"type": "text", "text": LIMB_ASK}]}]}
+    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
+        people = json.loads(re.search(r"\{.*\}", txt, re.S).group())["people"]
+    except Exception:
+        return []
+    return [f"{x.get('who', '?')}: arms {x.get('arms')}, hands {x.get('hands')}" for x in people
+            if x.get("extra_limb") or (x.get("arms") or 0) > 2 or (x.get("hands") or 0) > 2]
+
+
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
-    """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만)로 이 그림을 본다. (결과, 걸린 항목)"""
+    """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만) + 팔·손 개수(따로 묻기)로 본다. (결과, 걸린 항목)
+    팔·손이 남으면 '몸' 으로 걸고, 구도처럼 다시 그린다(편집으로 팔 하나만 지우기는 잘 안 된다)."""
     sys.path.insert(0, str(ROOT / "mcp"))
     import vision_review as V
     V.DIRS[:] = [img_path.parent.name]
     r = V.review(series, ep_dir, [pid], workers=2)[0]
-    return r, (set(V._probs(r)) if r.get("판정") == "다시" else set())
+    probs = set(V._probs(r)) if r.get("판정") == "다시" else set()
+    limbs = extra_limbs(img_path)
+    if limbs:
+        probs.add("몸")
+        r["고칠점"] = (str(r.get("고칠점") or "") + " 팔·손이 남는다: " + "; ".join(limbs)).strip()
+    return r, probs
 
 
 def staging_edit_prompt(series, p, r, probs) -> str:

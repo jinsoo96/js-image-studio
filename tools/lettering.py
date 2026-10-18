@@ -24,8 +24,9 @@ FONT_FILES = {
     "narration": ROOT / "fonts" / "NanumMyeongjo-Bold.ttf",
     "monologue": ROOT / "fonts" / "NanumMyeongjo-Bold.ttf",
     "sfx": ROOT / "fonts" / "BlackHanSans-Regular.ttf",
+    "hand": ROOT / "fonts" / "NanumPenScript-Regular.ttf",  # 손글씨 독백(화자가 바뀐 걸 글씨로, 2026-10-18 추몽 미선)
 }
-SIZES = {"speech": 25, "thought": 25, "shout": 30, "narration": 23, "monologue": 27, "sfx": 54}
+SIZES = {"speech": 25, "thought": 25, "shout": 30, "narration": 23, "monologue": 27, "sfx": 54, "hand": 34}
 MONO_INK = (46, 38, 54)
 INK, PAPER = (17, 17, 17), (255, 255, 255)
 STROKE = 3.5
@@ -293,7 +294,7 @@ def is_text_line(item):
 
 def draw_monologue(canvas, item, W, y, max_w):
     """가운데 맞춤 명조 글(배경 위, 상자 없음). 돌려주는 것: 높이."""
-    fnt = font("monologue")
+    fnt = font(item["font"] if item.get("font") in FONT_FILES else "monologue")  # "font": "hand" 면 손글씨
     lines = [ln.strip() for ln in item["text"].replace(" / ", "\n").split("\n") if ln.strip()]
     lines = [w for ln in lines for w in (wrap_diamond(ln, fnt, max_w) if fnt.getlength(ln) > max_w else [ln])]
     asc, desc = fnt.getmetrics()

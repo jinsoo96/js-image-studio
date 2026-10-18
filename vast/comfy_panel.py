@@ -187,19 +187,31 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     outfit = " ".join(f"{NAMES[c]} wears: {o}." for c, o in (p.get("outfit") or {}).items())
     sp = series / "prompts" / "style.txt"
     style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
-    if not n:  # 사람 없는 컷: 그림체 글의 눈·머리·얼굴·몸 묘사가 사람을 불러냈다(p073 호텔 문 인서트에 여자 둘) → 선·색·빛 문장만
+    # 컷 설명의 선택 칸(2026-10-18 추몽 1화: 시대·화자마다 색, 이름 없는 군중, 그림 속 글자):
+    #   look = 이 컷의 색·질감(예: 1996 세피아 + 필름 그레인), extras = 이름 없는 사람들(줄 선 사람·반 아이들), text_in_image = 그려도 되는 글자(삐삐 액정 8282)
+    extras = (p.get("extras") or "").strip()
+    if not n and not extras:  # 사람 없는 컷: 그림체 글의 눈·머리·얼굴·몸 묘사가 사람을 불러냈다(p073 호텔 문 인서트에 여자 둘) → 선·색·빛 문장만
         style = strip_people(style)
     extra = series / "prompts" / "rules_extra.txt"
-    count = (f"Exactly {n} {'person' if n == 1 else 'people'} in the panel"
-             + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
-             + (" No other people anywhere in the frame, not even small in the background." if n == 1 and not p.get("camera") else "")
-             if n else "No people in the panel.")
+    if n:
+        count = (f"Exactly {n} {'person' if n == 1 else 'people'}" + (" from the references" if extras else " in the panel")
+                 + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
+                 + (f" Besides them only these unnamed people: {extras}." if extras else
+                    " No other people anywhere in the frame, not even small in the background." if n == 1 and not p.get("camera") else ""))
+    else:
+        count = f"No main characters. Only these unnamed people: {extras}." if extras else "No people in the panel."
+    sj = series / "series.json"  # 작품마다 사람 규칙(기본은 성인 작품용 문장, 학생이 나오는 작품은 series.json 의 people_rule)
+    people_rule = (json.loads(sj.read_text(encoding="utf-8")).get("people_rule") if sj.exists() else None) or "Adults with realistic proportions."
+    text_rule = (f"One single panel: no speech bubbles, no sound effects, no panel border. The only readable text drawn in the picture: {p['text_in_image']}; "
+                 "no other letters, signs or logos." if p.get("text_in_image") else
+                 "One single panel: no text, no speech bubbles, no sound effects, no panel border.")
     parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.",
              f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
              action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", count,
              ("REFERENCES: " + " ".join(lines)) if lines else "", style,
-             "One single panel: no text, no speech bubbles, no sound effects, no panel border."
-             + (" Adults with realistic proportions." + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "") if n else
+             f"COLOR AND TEXTURE OF THIS PANEL: {p['look']}" if p.get("look") else "",
+             text_rule
+             + (" " + people_rule + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "") if n or extras else
                 " An empty scene: no people, no faces, no figures, no silhouettes, no reflections of people.")]
     return "\n\n".join(x for x in parts if x), refs[:MAX_REFS]
 
