@@ -8,11 +8,17 @@
 """
 import copy
 import json
+import os
 import urllib.parse
 
 from comfy_client import Comfy
 
-GEN, EDIT = "webtoon_vertical_qwen21.json", "webtoon_edit_qwen21.json"  # 생성 · 편집(표정 은행·기본복·남는 사람 지우기·연출 손보기)
+# 생성 · 편집(표정 은행·기본복·남는 사람 지우기·연출 손보기) 워크플로우. 모델 판은 환경변수 WEBTOON_MODEL 로 고른다(기본 uc).
+# 2026-10-18 사용자 "그 모델(Uncensored) 써서 해, 기본 모델이 너무 안 좋다" → 기본을 UC 판으로. 두 판은 모델(UNET)만 다르고 구성은 같다.
+MODELS = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json"),
+          "base": ("webtoon_vertical_qwen21.json", "webtoon_edit_qwen21.json")}
+MODEL = os.environ.get("WEBTOON_MODEL", "uc").strip().lower()
+GEN, EDIT = MODELS.get(MODEL, MODELS["uc"])
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 # 부르는 쪽이 노드를 찾는 번호. 전에 코드로 짜던 그래프와 같은 번호라 comfy_panel·refine·make_assets·xgen_catalog 는 그대로 쓴다.
 # 클래스가 워크플로우에 하나뿐일 때만 붙이고, 화면에서 더한 노드는 u<번호>.

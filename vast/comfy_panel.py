@@ -27,6 +27,8 @@ sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
 
 UNET, CLIP, VAE = "qwen_image_2.1_bf16.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
+if os.environ.get("WEBTOON_MODEL", "uc").strip().lower() == "uc":  # 저장 워크플로우를 못 불러 코드로 짤 때도 같은 판(saved_workflow.MODELS)
+    UNET = "qwen-image-2.1-UC-fp8.safetensors"
 TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turbo LoRA: 8스텝 cfg 1(시안용, 모델 카드)
 # 약 2MP(모델 기본 1MP, 최대 2048x2048), 32 배수. 합성 폭 1600 보다 크게
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),

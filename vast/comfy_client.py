@@ -164,7 +164,9 @@ if __name__ == "__main__":
         d = (s.get("devices") or [{}])[0]
         q = c.req("/queue")
         mine = sum(1 for e in q.get("queue_running", []) + q.get("queue_pending", []) if len(e) > 3 and (e[3] or {}).get("client_id") == "webtoon-studio")
-        need = {"diffusion_models": "qwen_image_2.1_bf16.safetensors", "text_encoders": "qwen3vl_8b_int8_convrot.safetensors",
+        uc = os.environ.get("WEBTOON_MODEL", "uc").strip().lower() == "uc"  # 그리는 모델 판(saved_workflow.MODELS)
+        need = {"diffusion_models": "qwen-image-2.1-UC-fp8.safetensors" if uc else "qwen_image_2.1_bf16.safetensors",
+                "text_encoders": "qwen3vl_8b_int8_convrot.safetensors",
                 "vae": "qwen_image_2.1_vae_bf16.safetensors", "loras": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"}
         miss = [n for f, n in need.items() if n not in (c.req(f"/models/{f}") or [])]
         print(f"인스턴스 {c.info['id']} {c.info['gpu_name']} {c.info['actual_status']} · ComfyUI {s['system'].get('comfyui_version')}")
