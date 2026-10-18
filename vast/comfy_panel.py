@@ -13,6 +13,7 @@ RTX 5090 기준 한 컷: 40스텝 약 100~160초, --turbo(8스텝) 약 30~50초.
 import argparse
 import hashlib
 import json
+import os
 import random
 import re
 import sys
@@ -31,6 +32,25 @@ TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turb
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
          "4:3": (1664, 1248), "3:2": (1760, 1184), "16:9": (1920, 1088)}
 MAX_REFS = 10
+PEOPLE_WORDS = re.compile(r"\b(eyes?|hair|faces?|blush|chest|adults?|lash(es)?|chibi|proportions?|skin|body|bodies|lips|nose)\b", re.I)
+
+
+def strip_people(text: str) -> str:
+    """사람 없는 그림(장소·인서트)용: 그림체 글에서 눈·머리·얼굴·몸 묘사만 뺀다(그 말이 사람을 불러냈다, p073·호프집 시안).
+    사람 얘기로 시작하는 문장("Eyes: …", "Faces: …")은 통째로, 아니면 그 문장 안의 사람 마디만 뺀다.
+    전에는 사람 말이 든 문장을 통째로 빼서 한 문장짜리 그림체(새 작품)가 다 사라져 사진처럼 그려졌다(2026-10-18 옥상 카페 시안)."""
+    sents = re.split(r"(?<=\.)\s+", text)
+    old = [s for s in sents if not re.search(r"^(Eyes|Hair)\b|face|blush|chest|adult|lash|chibi", s, re.I)]
+    if old and old[0] == sents[0]:  # 그림체 첫 문장이 남으면 예전 방식 그대로(D+18·무대 뒤 결과가 바뀌지 않게)
+        return " ".join(old)
+    out = []
+    for sent in sents:
+        parts = re.split(r"(?<=[,;:])\s+", sent)
+        if PEOPLE_WORDS.search(parts[0]):
+            continue
+        keep = [p for p in parts if not PEOPLE_WORDS.search(p)]
+        out.append(" ".join(keep).rstrip(",;:. ") + ".")
+    return " ".join(out)
 
 
 _SAVED_WARNED = False
@@ -77,7 +97,9 @@ def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit
     return g
 
 
-LLM_URL = "https://judge-gateway.invalid/v1"  # 사내 vLLM(키 없음). 그림 검수(mcp/vision_review.py)와 같은 곳
+# 판단하는 모델(표정 칸 고르기·남는 사람 찾기). 그림 검수(mcp/vision_review.py)와 같은 환경변수, 기본은 사내 vLLM(키 없음)
+LLM_URL = os.environ.get("VLM_URL", "https://judge-gateway.invalid/v1").rstrip("/")
+LLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.8-27b")
 
 
 def pick_expr(series, cid, name, text):
@@ -93,7 +115,7 @@ def pick_expr(series, cid, name, text):
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits.")
-    body = {"model": "qwen3.8-27b", "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
+    body = {"model": LLM_MODEL, "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": ask}]}
     req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
@@ -166,7 +188,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     sp = series / "prompts" / "style.txt"
     style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
     if not n:  # 사람 없는 컷: 그림체 글의 눈·머리·얼굴·몸 묘사가 사람을 불러냈다(p073 호텔 문 인서트에 여자 둘) → 선·색·빛 문장만
-        style = " ".join(s for s in re.split(r"(?<=\.)\s+", style) if not re.search(r"^(Eyes|Hair)\b|face|blush|chest|adult|lash|chibi", s, re.I))
+        style = strip_people(style)
     extra = series / "prompts" / "rules_extra.txt"
     count = (f"Exactly {n} {'person' if n == 1 else 'people'} in the panel"
              + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."

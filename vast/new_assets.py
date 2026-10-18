@@ -17,12 +17,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import graph, upload  # noqa: E402
+from comfy_panel import graph, strip_people, upload  # noqa: E402
 
 SHEET_HEAD = ("<image1> is ONLY a reference for the sheet layout and the art style: it shows a DIFFERENT person. Draw a new character design "
               "reference sheet with exactly the same layout (four full-body views on the left, a grid of head-and-shoulders expressions on the right), "
               "the same plain background and the same art style, for the new character described below. Do NOT copy the face, hairstyle, hair color, "
-              "body or outfit of <image1>.\n\n")
+              "body or outfit of <image1>. Every figure and every expression head on the sheet is the new character; the person in <image1> appears "
+              "nowhere on it.\n\n")  # 2026-10-18 새 작품 시험: 유나 시트의 표정 칸 하나에 본보기(민호) 얼굴이 그대로 들어갔다
 
 
 def paths(series: Path, kind: str, name: str):
@@ -31,14 +32,15 @@ def paths(series: Path, kind: str, name: str):
     return series / "prompts" / f"sheet_{name}.txt", series / "assets" / "_candidates" / f"{name}_sheet.png", series / "assets" / f"{name}_sheet.png"
 
 
-def style_ref(series: Path, name: str) -> Path:
-    """시트 모양 본보기: 그 작품 cast.json 순서에서 시트가 있는 첫 인물(주인공)."""
+def style_ref(series: Path, name: str):
+    """시트 모양 본보기: 그 작품 cast.json 순서에서 시트가 있는 첫 인물(주인공). 새 작품의 첫 인물이라 없으면 None(글로만 그린다)."""
     cast = json.loads((series / "cast.json").read_text(encoding="utf-8"))
-    for cid in cast:
-        f = series / "assets" / f"{cid}_sheet.png"
-        if not cid.startswith("_") and cid != name and f.exists():
-            return f
-    raise SystemExit("본보기로 쓸 인물 시트가 하나도 없다")
+    for where in ("", "_candidates/"):  # 새 작품은 첫 회차에 시안이 한꺼번에 생긴다: 먼저 그린 시안을 본보기로(그림체를 맞춘다)
+        for cid in cast:
+            f = series / "assets" / f"{where}{cid}_sheet.png"
+            if not cid.startswith("_") and cid != name and f.exists():
+                return f
+    return None
 
 
 def candidate_prompt(series: Path, kind: str, name: str):
@@ -49,12 +51,13 @@ def candidate_prompt(series: Path, kind: str, name: str):
     prompt = prompt_f.read_text(encoding="utf-8").strip()
     refs = []
     if kind == "sheet":
-        refs = [style_ref(series, name)]
+        ref = style_ref(series, name)
+        refs = [ref] if ref else []  # 새 작품의 첫 인물: 본보기 없이 글(시트 배치 + 그림체)로만 그린다(2026-10-18)
         # 2026-10-16 시험: 중년 오 팀장이 젊은 미남으로 나왔다 → 나이를 못 박는다
-        prompt = SHEET_HEAD + prompt + "\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described."
+        prompt = (SHEET_HEAD if ref else "") + prompt + "\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described."
     else:
         # 그림체 글의 눈·머리·얼굴 문장이 사람을 불러냈다(호프집 시안 앞에 여자, comfy_panel 의 사람 없는 컷과 같은 문제) → 빼고 빈 장소를 못 박는다
-        prompt = " ".join(s for s in re.split(r"(?<=\.)\s+", prompt) if not re.search(r"^(Eyes|Hair)\b|face|blush|chest|adult|lash|chibi", s, re.I))
+        prompt = strip_people(prompt)
         # 장소 글 자체에 "뒤쪽 손님들"이 있는 곳(호프집)은 "아무도 없음"과 부딪혀 앞 테이블에 사람을 앉혔다 → 앞·가운데만 비우게
         prompt += ("\n\nNobody in the foreground or middle ground: every table, seat and doorway near the camera is empty. "
                    "At most tiny, blurred background figures, and only if the location text asks for them.")

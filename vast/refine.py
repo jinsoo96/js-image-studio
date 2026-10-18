@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import graph, pick_expr, upload  # noqa: E402
+from comfy_panel import LLM_MODEL, LLM_URL, graph, pick_expr, upload  # noqa: E402
 
 
 def refine_prompt(series, p, expr=True):
@@ -51,7 +51,7 @@ def refine_prompt(series, p, expr=True):
     return "\n".join(lines), refs
 
 
-VLM_URL = "https://judge-gateway.invalid/v1"  # 그림을 보는 사내 Qwen(그림 검수와 같은 곳)
+VLM_URL, VLM_MODEL = LLM_URL, LLM_MODEL  # 그림을 보는 모델(comfy_panel 과 같은 설정: 환경변수 VLM_URL·VLM_MODEL)
 
 
 def find_extras(img_path: Path, series, p) -> list:
@@ -75,7 +75,7 @@ def find_extras(img_path: Path, series, p) -> list:
     img.thumbnail((1280, 1280))
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=88)
-    body = {"model": "qwen3.8-27b", "temperature": 0.0, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
+    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
                 {"type": "text", "text": ask}]}]}

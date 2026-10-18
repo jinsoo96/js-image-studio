@@ -1,5 +1,8 @@
-"""vast.ai ComfyUI 인스턴스 도우미. 키는 환경변수 VAST_KEY 또는 D:\\.claude\\CREDENTIALS.local.md(vast.ai 절)에서 읽고 출력하지 않는다.
-ComfyUI 접속 = 기본 인증(vastai / 인스턴스 jupyter_token). 토큰·주소는 vast.ai API 로 매번 읽는다(인스턴스를 다시 만들면 바뀐다).
+"""ComfyUI 서버 도우미(어느 ComfyUI 든). 어디에 붙을지는 환경변수로 정한다(comfy-workflow-mcp 와 같은 이름):
+- COMFY_URL 이 있으면 그 서버(로컬·사내·다른 클라우드). 인증은 COMFY_USER+COMFY_PASSWORD(기본 인증) · COMFY_TOKEN(Bearer) · COMFY_HEADERS(JSON).
+- 없으면 vast.ai: 키는 VAST_KEY(또는 VAST_API_KEY) 또는 D:\\.claude\\CREDENTIALS.local.md(vast.ai 절), 출력하지 않는다. VAST_INSTANCE_ID 로 고른다.
+  접속 = 기본 인증(vastai / 인스턴스 jupyter_token). 토큰·주소는 vast.ai API 로 매번 읽는다(인스턴스를 다시 만들면 바뀐다).
+(2026-10-18 사용자 "vast 의존이 있나, 비하드코딩으로": 전에는 vast 에만 붙었다)
 
     python vast/comfy_client.py info                 GPU·버전·노드 수
     python vast/comfy_client.py models [폴더]         모델 폴더 목록 / 그 폴더 파일
@@ -24,7 +27,7 @@ CRED = Path(r"D:\.claude\CREDENTIALS.local.md")
 
 
 def vast_key() -> str:
-    k = os.environ.get("VAST_KEY")
+    k = os.environ.get("VAST_KEY") or os.environ.get("VAST_API_KEY")
     if k:
         return k
     t = CRED.read_text(encoding="utf-8")
@@ -40,6 +43,8 @@ def instance():
                                  headers={"Authorization": f"Bearer {vast_key()}", "User-Agent": "webtoon-studio"})
     with urllib.request.urlopen(req, timeout=30) as r:
         inst = json.loads(r.read().decode())["instances"]
+    if os.environ.get("VAST_INSTANCE_ID"):
+        inst = [i for i in inst if str(i.get("id")) == os.environ["VAST_INSTANCE_ID"]]
     run = [i for i in inst if i.get("actual_status") == "running"] or inst
     if not run:
         sys.exit("인스턴스가 없다")
@@ -47,14 +52,31 @@ def instance():
 
 
 class Comfy:
+    """self.base(주소) · self.headers(인증 머리) · self.secret(화면·기록에서 가릴 값) · self.info."""
+
     def __init__(self):
+        e = os.environ
+        if e.get("COMFY_URL"):
+            self.base = e["COMFY_URL"].rstrip("/")
+            self.headers = json.loads(e["COMFY_HEADERS"]) if e.get("COMFY_HEADERS") else {}
+            if e.get("COMFY_TOKEN"):
+                self.headers["Authorization"], self.secret = f"Bearer {e['COMFY_TOKEN']}", e["COMFY_TOKEN"]
+            elif e.get("COMFY_USER"):
+                self.headers["Authorization"] = "Basic " + base64.b64encode(f"{e['COMFY_USER']}:{e.get('COMFY_PASSWORD', '')}".encode()).decode()
+                self.secret = e.get("COMFY_PASSWORD", "")
+            else:
+                self.secret = ""
+            self.info = {"server": self.base}
+            return
         i = instance()
-        self.base = f"http://{i['public_ipaddr']}:{i['ports']['8188/tcp'][0]['HostPort']}"
-        self.auth = "Basic " + base64.b64encode(f"vastai:{i['jupyter_token']}".encode()).decode()
+        port = e.get("VAST_COMFY_PORT", "8188")
+        self.base = f"http://{i['public_ipaddr']}:{i['ports'][f'{port}/tcp'][0]['HostPort']}"
+        self.secret = i["jupyter_token"]
+        self.headers = {"Authorization": "Basic " + base64.b64encode(f"vastai:{self.secret}".encode()).decode()}
         self.info = {k: i.get(k) for k in ("id", "gpu_name", "gpu_ram", "dph_total", "actual_status")}
 
     def req(self, path, data=None, ctype="application/json", timeout=60, raw=False):
-        h = {"Authorization": self.auth, "User-Agent": "webtoon-studio"}
+        h = {**self.headers, "User-Agent": "webtoon-studio"}
         body = None
         if data is not None:
             body = data if isinstance(data, bytes) else json.dumps(data).encode()

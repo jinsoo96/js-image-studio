@@ -9,6 +9,7 @@
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
+import ctypes
 import json
 import os
 import re
@@ -25,6 +26,8 @@ from mcp.server.fastmcp import FastMCP
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp"))
 import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷 그림 + 컷 설명)
+sys.path.insert(0, str(ROOT / "tools"))
+import new_series as ns  # noqa: E402  새 작품 열기(설정 한 장 → 작품 폴더)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
@@ -48,6 +51,8 @@ mcp = FastMCP("webtoon-studio", instructions=(
 # ── 내부 도우미 ───────────────────────────────────────────────
 def _series(name: str) -> Path:
     key = SERIES_ALIAS.get(name.strip().lower(), name.strip())
+    if not (ROOT / "series" / key).is_dir() and (ROOT / "series" / f"{key}-hf").is_dir():  # new_series 의 slug 로도 부른다
+        key = f"{key}-hf"
     p = ROOT / "series" / key
     if not (p.is_dir() and (p / "episodes").is_dir()) or key.startswith("_"):
         known = sorted(d.name for d in (ROOT / "series").iterdir() if d.is_dir() and not d.name.startswith("_"))
@@ -90,17 +95,33 @@ def _panels_json(ep: Path) -> list:
     return _json(ep / "panels.json", []) or []
 
 
+def _alive(pid) -> bool:
+    """프로세스가 살아 있나. Windows 에서 os.kill(pid, 0) 은 '살아 있나 보기'가 아니라 TerminateProcess(그 작업을 죽임)이거나 오류라
+    (2026-10-18 시험: 도는 작업이 있어도 못 알아채고 두 번째 작업을 띄움) 프로세스 종료 코드로 본다."""
+    if not pid:
+        return False
+    if os.name == "nt":
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _running_job(ep: Path):
     for st in JOBS.glob("*.status.json"):
         s = _json(st, {})
         spec = _json(st.with_name(st.name.replace(".status.json", ".json")), {})
-        if s.get("state") == "running" and spec.get("episode_dir") == str(ep):
-            pid = s.get("pid")
-            try:
-                os.kill(pid, 0)  # 살아 있는지만 본다
-                return st.name.replace(".status.json", "")
-            except Exception:
-                continue
+        if s.get("state") == "running" and spec.get("episode_dir") == str(ep) and _alive(s.get("pid")):
+            return st.name.replace(".status.json", "")
     return None
 
 
@@ -490,6 +511,13 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     if dst.exists():
         return f"이미 있다: {dst.relative_to(ROOT)}"
     eps = sorted(d.name for d in (s / "episodes").iterdir() if d.is_dir() and not d.name.endswith("_vast"))
+    if not eps and not template.strip():  # 새 작품의 첫 회차: 빈 콘티 틀(제목·크레딧은 series.json 에서 읽음)
+        dst.mkdir(parents=True)
+        shutil.copy2(ROOT / "skills" / "storyboard" / "make_storyboard_template.py", dst / "make_storyboard.py")
+        (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
+        (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
+        return (f"새 회차 {dst.relative_to(ROOT)} (첫 회차라 빈 콘티 틀). read_skill('storyboard') 를 읽고 make_storyboard.py 의 '컷' 부분을 "
+                "이야기대로 쓴 뒤(start_file·append_file·check_file) prepare_episode, 컷 설명은 set_panels 로 채운다")
     tpl = template.strip() or eps[-1]
     src = s / "episodes" / tpl
     if not src.is_dir():
@@ -507,6 +535,68 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사, 컷 설명 표(panels_spec.json) 준비. "
             "make_storyboard.py 를 새 이야기로 고친 뒤(start_file·append_file·check_file) prepare_episode 로 storyboard.json 을 만들고, "
             "컷 설명은 set_panels 로 몇 컷씩 채운다(틀 회차의 컷 설명 예시는 read_file 로 그 회차 build_panels.py 를 본다)")
+
+
+@mcp.tool()
+def new_series(spec: str) -> str:
+    """새 웹툰(작품)을 연다. spec 은 작품 설정 JSON(문자열):
+    {"slug": "영어-소문자-하이픈", "title": "제목", "logline": "한 줄 소개", "genre": "장르·수위", "credit": "글: …  그림: …",
+     "style": "English art style paragraph (line, coloring, light, faces, proportions)",
+     "cast": {"<id>": {"ko": "이름", "en": "English Name (age)", "role": "역할", "who": "English appearance (adult: ethnicity, age, height, build, hair, eyes, face)",
+                       "main": "English default outfit", "exprs": "six English expressions, comma separated"}},
+     "locations": {"<name>": "English description: place, time of day, light, furniture"}}
+    폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 다음: new_episode(slug, "ep001") → 콘티 → set_panels →
+    make_episode(에셋 점검에서 인물 시트·장소 시안을 vast 로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
+    try:
+        d = json.loads(spec) if isinstance(spec, str) else spec
+        made = ns.create(d)
+    except SystemExit as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001
+        return f"실패: {type(e).__name__}: {e}"
+    return (f"새 작품 {made.relative_to(ROOT)}: 인물 {len(d['cast'])}명 · 장소 {len(d.get('locations') or {})}곳 설정과 프롬프트를 만들었다. "
+            f"다음: new_episode('{d['slug']}', 'ep001') 로 첫 회차를 연다")
+
+
+@mcp.tool()
+def add_to_series(series: str, kind: str, key: str, value: str) -> str:
+    """작품에 인물이나 장소를 더한다(새 회차에 처음 나오는 사람·곳). kind = cast | location, key = 영어 id.
+    cast 면 value 는 JSON {"ko","en","role","who","main","exprs"}(new_series 와 같은 칸), location 이면 영어 설명 한 문장.
+    그림은 make_episode 의 에셋 점검이 시안으로 그린다. new_series 로 연 작품만(series.json 이 있는 작품)."""
+    try:
+        s = _series(series)
+        if not (s / "series.json").exists():
+            return f"{s.name} 은 작품 설정(series.json)이 없는 옛 작품이다. 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄 넣는다"
+        if kind not in ("cast", "location"):
+            return "kind 는 cast 또는 location"
+        files = ns.add(s, kind, key, json.loads(value) if kind == "cast" else value)
+    except SystemExit as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001
+        return f"실패: {type(e).__name__}: {e}"
+    return f"{s.name} 에 {kind} {key} 를 더했다. 프롬프트 {len(files)}개. 그림은 make_episode 에셋 점검이 시안으로 그린다"
+
+
+@mcp.tool()
+def redo_candidate(series: str, kind: str, name: str) -> str:
+    """사용자가 마음에 안 들어 한 새 인물 시트·장소 시안을 다른 시드로 다시 그린다(크레딧 0, vast, 약 2~4분). kind = sheet | location.
+    지난 시안은 지우지 않고 assets/_candidates/_rejected/ 로 옮긴다. 생김새·옷을 바꾸려면 먼저 add_to_series 로 설정을 고친다."""
+    try:
+        s = _series(series)
+    except ValueError as e:
+        return str(e)
+    if kind not in ("sheet", "location"):
+        return "kind 는 sheet 또는 location"
+    cand = s / "assets" / "_candidates" / (f"locations/{name}.png" if kind == "location" else f"{name}_sheet.png")
+    running = _running_job(s)
+    if running:
+        return f"이 작품에 도는 작업이 있다({running}). job_wait 로 끝난 뒤 부른다"
+    if cand.exists():
+        rej = s / "assets" / "_candidates" / "_rejected"
+        rej.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(cand), str(rej / f"{cand.stem}_{time.strftime('%m%d%H%M%S')}.png"))
+    job = _start_job("redo_candidate", s, [{"label": f"시안 다시 그리기({kind} {name})", "cmd": [PY, str(VAST / "new_assets.py"), str(s), kind, name]}])
+    return f"작업 시작 {job}: 시안 {cand.relative_to(ROOT)} 를 다시 그린다(약 2~4분). job_wait('{job}')"
 
 
 SPEC_STUB = '''"""컷 설명은 panels_spec.json(MCP set_panels 로 채움). 이 파일은 공용 변환기 tools/panels_from_spec.py 를 부른다."""

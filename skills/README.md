@@ -27,4 +27,5 @@
 - 정본은 이 폴더의 SKILL.md 다. 규칙의 근거(사용자가 짚은 일)는 `../LESSONS.md` 에 남고, SKILL.md 는 그중 지금 지켜야 할 것만 짧게 모은다.
 - agent platform 「이미지 스튜디오 (Qwen)」 에이전트의 시스템 프롬프트는 `continuity` · `panel-spec` 의 "agent platform 에서" 절로 만든다(`vast/xgen_studio_agent.py apply`). SKILL.md 를 고치면 다시 돌린다.
 - agent app 의 Qwen 은 MCP `read_skill(이름)` 으로 읽는다. Claude Code 는 파일을 바로 읽는다.
+- agent app 에이전트는 둘이다: 「새 웹툰 생성기」(새 작품 열기 → 1화, MCP `new_series`) · 「웹툰 이어 그리기」(있는 작품의 다음 화). 도구·스킬·ComfyUI 워크플로우는 같고 시작점만 다르다(`mcp/agents/`).
 - agent platform 자체의 Skill(agent-workflow 의 Skill 클래스, 에이전트 SKILL 입력)으로 올리는 일은 제품 개발(MR)이라 아직 하지 않았다.

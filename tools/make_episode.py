@@ -69,6 +69,9 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
         maker = series / ("make_location_prompts.py" if kind == "location" else "make_sheet_prompts.py")
         if not prompt.exists() and maker.exists():
             run([PY, maker], f"{name} 프롬프트 만들기", allow_fail=True, capture=True)
+        elif not prompt.exists() and (series / "series.json").exists():  # 새 작품 틀(tools/new_series.py): 설정 한 장에서 다시 쓴다
+            run([PY, TOOLS / "new_series.py", series, "--prompts"], f"{name} 프롬프트 만들기(series.json)", allow_fail=True, capture=True)
+            maker = series / "series.json"
         if not prompt.exists():
             need.append(f"{'장소' if kind == 'location' else '인물'} {name}: 프롬프트가 없다({maker.name} 에 한 줄 넣는다)")
             continue

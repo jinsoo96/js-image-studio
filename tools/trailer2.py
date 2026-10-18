@@ -321,6 +321,23 @@ def soundtrack(events, total, heart):
 
 # ---------- 묶기 ----------
 
+def auto_spec(ep, n=6):
+    """trailer.json 이 없을 때(새 작품 첫 화 등) 콘티에서 예고편 순서를 만든다: 대사가 있는 인물 컷을 고르게 n 개 + 제목.
+    (2026-10-18 새 웹툰 생성기 시험: 새 작품은 trailer.json 을 손으로 쓰기 전이라 예고편이 빠졌다)"""
+    board = load_json(ep / "storyboard.json")
+    cand = [p for p in board["panels"] if p.get("characters") and not p.get("composite")
+            and any(d.get("type") in ("speech", "thought", "monologue") for d in p.get("dialogue", []))]
+    if len(cand) > n:
+        cand = [cand[round(i * (len(cand) - 1) / (n - 1))] for i in range(n)]
+    beats = []
+    for p in cand:
+        lines = [d for d in p["dialogue"] if d.get("type") in ("speech", "thought", "monologue")][:2]
+        beats.append({"panel": p["id"], "line": "|".join(d["text"] for d in lines), "kind": lines[0]["type"], "sec": 2.0})
+    if beats:
+        beats[-1]["heart"] = True
+    return {"why": "자동(콘티의 대사 컷에서)", "beats": beats + [{"title": True, "sec": 2.8}]}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("episode_dir")
@@ -329,7 +346,7 @@ def main():
     if not shutil.which("ffmpeg"):
         sys.exit("ffmpeg 가 없다")
     ep = Path(args.episode_dir)
-    spec = load_json(ep / "trailer.json")
+    spec = load_json(ep / "trailer.json") if (ep / "trailer.json").exists() else auto_spec(ep)
     out = ep / "out"
     tmp = out / "_trailer2"
     tmp.mkdir(parents=True, exist_ok=True)

@@ -71,10 +71,15 @@ def kind_title(spec, ep):
     img = Image.new("RGB", (W, H), (10, 10, 14))
     d = ImageDraw.Draw(img)
     t = spec.get("title", "")
-    ft = f(230, path=BLACK_HAN)
-    d.text((W / 2, H / 2 - 30), t, font=ft, fill=(245, 245, 245), anchor="mm")
+    size = 230  # 짧은 제목(D+18) 기준 크기. 긴 제목은 폭 안에 들어올 때까지 줄인다(2026-10-18 "옥상 카페(시험)" 양옆이 잘림)
+    while size > 60 and d.textlength(t, font=f(size, path=BLACK_HAN)) > W * 0.9:
+        size -= 10
+    d.text((W / 2, H / 2 - 30), t, font=f(size, path=BLACK_HAN), fill=(245, 245, 245), anchor="mm")
     if spec.get("subtitle"):
-        d.text((W / 2, H / 2 + 120), spec["subtitle"], font=f(40), fill=(170, 170, 180), anchor="mm")
+        sub = 40
+        while sub > 22 and d.textlength(spec["subtitle"], font=f(sub)) > W * 0.9:
+            sub -= 2
+        d.text((W / 2, H / 2 + 120), spec["subtitle"], font=f(sub), fill=(170, 170, 180), anchor="mm")
     if spec.get("credit"):  # 작가 표기(글·그림)
         d.text((W / 2, H - 70), spec["credit"], font=f(30, bold=False), fill=(150, 150, 160), anchor="mm")
     return img

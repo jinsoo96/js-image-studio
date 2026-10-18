@@ -19,6 +19,19 @@ from PIL import Image
 ASPECT = {"landscape": "3:2", "close": "4:3", "wide": "16:9", "portrait": "2:3"}  # 콘티 aspect → 그림 비율(2화 v2 build_panels 와 같음)
 
 
+def norm_shot(s: str) -> str:
+    """샷 이름을 그리기 코드가 아는 꼴로(close-up · wide shot · medium shot · full shot · insert shot). 낱말로 본다.
+    (2026-10-18 agent app 새 웹툰 생성기 시험: 에이전트가 'close shot' 으로 써서 클로즈업 처리(장소를 뒤로, 배치 문장 빼기)가 안 걸렸다)"""
+    t = (s or "medium shot").lower()
+    if "close" in t:
+        return "extreme close-up" if "extreme" in t else "close-up"
+    for word, name in (("wide", "wide shot"), ("long", "wide shot"), ("establish", "wide shot"), ("medium", "medium shot"),
+                       ("mid", "medium shot"), ("full", "full shot"), ("insert", "insert shot")):
+        if word in t:
+            return name
+    return s
+
+
 def main():
     ep = Path(sys.argv[1]).resolve()
     series = ep.parents[1]
@@ -54,7 +67,7 @@ def main():
         loc = sp.get("location")
         if loc in scenes and chars and not sp.get("camera"):  # 어깨 너머 숏은 카메라 칸에 배치가 있다
             action = f"{action} SPACE (identical in every panel of this scene): {scenes[loc]}"
-        e = {"id": pid, "chars": chars, "outfit": sp.get("outfit", {}), "location": loc, "shot": sp.get("shot", "medium shot"),
+        e = {"id": pid, "chars": chars, "outfit": sp.get("outfit", {}), "location": loc, "shot": norm_shot(sp.get("shot", "medium shot")),
              "aspect": sp.get("aspect") or ASPECT.get(by_id[pid].get("aspect", "landscape"), "3:2"), "action": action}
         for k in ("acting", "camera", "refs_extra", "outfit_sheets"):
             if sp.get(k):
@@ -62,9 +75,11 @@ def main():
         panels.append(e)
     missing = [p["id"] for p in board["panels"] if p["id"] not in P and p["id"] not in reuse and not p.get("composite")]
     no_act = [p["id"] for p in panels if p["chars"] and "acting" not in p]
+    crowded = [p["id"] for p in panels if "close-up" in p["shot"] and len(p["chars"]) > 1 and not p.get("camera")]  # 클로즈업은 한 사람(panel-spec 규칙)
     (ep / "panels.json").write_text(json.dumps(panels, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"새로 그릴 컷 {len(panels)}, 가져다 쓴 컷 {len(reuse)}(이번에 복사 {copied}), 빠진 컷 {missing}, 연기 없는 인물 컷 {no_act}"
-          + (f", 콘티에 없는 번호 {unknown}" if unknown else "") + (f", 없는 재사용 그림 {bad_reuse}" if bad_reuse else ""))
+          + (f", 콘티에 없는 번호 {unknown}" if unknown else "") + (f", 없는 재사용 그림 {bad_reuse}" if bad_reuse else "")
+          + (f", 인물 둘 이상인 클로즈업 {crowded}(한 사람만 남기거나 medium·어깨 너머 숏 camera 로)" if crowded else ""))
 
 
 if __name__ == "__main__":
