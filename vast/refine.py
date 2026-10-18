@@ -110,7 +110,7 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
     return changed
 
 
-EDITABLE = {"표정연기", "옷"}  # 편집으로 고칠 수 있는 것. 좌우·시선·배경·인원은 구도라 다시 그린다
+EDITABLE = {"표정연기", "옷", "소품"}  # 편집으로 고칠 수 있는 것(소품 = 설명에 없는 휴대폰 등). 좌우·시선·배경·인원은 구도라 다시 그린다
 
 
 LIMB_ASK = ("Look only at the bodies. For each fully visible person (ignore people seen only from behind at the frame edge), count their arms "
@@ -403,6 +403,11 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     if swapped:
         probs.add("좌우")
         r["고칠점"] = (str(r.get("고칠점") or "") + " " + swapped[0]).strip()
+    if p.get("chars") and not re.search(r"\bphone", " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera", "extras")), re.I):
+        held = _vlm([img_path], 'Is any person in this picture holding a mobile phone in their hand? Answer JSON only: {"phone_in_hand": true|false}', max_tokens=40)
+        if held.get("phone_in_hand") is True:  # 설명에 없는 휴대폰(외출 1화 열세 컷: 건배하는 손, 발표하는 손에 폴더폰)
+            probs.add("소품")
+            r["고칠점"] = (str(r.get("고칠점") or "") + " 설명에 없는 휴대폰을 손에 들고 있다: 손을 비우거나 설명의 물건으로").strip()
     view = viewpoint_check(img_path, p)  # 카메라 기준으로 쪼갠 사실(앞모습·뒷모습·무릎·빈 좌석 방향)을 코드가 비교
     if view:
         probs.add("구도")
@@ -427,8 +432,11 @@ def staging_edit_prompt(series, p, r, probs) -> str:
     if "표정연기" in probs:
         parts.append(f"Change only the facial expressions and body language to match this acting: {p.get('acting') or p['action']} "
                      "Make the emotion strong and instantly readable like a Korean webtoon.")
+    if "소품" in probs:
+        parts.append("Remove the mobile phone from the person's hand; their hand rests empty or holds what the description says: "
+                     + re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)[:300])
     if "옷" in probs:
-        wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
+        wear ="; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
         if wear:
             parts.append(f"Change the clothes to match: {wear}.")
     if r.get("고칠점"):

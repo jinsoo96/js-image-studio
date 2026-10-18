@@ -250,9 +250,13 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     sj = series / "series.json"  # 작품마다 사람 규칙(기본은 성인 작품용 문장, 학생이 나오는 작품은 series.json 의 people_rule)
     people_rule = (json.loads(sj.read_text(encoding="utf-8")).get("people_rule") if sj.exists() else None) or "Adults with realistic proportions."
     # 시대 규칙(series.json era_rule): 2008년 작품에 스마트폰이 일곱 컷 나왔다(2026-10-18 외출 1화) → 그리기 지시에 시대 소품을 박는다
-    era_rule = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else None) or ""
+    sjd = json.loads(sj.read_text(encoding="utf-8")) if sj.exists() else {}
+    era_rule = sjd.get("era_rule") or ""
     if era_rule:
         people_rule = f"{people_rule} {era_rule}"
+    # 시대 소품 중 휴대폰 규칙은 컷 설명에 휴대폰이 나올 때만 붙인다. 늘 붙였더니 열세 컷에서 설명에 없는 휴대폰을 손에 쥐여 줬다(외출 1화)
+    if sjd.get("era_phone") and re.search(r"\bphone", " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera", "extras")), re.I):
+        people_rule = f"{people_rule} {sjd['era_phone']}"
     text_rule = (f"One single panel: no speech bubbles, no sound effects, no panel border. The only readable text drawn in the picture: {p['text_in_image']}; "
                  "no other letters, signs or logos." if p.get("text_in_image") else
                  "One single panel: no text, no speech bubbles, no sound effects, no panel border.")
