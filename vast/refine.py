@@ -64,11 +64,19 @@ def find_extras(img_path: Path, series, p) -> list:
     NAMES = names(series)
     chars = p.get("chars", [])
     wear = {c: o for c, o in (p.get("outfit") or {}).items()}
-    who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" (wears {wear[c]})" if c in wear else "") for c in chars) or "nobody"
+    # 같은 교복을 입은 두 소년을 '같은 사람 둘'로 보고 동만을 지웠다(2026-10-18 추몽 p032, 세 번) → 인물마다 생김새(작품 설정 who 의 앞 문장)를 같이 준다
+    looks = {}
+    sj = Path(series) / "series.json"
+    if sj.exists():
+        looks = {c: re.split(r"(?<=\.)\s", v.get("who", ""))[0][:140] for c, v in json.loads(sj.read_text(encoding="utf-8")).get("cast", {}).items()}
+    who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" ({looks[c]})" if looks.get(c) else "") + (f" wearing {wear[c]}" if c in wear else "")
+                    for c in chars) or "nobody"
     ask = (f"This webtoon panel should show exactly {len(chars)} {'person' if len(chars) == 1 else 'people'}: {who}."
            + (" An over-the-shoulder figure seen from behind in the foreground is also expected and is NOT extra." if is_ots(p.get("camera")) else "")
            + (f" These unnamed people are also expected and are NOT extra: {p['extras']}." if p.get("extras") else "")
-           + "\nLook at the image. List every EXTRA person who should not be there: duplicates of the same person (keep the one whose clothes match), "
+           + "\nLook at the image. If it shows no more people than expected, answer with an empty list: different expected people can wear "
+           "the same uniform, so do not call someone a duplicate just because the clothes match; compare faces, hair and build. "
+           "Otherwise list every EXTRA person who should not be there: true duplicates of the same person (keep the one whose clothes match), "
            "strangers, and small background figures. Describe each extra person in one short phrase by clothes and position "
            "(e.g. 'the old woman in a red coat standing at the far left'). "
            'Answer only JSON: {"extra": ["...", "..."]} or {"extra": []}.')

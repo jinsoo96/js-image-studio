@@ -121,6 +121,11 @@ def pick_expr(series, cid, name, text):
     # 표정 시트 12칸 + make_assets.py 로 늘린 센 표정(extra)
     files = [f"{cid}_expr_{k:02d}.png" for k in range(1, len(meta["labels"]) + 1)] + [x["file"] for x in meta.get("extra", [])]
     labels = meta["labels"] + [x["label"] for x in meta.get("extra", [])]
+    # 연기 글이 우는 걸 말하지 않으면 우는 칸은 후보에서 뺀다. 프롬프트로 일러도 "dry hopeful eyes" 에 눈물 칸을 골랐다(2026-10-18 추몽 p067)
+    said = re.sub(r"\b(no|without|dry|not)\s+(\w+\s+)?(tears?|crying|cry)\b", "", text, flags=re.I)
+    if not re.search(r"\b(tears?|tearful|crying|cries|cry|sob\w*|weep\w*)\b", said, re.I):
+        keep = [k for k, lb in enumerate(labels) if not re.search(r"tear|cry|crying|sob|weep|welling", lb, re.I)]
+        files, labels = [files[k] for k in keep], [labels[k] for k in keep]
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits. "
