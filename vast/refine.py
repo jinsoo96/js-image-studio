@@ -80,24 +80,7 @@ def find_extras(img_path: Path, series, p) -> list:
            "strangers, and small background figures. Describe each extra person in one short phrase by clothes and position "
            "(e.g. 'the old woman in a red coat standing at the far left'). "
            'Answer only JSON: {"extra": ["...", "..."]} or {"extra": []}.')
-    img = Image.open(img_path).convert("RGB")
-    img.thumbnail((1280, 1280))
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=88)
-    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
-                {"type": "text", "text": ask}]}]}
-    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            text = json.loads(r.read().decode("utf-8"))["choices"][0]["message"]["content"]
-        m = re.search(r"\{.*\}", text, re.S)
-        return [x for x in json.loads(m.group(0)).get("extra", []) if isinstance(x, str) and x.strip()] if m else []
-    except Exception as e:
-        print(f"  사람 세기 실패: {str(e)[:100]}", flush=True)
-        return []
+    return [x for x in _vlm([img_path], ask).get("extra", []) if isinstance(x, str) and x.strip()]
 
 
 def remove_prompt(extras: list) -> str:
@@ -139,26 +122,7 @@ LIMB_ASK = ("Look only at the bodies. For each fully visible person (ignore peop
 def extra_limbs(img_path: Path) -> list:
     """팔·손이 남는 사람(짧은 질문 하나로 따로 묻는다). 여러 항목을 함께 묻는 검수에선 '팔 셋'을 놓쳤고, 이것만 물으니 잡았다
     (2026-10-18 낙제생과 조교 p003: 팔짱 + 든 손). 실패하면 빈 목록."""
-    import base64
-    import io
-    import urllib.request
-    from PIL import Image
-    img = Image.open(img_path).convert("RGB")
-    img.thumbnail((1280, 1280))
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=90)
-    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
-                {"type": "text", "text": LIMB_ASK}]}]}
-    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
-        people = json.loads(re.search(r"\{.*\}", txt, re.S).group())["people"]
-    except Exception:
-        return []
+    people = [x for x in _vlm([img_path], LIMB_ASK).get("people", []) if isinstance(x, dict)]
     return [f"{x.get('who', '?')}: arms {x.get('arms')}, hands {x.get('hands')}" for x in people
             if x.get("extra_limb") or (x.get("arms") or 0) > 2 or (x.get("hands") or 0) > 2]
 
@@ -171,35 +135,21 @@ GAZE_ASK = ("Look only at where each person in this webtoon panel is looking. Is
 
 def camera_gaze(img_path: Path) -> list:
     """독자(카메라)를 정면으로 보는 사람(짧은 질문 하나로 따로 묻는다). 여러 항목 검수에선 놓쳤다
-    (2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐", p016 다락에서 정면 미소가 통과). 실패하면 빈 목록."""
-    import base64
-    import io
-    import urllib.request
-    from PIL import Image
-    img = Image.open(img_path).convert("RGB")
-    img.thumbnail((1280, 1280))
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=90)
-    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 200, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
-                {"type": "text", "text": GAZE_ASK}]}]}
-    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
-        return [str(x) for x in json.loads(re.search(r"\{.*\}", txt, re.S).group()).get("at_viewer", []) if x]
-    except Exception:
-        return []
+    (2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐", p016 다락에서 정면 미소가 통과)."""
+    return [str(x) for x in _vlm([img_path], GAZE_ASK, max_tokens=200).get("at_viewer", []) if x]
+
+
+JUDGE_FAILS = {"n": 0, "last": ""}  # 검사 모델 호출 실패 횟수. staging_check 가 앞뒤로 보고 '검사 못 함'을 건다(통과로 넘기지 않는다)
 
 
 def _vlm(images: list, text: str, max_tokens=300) -> dict:
-    """그림 여러 장 + 질문 하나를 그림 보는 모델에 묻고 JSON 을 받는다. 실패하면 빈 dict."""
+    """그림 여러 장 + 질문 하나를 그림 보는 모델(judge_ep 가 고른 주소)에 묻고 JSON 을 받는다.
+    모델에 닿지 않거나 답이 JSON 이 아니면 JUDGE_FAILS 를 올리고 빈 dict(부르는 쪽은 빈 답을 '문제 없음'으로 읽지 말고 staging_check 가 막는다).
+    (2026-10-18 외출: judge 서버가 502 인데 모든 검사가 빈 답 = 통과로 넘어갔다)"""
     import base64
     import io
-    import urllib.request
     from PIL import Image
+    from judge_ep import JudgeDown, chat
     content = []
     for p in images:
         img = Image.open(p).convert("RGB")
@@ -208,15 +158,15 @@ def _vlm(images: list, text: str, max_tokens=300) -> dict:
         img.save(buf, "JPEG", quality=90)
         content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
     content.append({"type": "text", "text": text})
-    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": content}]}
-    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
-        return json.loads(re.search(r"\{.*\}", txt, re.S).group())
-    except Exception:
+        txt = chat(content, max_tokens=max_tokens)
+        m = re.search(r"\{.*\}", txt, re.S)
+        if not m:
+            raise ValueError("JSON 없는 답: " + txt[:80])
+        return json.loads(m.group())
+    except (JudgeDown, ValueError) as e:
+        JUDGE_FAILS["n"] += 1
+        JUDGE_FAILS["last"] = str(e)[:160]
         return {}
 
 
@@ -330,6 +280,50 @@ def scene_present(ep_dir: Path, pid: str) -> list:
     return sorted(present - set(spec[pid].get("chars") or []))
 
 
+VIEW_ASK = """Describe this picture relative to the CAMERA (the viewer), only what you can see:
+1. For each main person: do we see the FRONT of them (their face and chest, even if the head is turned a little), their BACK (back of the head and back), or only their SIDE in profile? Are they sitting or standing? If sitting, which way do their KNEES and lap point: toward the camera (we see the knees from the front), away from the camera, left, right, or hidden?
+2. Seats that nobody in the picture sits on (rows of bus, train, cinema or car seats): which way do their seat cushions and fronts face: toward the camera (we see the cushions), away from the camera (we see the seat backs), left or right? "none" if no such seats are visible.
+3. If a steering wheel is visible, is it on the left or the right half of the picture? "none" if not visible.
+Answer JSON only: {"people": [{"who": "short description", "see": "front" | "back" | "side", "pose": "sitting" | "standing" | "other", "knees": "toward" | "away" | "left" | "right" | "hidden"}], "other_seats": "toward" | "away" | "left" | "right" | "mixed" | "none", "steering_wheel": "left" | "right" | "none"}"""
+
+
+def viewpoint_check(img_path: Path, p: dict) -> list:
+    """카메라 기준의 보이는 사실(사람 몸 방향·빈 좌석 방향·운전대 자리)을 그림 모델에게 묻고, 맞는지는 코드가 따진다.
+    "승객이 거꾸로 앉았나"를 통째로 물으면 진행 방향을 몰라 못 잡았다(외출 p008 버스, 세 번). 사용자 "카메라 시점을 생각하면 하네스가 잡아낼 텐데".
+    규칙: ① 탈것에서 앉은 사람의 몸 방향이 다른 좌석의 방향과 반대면 거꾸로 앉은 것 ② 컷 설명의 카메라가 사람 뒤(from behind)면 몸이 away,
+    정면(front view·facing them·through the windshield)이면 toward ③ 설명이 운전대 자리를 말하면(on the RIGHT/LEFT of the picture) 그 쪽."""
+    text = " ".join(str(p.get(k) or "") for k in ("action", "camera"))
+    vehicle = re.search(r"bus(?!_stop)|car|taxi|train|subway", str(p.get("location") or "") + " " + text, re.I)
+    want_away = re.search(r"from behind|seen from the seat behind|backs? (of|to)|from the back seat", text, re.I)
+    want_toward = re.search(r"front view|through the windshield|facing (them|the camera)|toward the camera", text, re.I)
+    wheel = re.search(r"(steering wheel|driver)[^.]{0,80}\b(RIGHT|LEFT)\b of the picture", text, re.I) or \
+        re.search(r"\b(RIGHT|LEFT)\b of the picture[^.]{0,40}(steering wheel|driver)", text, re.I)
+    if not (vehicle or want_away or want_toward):
+        return []
+    v = _vlm([img_path], VIEW_ASK, max_tokens=400)
+    people = [x for x in v.get("people", []) if isinstance(x, dict)]
+    out = []
+    seats = v.get("other_seats")
+    if vehicle and seats in ("toward", "away"):
+        # 빈 좌석의 등받이가 보이면(away) 좌석은 카메라 반대쪽을 본다 → 앉은 사람도 등이 보여야 한다. 앞모습이 보이면 거꾸로 앉은 것
+        clash = {"away": "front", "toward": "back"}[seats]
+        knee_clash = {"away": "toward", "toward": "away"}[seats]  # 고개를 돌려도 무릎은 앉은 방향을 따른다(외출 p008 UC 판: 둘 다 옆을 봤다)
+        for x in people:
+            if x.get("pose") == "sitting" and (x.get("see") == clash or x.get("knees") == knee_clash):
+                out.append(f"{x.get('who', '?')} 이(가) 다른 좌석과 반대 방향으로 앉아 있다(빈 좌석은 "
+                           f"{'등받이가 보이는데 이 사람은 앞모습' if seats == 'away' else '앞면이 보이는데 이 사람은 뒷모습'})")
+    if want_away and not want_toward and people and all(x.get("see") == "front" for x in people):
+        out.append("카메라가 사람 뒤에 있다고 했는데 모두 앞모습이다")
+    if want_toward and not want_away and people and all(x.get("see") == "back" for x in people):
+        out.append("정면 구도라고 했는데 모두 뒷모습이다")
+    # 운전대 자리는 대체 검사 모델(8B)이 맞게 그린 차를 반대로 읽어(외출 p037) 판정에 쓰지 않는다. 차는 컷 설명 규칙(앞 유리 밖 시점)으로 막는다
+    if False and wheel and v.get("steering_wheel") in ("left", "right"):
+        side = (wheel.group(2) if wheel.re.pattern.startswith("(steering") else wheel.group(1)).lower()
+        if v["steering_wheel"] != side:
+            out.append(f"운전대가 화면 {v['steering_wheel']} 쪽에 있다(설명은 {side})")
+    return out
+
+
 def logic_check(img_path: Path, p: dict, era: str = "") -> list:
     desc = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
     desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
@@ -366,9 +360,13 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     팔·손이 남으면 '몸' 으로 걸고, 구도처럼 다시 그린다(편집으로 팔 하나만 지우기는 잘 안 된다)."""
     sys.path.insert(0, str(ROOT / "mcp"))
     import vision_review as V
+    fails0 = JUDGE_FAILS["n"]
     V.DIRS[:] = [img_path.parent.name]
     r = V.review(series, ep_dir, [pid], workers=2)[0]
     probs = set(V._probs(r)) if r.get("판정") == "다시" else set()
+    if r.get("error") or r.get("raw"):  # 검수 모델이 답을 못 줬다: 통과로 넘기지 않는다
+        JUDGE_FAILS["n"] += 1
+        JUDGE_FAILS["last"] = str(r.get("error") or "형식 밖 답")[:160]
     limbs = extra_limbs(img_path)
     if limbs:
         probs.add("몸")
@@ -405,6 +403,10 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     if swapped:
         probs.add("좌우")
         r["고칠점"] = (str(r.get("고칠점") or "") + " " + swapped[0]).strip()
+    view = viewpoint_check(img_path, p)  # 카메라 기준으로 쪼갠 사실(앞모습·뒷모습·무릎·빈 좌석 방향)을 코드가 비교
+    if view:
+        probs.add("구도")
+        r["고칠점"] = (str(r.get("고칠점") or "") + " 카메라 기준 방향: " + "; ".join(view)).strip()
     if p.get("chars") or p.get("extras"):
         sj = Path(series) / "series.json"
         era = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else "") or ""
@@ -412,6 +414,9 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         if bad:
             probs.add("논리")
             r["고칠점"] = (str(r.get("고칠점") or "") + " 연출 논리: " + "; ".join(bad)).strip()
+    if JUDGE_FAILS["n"] > fails0:
+        probs.add("검사불가")
+        r["고칠점"] = (str(r.get("고칠점") or "") + f" 검사 모델이 답하지 못한 항목이 {JUDGE_FAILS['n'] - fails0}개({JUDGE_FAILS['last'][:80]})").strip()
     return r, probs
 
 
@@ -447,6 +452,9 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
             log(f"  {pid}: 연출 확인 통과" + (f" (애매, 사람 눈으로: {r.get('기타', '')[:120]})" if r.get("판정") == "애매" else ""))
             return
         log(f"  {pid}: 연출 확인 걸림 {sorted(probs)} {str(r.get('고칠점', ''))[:120]}")
+        if probs == {"검사불가"}:  # 검사를 못 했다: 다시 그려도 소용없다. 통과로도 넘기지 않는다
+            log(f"  {pid}: 연출 확인 남음 ['검사불가'] → 사람 눈으로 확인(검사 모델에 닿지 않음)")
+            return
         # 좌우만 바뀌었으면(그림에 글자가 없을 때) 다시 그리지 않고 뒤집는다. 다시 그리면 또 바뀌었다(외출 p012)
         if "좌우" in probs and not p.get("text_in_image") and not getattr(staging_pass, "_flipped", {}).get(pid):
             from PIL import Image, ImageOps

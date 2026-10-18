@@ -18,6 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vast"))  # judge_ep(그림 보는 모델 주소 고르기)
 VLM_URL = os.environ.get("VLM_URL", "https://judge-gateway.invalid/v1").rstrip("/")
 VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.8-27b")
 
@@ -102,16 +103,12 @@ def ask_one(series_dir: Path, ep: Path, pid: str, timeout=60) -> dict:
     img.thumbnail((1280, 1280))  # 896 에선 턱의 눈물 자국을 목걸이로 읽었다(2026-10-15 p078)
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=88)
-    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 700, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
-                {"type": "text", "text": ASK + spec_text(series_dir, ep, pid)}]}]}
-    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            text = json.loads(r.read().decode("utf-8"))["choices"][0]["message"]["content"]
-    except Exception as e:
+    content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
+               {"type": "text", "text": ASK + spec_text(series_dir, ep, pid)}]
+    try:  # 주소는 judge_ep 가 고른다(VLM_URL, 안 되면 VLM_FALLBACK)
+        from judge_ep import chat
+        text = chat(content, max_tokens=700, timeout=max(timeout, 90))
+    except Exception as e:  # noqa: BLE001
         return {"id": pid, "error": f"검수 모델 호출 실패: {str(e)[:120]}"}
     m = re.search(r"\{.*\}", text, re.S)
     try:

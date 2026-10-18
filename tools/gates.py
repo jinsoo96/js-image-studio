@@ -22,12 +22,10 @@ CHUNK = 18  # 컷 설명은 이만큼씩 나눠 채점(모델 입력이 길면 �
 
 
 def _llm(text: str, max_tokens=1500) -> dict:
-    body = {"model": LLM_MODEL, "temperature": 0.05, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": text}]}
-    req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    with urllib.request.urlopen(req, timeout=240) as r:
-        txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
+    """관문 judge 한 번(주소는 vast/judge_ep: VLM_URL, 안 되면 VLM_FALLBACK). 닿지 않으면 예외 = 관문을 통과시키지 않는다."""
+    sys.path.insert(0, str(ROOT / "vast"))
+    from judge_ep import chat
+    txt = chat([{"type": "text", "text": text}], max_tokens=max_tokens, temperature=0.05, timeout=240)
     return json.loads(re.search(r"\{.*\}", txt, re.S).group())
 
 
