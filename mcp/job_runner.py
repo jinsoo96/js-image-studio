@@ -31,6 +31,9 @@ for i, step in enumerate(steps, 1):
         f.write(f"\n== [{i}/{len(steps)}] {step['label']} ({time.strftime('%H:%M:%S')})\n")
         f.flush()
         p = subprocess.run(step["cmd"], cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT)
+    if p.returncode in step.get("review_codes", []):  # 실패가 아니라 사람 확인 대기(make_episode 종료 3 = 새 에셋 시안 확인)
+        status(state="needs_review", stopped_step=i, returncode=p.returncode, finished=time.strftime("%Y-%m-%d %H:%M:%S"))
+        sys.exit(0)
     if p.returncode != 0 and not step.get("allow_fail"):
         status(state="failed", failed_step=i, returncode=p.returncode)
         sys.exit(p.returncode)

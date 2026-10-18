@@ -874,7 +874,7 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
         return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
     cmd = [PY, str(TOOLS / "make_episode.py"), str(_series(series)), ep.name, "--until", until]
     cmd += (["--accept-new"] if accept_new else []) + ([] if check else ["--no-check"])
-    job = _start_job("make_episode", ep, [{"label": f"한 화 만들기({ep.name}, ~{until})", "cmd": cmd}])
+    job = _start_job("make_episode", ep, [{"label": f"한 화 만들기({ep.name}, ~{until})", "cmd": cmd, "review_codes": [3]}])
     n = len(_panels_json(ep))
     # 2026-10-16 agent app 시험: 이 작업을 같은 대화에서 기다리다 대화가 36분·도구 44번으로 길어져, 사내 모델이 마지막 답을 180초 안에 시작하지 못했다
     return (f"작업 시작 {job}: {ep.name}, 새 컷 약 {n}개, 예상 {max(3, n * 2 + 3)}분 안팎, 크레딧 0. "
@@ -981,6 +981,10 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
     look = [ln.strip() for ln in lines if "사람 눈으로 확인" in ln]
     if look:
         head += "\n사람 눈으로 확인할 컷: " + " / ".join(look)
+    if (st or {}).get("state") == "needs_review":  # 실패가 아니다: 새 인물 시트·장소 시안을 사용자가 보고 골라야 이어진다
+        cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
+        head += ("\n확인 필요(실패 아님): 시안을 사용자에게 보여 주고, 좋으면 make_episode(작품, 회차, accept_new=True), "
+                 "다시 뽑을 건 redo_candidate. 시안: " + " / ".join(cands))
     return f"{head}\n{json.dumps(st or {'state': 'starting'}, ensure_ascii=False)}\n--- 로그 끝 ---\n{tail}"
 
 

@@ -51,8 +51,11 @@ def candidate_prompt(series: Path, kind: str, name: str):
     prompt = prompt_f.read_text(encoding="utf-8").strip()
     refs = []
     if kind == "sheet":
-        ref = style_ref(series, name)
-        refs = [ref] if ref else []  # 새 작품의 첫 인물: 본보기 없이 글(시트 배치 + 그림체)로만 그린다(2026-10-18)
+        # 새 웹툰 생성기로 연 작품(series.json)은 그림체 글이 정본이라 인물 시트를 모두 글로만 그린다. 다른 인물 시트를 본보기로 넣으면
+        # 그 얼굴을 베꼈다(2026-10-18 agent app 시험: 여자 조교 유나가 남학생 민오 얼굴에 머리만 묶은 꼴, 옥상 카페에선 표정 칸 하나가 민호).
+        # 옛 작품(D+18·무대 뒤)은 하던 대로 주인공 시트를 그림체·배치 본보기로 쓴다.
+        ref = None if (series / "series.json").exists() else style_ref(series, name)
+        refs = [ref] if ref else []
         # 2026-10-16 시험: 중년 오 팀장이 젊은 미남으로 나왔다 → 나이를 못 박는다
         prompt = (SHEET_HEAD if ref else "") + prompt + "\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described."
     else:
