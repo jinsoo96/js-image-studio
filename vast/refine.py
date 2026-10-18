@@ -292,17 +292,25 @@ def logic_check(img_path: Path, p: dict, era: str = "") -> list:
 
 
 CONT_ASK = """Image 1 is the previous panel and image 2 is the next panel of the SAME scene in a webtoon (continuous time).
+Panel 1 shows: {who1}. Panel 2 shows: {who2}. Compare only the people who appear in BOTH panels; a different person in the next
+panel (a shot of the other speaker, a close-up of one person after a wide shot) is normal, not a mistake.
 What happens in panel 2: {desc}
 List differences between the two panels that a reader would notice as continuity mistakes, unless the text above explains them:
 a person who was sitting is now standing (or the reverse); the number or kind of drinks, cups or props on the table changes; clothes, hairstyle or glasses change; a person looks like a different person (face, age, build); the drawing style changes (line, coloring, proportions, realism); the left-right positions of the people swap.
 Only report clear mistakes. Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
 
 
-def continuity_pair(prev_img: Path, img: Path, p: dict) -> list:
-    """같은 장면의 앞 컷과 이 컷을 나란히 보고 이어짐이 깨진 곳(자세·소품·옷·얼굴·그림체·좌우)."""
+def continuity_pair(prev_img: Path, img: Path, p: dict, prev: dict | None = None, names: dict | None = None) -> list:
+    """같은 장면의 앞 컷과 이 컷을 나란히 보고 이어짐이 깨진 곳(자세·소품·옷·얼굴·그림체·좌우).
+    컷마다 누가 나오는지 알려 준다: 주고받는 대화 컷(이동원 → 상수)을 '같은 사람이 바뀌었다'로 오판했다(외출 p078→p077)."""
+    if prev is not None and not set(prev.get("chars") or []) & set(p.get("chars") or []):
+        return []  # 겹치는 인물이 없으면(다른 사람 컷) 사람 이어짐은 볼 게 없다
+    nm = names or {}
+    who = lambda q: ", ".join(nm.get(c, c) for c in (q.get("chars") or [])) or "no main characters"  # noqa: E731
     desc = " ".join(str(p.get(k) or "") for k in ("action", "acting"))
     desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
-    return [str(x) for x in _vlm([prev_img, img], CONT_ASK.format(desc=desc)).get("problems", []) if x]
+    ask = CONT_ASK.format(desc=desc, who1=who(prev or {}), who2=who(p))
+    return [str(x) for x in _vlm([prev_img, img], ask).get("problems", []) if x]
 
 
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):

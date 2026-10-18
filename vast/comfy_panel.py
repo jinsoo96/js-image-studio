@@ -127,7 +127,8 @@ def pick_expr(series, cid, name, text):
         keep = [k for k, lb in enumerate(labels) if not re.search(r"tear|cry|crying|sob|weep|welling", lb, re.I)]
         files, labels = [files[k] for k in keep], [labels[k] for k in keep]
     # 홍조도 같다: 연기 글이 붉어진다고 하지 않으면 볼·귀가 빨간 칸을 뺀다. 마흔여섯 재석이 다락에서 얼굴이 빨갛게 나왔다(2026-10-18 추몽 사용자 지적)
-    if not re.search(r"\b(blush\w*|flush\w*|red(dened)? (face|cheeks|ears)|embarrass\w*|shy)\b", text, re.I):
+    # 명시적으로 붉어진다고 쓸 때만(embarrassed·shy 로는 열지 않는다: 외출 p080 "a little shy" 에 마흔 상수가 볼이 빨갛게 나왔다)
+    if not re.search(r"\b(blush\w*|flush\w*|red(dened)? (face|cheeks))\b", text, re.I):
         keep = [k for k, lb in enumerate(labels) if not re.search(r"blush|red ears|red cheeks|flush|fluster|shy|embarrass", lb, re.I)]
         files, labels = [files[k] for k in keep], [labels[k] for k in keep]
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"

@@ -42,9 +42,12 @@ def main():
     only = set(a.only.split(",")) if a.only else None
     todo = [x for x in pairs(ep) if not only or x[0]["id"] in only or x[2]["id"] in only]
 
+    from hf_panel import names
+    nm = names(ep.parents[1])
+
     def one(x):
         pp, pimg, p, img = x
-        return pp["id"], p["id"], continuity_pair(pimg, img, p)
+        return pp["id"], p["id"], continuity_pair(pimg, img, p, pp, nm)
     with ThreadPoolExecutor(4) as ex:
         res = list(ex.map(one, todo))
     bad = [(a_, b_, pr) for a_, b_, pr in res if pr]
