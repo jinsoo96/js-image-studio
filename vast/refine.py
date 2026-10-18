@@ -494,7 +494,49 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
     # 고치기 사다리의 마지막 칸: 다시 그려도 안 고쳐진 시선·방향은 편집으로 돌린다(외출 p004 박 과장: 다시 그리면 또 정면, 편집은 한 번에 됐다)
     if best[2] and best[2] <= {"시선", "좌우시선"} and fix_facing(c, cache, dst, series, ep_dir, p, seed, log):
         return
+    # 인원이 남으면(같은 사람 둘 등) 콕 집은 지우기 편집 + 사람 수만 따로 세서 확인(외출 p008: 다시 그리기·남는 사람 지우기로 안 되던 것이 한 번에 됐다)
+    if "인원" in best[2] and fix_count(c, cache, dst, p, seed, log):
+        return
     log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
+
+
+COUNT_ASK = 'How many people are visible in this picture (count every visible person, including partly visible ones)? Answer JSON only: {"people": N}'
+WHO_EXTRA = ("This picture should show exactly {n} people: {who}. It shows more. Which ONE visible person is the extra one (a duplicate or a stranger)? "
+             'Describe them by position and clothes, e.g. "the woman on the far left by the window". Answer JSON only: {{"extra": "..."}}')
+
+
+def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
+    """사람이 많으면 남는 한 사람을 위치·옷으로 짚어 지우고, 사람 수만 다시 센다(맞으면 True, 아니면 원본으로 되돌리고 False). 최대 3번."""
+    from hf_panel import names
+    want = len(p.get("chars") or []) + (1 if re.search(r"\bone\b", str(p.get("extras") or ""), re.I) else 0)
+    if not want:
+        return False
+    before = dst.read_bytes()
+    for k in range(3):
+        n = _vlm([dst], COUNT_ASK, max_tokens=40).get("people")
+        if n == want:
+            log(f"  {p['id']}: 사람 수 맞춤({want}명) → 통과")
+            return True
+        if not isinstance(n, int) or n < want:
+            break
+        nm = names(Path(dst).parents[3]) if len(Path(dst).parents) > 3 else {}
+        who = ", ".join(nm.get(c_, c_) for c_ in p.get("chars") or [])
+        extra = _vlm([dst], WHO_EXTRA.format(n=want, who=who), max_tokens=80).get("extra")
+        if not extra:
+            break
+        prompt = (f"In <image1>, remove {extra} entirely; fill the space with the background around them. Keep everyone else, the place, the light and "
+                  "the framing exactly the same.")
+        g = graph(prompt, [upload(c, dst, cache)], 0, 0, seed % 100000 + 41 + k, 8, 1024, turbo=True, edit=True)
+        g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/count_fix"
+        hist = c.wait(c.queue(g), 600)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+        log(f"  {p['id']}: 남는 사람 콕 집어 지움({k + 1}회): {extra}")
+    if _vlm([dst], COUNT_ASK, max_tokens=40).get("people") == want:
+        log(f"  {p['id']}: 사람 수 맞춤({want}명) → 통과")
+        return True
+    dst.write_bytes(before)
+    log(f"  {p['id']}: 사람 수를 못 맞춤 → 되돌림")
+    return False
 
 
 TURN = ("In <image1>, turn only these people so that their face and shoulders point toward the person or thing they are dealing with, in profile or "
