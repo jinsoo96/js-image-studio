@@ -476,6 +476,103 @@ def wrap_px(d, text, fnt, max_w):
     return out
 
 
+def kind_flip(spec, ep):
+    """2000년대 폴더폰을 펼친 화면(위 작은 액정, 아래 자판). 스마트폰 이전 시대 작품용(2026-10-18 비금경 「외출」, 2000년대 후반).
+    spec: {"time": "17:42", "screen": "sms", "from": "정은영 과장", "text": "...", "date": "10/03"}   받은 문자 하나
+          {"time": "21:03", "screen": "missed", "calls": [{"name": "강영원 PM", "time": "18:02"}, ...]}   부재중 전화
+          {"time": "...", "screen": "send", "to": "정은영 과장", "text": "..."}   보내는 문자"""
+    W, H = 832, 1216
+    img = room_bg(W, H)
+    d = ImageDraw.Draw(img)
+    body, metal = (52, 54, 62), (168, 172, 182)
+    # 윗판(액정)과 아랫판(자판), 가운데 경첩
+    top, bot = (186, 70, 646, 620), (196, 646, 636, 1150)
+    for box in (top, bot):
+        shadow = Image.new("L", img.size, 0)
+        ImageDraw.Draw(shadow).rounded_rectangle([box[0] + 8, box[1] + 14, box[2] + 8, box[3] + 14], radius=46, fill=140)
+        img.paste((0, 0, 0), (0, 0), shadow.filter(ImageFilter.GaussianBlur(18)))
+        d.rounded_rectangle(box, radius=46, fill=body, outline=metal, width=3)
+    d.rounded_rectangle([196, 612, 636, 656], radius=18, fill=(40, 42, 48), outline=metal, width=2)
+    d.rounded_rectangle([386, 96, 446, 104], radius=4, fill=(24, 24, 28))  # 수화부
+    sx0, sy0, sx1, sy1 = 222, 130, 610, 584
+    lcd_bg, ink, sub, accent = (226, 236, 246), (22, 30, 44), (88, 100, 120), (40, 92, 170)
+    d.rectangle([sx0, sy0, sx1, sy1], fill=lcd_bg)
+    d.rectangle([sx0, sy0, sx1, sy0 + 34], fill=(198, 214, 232))  # 위 상태 줄
+    for k in range(4):
+        d.rectangle([sx0 + 14 + k * 9, sy0 + 24 - k * 5, sx0 + 20 + k * 9, sy0 + 28], fill=ink)  # 안테나 막대
+    d.text((sx1 - 14, sy0 + 17), spec.get("time", ""), font=f(20), fill=ink, anchor="rm")
+    y = sy0 + 50
+    scr = spec.get("screen", "sms")
+    if scr == "missed":
+        d.text(((sx0 + sx1) / 2, y + 14), f"부재중 전화 {len(spec.get('calls', []))}통", font=f(26), fill=accent, anchor="mm")
+        y += 50
+        for cl in spec.get("calls", []):
+            d.line([(sx0 + 12, y), (sx1 - 12, y)], fill=(180, 192, 210), width=1)
+            d.text((sx0 + 18, y + 26), "☏ " + cl.get("name", ""), font=f(24), fill=ink, anchor="lm")
+            d.text((sx1 - 18, y + 26), cl.get("time", ""), font=f(20, bold=False), fill=sub, anchor="rm")
+            y += 54
+    else:
+        who = spec.get("from") if scr == "sms" else spec.get("to")
+        label = ("받은 문자" if scr == "sms" else "보내는 문자") + (f"  {spec['date']}" if spec.get("date") else "")
+        d.text((sx0 + 16, y + 10), label, font=f(18, bold=False), fill=sub, anchor="lm")
+        d.text((sx0 + 16, y + 44), ("보낸 사람: " if scr == "sms" else "받는 사람: ") + (who or ""), font=f(22), fill=ink, anchor="lm")
+        d.line([(sx0 + 12, y + 66), (sx1 - 12, y + 66)], fill=(180, 192, 210), width=1)
+        ty = y + 92
+        for ln in wrap_px(d, spec.get("text", ""), f(26, bold=False), sx1 - sx0 - 36):
+            d.text((sx0 + 18, ty), ln, font=f(26, bold=False), fill=ink, anchor="lm")
+            ty += 38
+    # 아래 소프트키 줄
+    d.rectangle([sx0, sy1 - 34, sx1, sy1], fill=(198, 214, 232))
+    keys = ("답장", "확인", "삭제") if scr == "sms" else ("통화", "확인", "메뉴") if scr == "missed" else ("전송", "", "취소")
+    for k, t in enumerate(keys):
+        d.text((sx0 + (sx1 - sx0) * (k * 2 + 1) / 6, sy1 - 17), t, font=f(18, bold=False), fill=ink, anchor="mm")
+    # 자판: 방향키 + 숫자판
+    cx = (bot[0] + bot[2]) / 2
+    d.ellipse([cx - 62, 690, cx + 62, 800], outline=metal, width=3, fill=(64, 66, 76))
+    d.ellipse([cx - 24, 726, cx + 24, 764], fill=(84, 86, 98), outline=metal, width=2)
+    for r in range(4):
+        for c in range(3):
+            kx, ky = bot[0] + 70 + c * 120, 840 + r * 70
+            d.rounded_rectangle([kx, ky, kx + 90, ky + 48], radius=14, fill=(70, 72, 82), outline=(110, 112, 124), width=1)
+            d.text((kx + 45, ky + 24), "123456789*0#"[r * 3 + c], font=f(24), fill=(214, 218, 228), anchor="mm")
+    return img
+
+
+def kind_mail(spec, ep):
+    """2000년대 PC 웹메일에서 받은 메일 한 통(첨부 목록 포함). 실제 서비스 로고는 넣지 않는다.
+    spec: {"from": "강영원", "subject": "...", "date": "2008.10.03 21:47", "attachments": ["PI_제안서_1.ppt", ...], "body": "..."}"""
+    W, H = 1344, 1000
+    img = Image.new("RGB", (W, H), (40, 44, 52))
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = 70, 60, W - 70, H - 60  # 모니터 속 창
+    d.rectangle([x0, y0, x1, y1], fill=(250, 250, 252), outline=(150, 156, 170), width=2)
+    d.rectangle([x0, y0, x1, y0 + 44], fill=(58, 92, 156))  # 창 제목 줄
+    d.text((x0 + 18, y0 + 22), "받은편지함", font=f(22), fill=(240, 244, 252), anchor="lm")
+    for k, c in enumerate(((236, 96, 90), (240, 190, 70), (110, 190, 100))):
+        d.ellipse([x1 - 100 + k * 28, y0 + 13, x1 - 82 + k * 28, y0 + 31], fill=c)
+    y = y0 + 74
+    d.text((x0 + 30, y), spec.get("subject", ""), font=f(32), fill=(24, 28, 36), anchor="lm")
+    y += 50
+    d.text((x0 + 30, y), f"보낸 사람  {spec.get('from', '')}", font=f(22, bold=False), fill=(70, 76, 90), anchor="lm")
+    d.text((x1 - 30, y), spec.get("date", ""), font=f(20, bold=False), fill=(110, 116, 130), anchor="rm")
+    y += 30
+    d.line([(x0 + 24, y), (x1 - 24, y)], fill=(210, 214, 222), width=2)
+    att = spec.get("attachments", [])
+    if att:
+        y += 22
+        box_h = 40 + 38 * len(att)
+        d.rectangle([x0 + 30, y, x1 - 30, y + box_h], fill=(242, 245, 250), outline=(204, 210, 222))
+        d.text((x0 + 48, y + 22), f"첨부파일 {len(att)}개", font=f(20), fill=(58, 92, 156), anchor="lm")
+        for k, a in enumerate(att):
+            d.text((x0 + 60, y + 60 + k * 38), "▸ " + a, font=f(22, bold=False), fill=(36, 40, 52), anchor="lm")
+        y += box_h
+    y += 34
+    for ln in wrap_px(d, spec.get("body", ""), f(24, bold=False), x1 - x0 - 80):
+        d.text((x0 + 40, y), ln, font=f(24, bold=False), fill=(36, 40, 52), anchor="lm")
+        y += 36
+    return img
+
+
 def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
@@ -485,7 +582,7 @@ def main():
     spec = panel["composite"]
     img = {"title": kind_title, "profile": kind_profile, "chat": kind_chat, "calendar": kind_calendar,
            "insta": kind_insta, "calls": kind_calls, "blocked": kind_blocked, "search": kind_search,
-           "notice": kind_notice, "band": kind_band, "cover": kind_cover}[spec["kind"]](spec, ep)
+           "notice": kind_notice, "band": kind_band, "cover": kind_cover, "flip": kind_flip, "mail": kind_mail}[spec["kind"]](spec, ep)
     out = ep / "panels" / f"{pid}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
