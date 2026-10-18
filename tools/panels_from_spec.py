@@ -115,6 +115,9 @@ def staging_lint(panels, board) -> list:
             out.append(f"{p['id']} 앞 컷에서 앉아 있었는데 이 컷은 'lean'만 있다(seated 를 다시 쓴다, 안 쓰면 일어선 사람을 그렸다)")
         if re.search(r"\bmugs?\b|\bcups?\b|\bglass(es)? of\b", t, re.I) and not re.search(r"\b(beer|coffee|soju|wine|tea|water|cider|juice|milk|ssanghwa)\b", t, re.I):
             out.append(f"{p['id']} 잔의 종류가 없다(beer mug·coffee cup 처럼, 개수까지)")
+        neg = re.findall(r"\b(?:no|without)\s+(hands?|people|person|faces?|phones?|text|tears?|smile|one)\b", t, re.I)
+        if neg:  # 부정어로 쓰면 그 낱말을 그린다(no tears → 눈물, no hands → 손: 외출 p021 두 번)
+            out.append(f"{p['id']} 부정어 'no/without {', '.join(sorted(set(neg)))}' 가 있다(그 낱말을 그린다): 보이는 것만 쓴다")
         act = str(p.get("acting") or "")
         if SAD.search(act) and re.search(r"\bsmil\w*", act, re.I) and not re.search(r"without a smile|no smile|not smiling", act, re.I):
             out.append(f"{p['id']} 서운함·외로움 연기에 smile 이 들어 있다(밝게 웃는 얼굴로 그려진다, 보이는 상태로만: lips closed, eyes lowered)")
