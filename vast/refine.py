@@ -231,6 +231,7 @@ Check only these and answer from what you actually see:
 3. Props: do the number and kind of drinks, cups and key objects match the description (for example exactly two beer mugs, not three; beer mugs, not coffee cups)?
 4. Faces: if a person is speaking or reacting in this moment, is their face visible? Only the back of the head is a mistake unless the description asks for a back view.
 Only report clear mistakes. Do not report small differences in exactly where someone's eyes point, as long as people who talk look toward each other.
+A screen or monitor seen from behind is normal when the camera looks at the person from behind their screen (the screen faces them and lights their face).
 Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
 
 FACING_ASK = """Several people are in this webtoon panel and they are dealing with each other. For EACH person, look at the direction of their FACE and SHOULDERS:
@@ -242,6 +243,43 @@ Answer JSON only: {"facing_viewer": ["short description of each person facing th
 def facing_check(img_path: Path) -> list:
     """대화하는 사람이 상대가 아니라 독자 쪽으로 몸·얼굴을 두고 서 있나(외출 p004 박희재: 눈만 옆을 보고 몸은 정면이라 시선 검사를 통과했다)."""
     return [str(x) for x in _vlm([img_path], FACING_ASK).get("facing_viewer", []) if x]
+
+
+SIDE_ASK = """Look at the main people in this webtoon panel. Is the person on the LEFT half of the picture a man or a woman, and the person on the RIGHT half?
+Answer JSON only: {"left": "man" | "woman" | "unclear", "right": "man" | "woman" | "unclear"}"""
+
+
+def expected_sides(series, p: dict, layout: str = "") -> dict:
+    """컷 설명(action·camera)에 적힌 화면 좌우를 인물 성별로: {"left": "man", "right": "woman"}. 못 읽으면 {}."""
+    from hf_panel import names
+    if len(p.get("chars") or []) != 2:
+        return {}
+    NAMES = names(series)
+    sj = Path(series) / "series.json"
+    cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
+    text = " ".join(str(p.get(k) or "") for k in ("action", "camera")) + " " + layout  # 장면 배치 문장(panels_spec scenes)도 본다
+    side, sex = {}, {}
+    for cid in p["chars"]:
+        short = re.sub(r"\s*\(.*?\)", "", NAMES.get(cid, cid)).split()[-1]
+        m = re.search(rf"{re.escape(short)}[^.;]{{0,45}}?\b(LEFT|RIGHT)\b", text)
+        w = str(cast.get(cid, {}).get("who", "")).lower()
+        g = "woman" if re.search(r"\bwoman\b|\bgirl\b", w) else "man" if re.search(r"\bman\b|\bboy\b", w) else ""
+        if m and g:
+            side[cid], sex[cid] = m.group(1).lower(), g
+    if len(side) != 2 or len(set(side.values())) != 2 or len(set(sex.values())) != 2:
+        return {}
+    return {s: sex[c] for c, s in side.items()}
+
+
+def side_check(series, img_path: Path, p: dict, layout: str = "") -> list:
+    """180도 법칙: 장면 배치의 좌우와 그림의 좌우가 같은가(외출 p010·p012 를 다시 그릴 때마다 상수·은영이 바뀌었다)."""
+    want = expected_sides(series, p, layout)
+    if not want:
+        return []
+    got = _vlm([img_path], SIDE_ASK)
+    if got.get("left") == want.get("right") and got.get("right") == want.get("left"):
+        return [f"좌우가 바뀌었다: 왼쪽이 {want['left']}, 오른쪽이 {want['right']} 여야 한다"]
+    return []
 
 
 def logic_check(img_path: Path, p: dict, era: str = "") -> list:
@@ -290,6 +328,12 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         if facing:
             probs.add("시선")
             r["고칠점"] = (str(r.get("고칠점") or "") + " 상대 대신 독자 쪽을 향함: " + "; ".join(facing)).strip()
+    sc = ep_dir / "panels_spec.json"
+    layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("location") or "", "") if sc.exists() else "")
+    swapped = side_check(series, img_path, p, layout)
+    if swapped:
+        probs.add("좌우")
+        r["고칠점"] = (str(r.get("고칠점") or "") + " " + swapped[0]).strip()
     if p.get("chars") or p.get("extras"):
         sj = Path(series) / "series.json"
         era = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else "") or ""
@@ -332,6 +376,13 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
             log(f"  {pid}: 연출 확인 통과" + (f" (애매, 사람 눈으로: {r.get('기타', '')[:120]})" if r.get("판정") == "애매" else ""))
             return
         log(f"  {pid}: 연출 확인 걸림 {sorted(probs)} {str(r.get('고칠점', ''))[:120]}")
+        # 좌우만 바뀌었으면(그림에 글자가 없을 때) 다시 그리지 않고 뒤집는다. 다시 그리면 또 바뀌었다(외출 p012)
+        if "좌우" in probs and not p.get("text_in_image") and not getattr(staging_pass, "_flipped", {}).get(pid):
+            from PIL import Image, ImageOps
+            ImageOps.mirror(Image.open(dst).convert("RGB")).save(dst)
+            staging_pass._flipped = {**getattr(staging_pass, "_flipped", {}), pid: True}
+            log(f"  {pid}: 좌우를 뒤집음(장면 배치와 반대로 그려졌다)")
+            continue
         if probs <= EDITABLE:
             before = dst.read_bytes()
             keep = dst.parent / "_stage1"
