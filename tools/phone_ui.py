@@ -445,12 +445,14 @@ def kind_cover(spec, ep):
         blocks.append((30 + 52 * len(lines), lambda y, lines=lines: [d.text((W / 2, y + 40 + 52 * k), ln, font=serif(34, "Light"), fill=(170, 176, 186), anchor="mm")
                                                                     for k, ln in enumerate(lines)]))
     total = sum(h for h, _ in blocks)
-    y = (H - (150 if spec.get("credit") else 0) - total) / 2
+    y = (H - (150 + 48 * str(spec.get("credit") or "").count("\n") if spec.get("credit") else 0) - total) / 2
     for h, draw in blocks:
         draw(y)
         y += h
-    if spec.get("credit"):
-        d.text((W / 2, H - 100), spec["credit"], font=serif(34, "Regular"), fill=(150, 158, 168), anchor="mm")
+    if spec.get("credit"):  # 줄바꿈(\n)이 있으면 여러 줄로(외출: "글: 비금경" 다음 줄에 "그림: 미사일 발사대")
+        lines = str(spec["credit"]).split("\n")
+        for k, ln in enumerate(lines):
+            d.text((W / 2, H - 100 - 48 * (len(lines) - 1 - k)), ln, font=serif(34, "Regular"), fill=(150, 158, 168), anchor="mm")
     return img
 
 
