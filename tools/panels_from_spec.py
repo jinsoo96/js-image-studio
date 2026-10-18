@@ -106,6 +106,9 @@ def staging_lint(panels, board) -> list:
     for p in panels:
         t = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
         loc = str(p.get("location") or "")
+        if p["chars"] and re.search(r"bus(?!_stop)|train|subway", loc) and re.search(r"from the front of the (bus|train)|looking toward the back|toward the camera|facing the camera|seats? facing the", t, re.I):
+            # 그림 모델은 버스 실내를 늘 뒤에서 앞을 보는 구도로 그린다. 앞에서 뒤를 보라고 쓰면 승객만 거꾸로 앉힌다(외출 p008, 세 번)
+            out.append(f"{p['id']} 버스·지하철을 앞에서 뒤로 보는 구도는 모델이 못 그린다(승객이 거꾸로 앉는다): 승객 뒤에서 앞을 보거나, 통로 건너편에서 옆모습으로")
         if p["chars"] and re.search(r"bus(?!_stop)|car_|_car|taxi|train|subway", loc) and not re.search(r"windshield|front of the bus|toward the back|looking back|back seat|direction of travel|driver'?s seat", t, re.I):
             out.append(f"{p['id']} 탈것인데 좌석·운전석 방향이 없다(버스는 앞에서 뒤를 보면 좌석이 카메라를 향함, 한국 차는 운전석 왼쪽)")
         if re.search(r"\blean(s|ing)?\b", t, re.I) and not SEATED.search(t) and prev and prev["location"] == p["location"] and SEATED.search(prev["t"]):
