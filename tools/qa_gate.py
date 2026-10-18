@@ -90,7 +90,9 @@ def lint_board(ep):
             kind, text = d.get("type", "speech"), d.get("text", "")
             if kind == "thought" and retrospective(text):
                 warns.append(("글", pid, f"생각 풍선에 되돌아보는 말 → 배경 글(monologue): {text[:30]}"))
-            if kind in ("narration", "monologue") and not d.get("box") and not text.startswith("[") and d.get("style") != "card":
+            # authored = 사용자 글콘티 그대로인 줄(일부러 끊은 독백 "마흔여섯." 같은 것, 2026-10-18 추몽). 에이전트가 쓴 줄은 그대로 검사한다
+            if (kind in ("narration", "monologue") and not d.get("box") and not text.startswith("[") and d.get("style") != "card"
+                    and not d.get("authored")):
                 if not sentence_ok(text):
                     warns.append(("글", pid, f"자막이 표지판식(서술어 없음): {text[:30]}"))
             for w in BANNED_WORDS:

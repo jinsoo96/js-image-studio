@@ -32,6 +32,15 @@ TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turb
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
          "4:3": (1664, 1248), "3:2": (1760, 1184), "16:9": (1920, 1088)}
 MAX_REFS = 10
+OTS_WORDS = re.compile(r"over[- ]the[- ]shoulder|shoulder[- ]over|\bOTS\b|어깨 너머", re.I)
+
+
+def is_ots(camera) -> bool:
+    """카메라 칸이 어깨 너머 숏인가. D+18 은 카메라 칸을 어깨 너머에만 써서 '카메라가 있으면 앞사람 하나 더'로 셌는데,
+    추몽은 측면·바스트 같은 다른 지시에도 써서 그 '앞사람'이 같은 인물로 하나 더 그려졌다(2026-10-18 p075 재석 둘)."""
+    return bool(camera) and bool(OTS_WORDS.search(camera))
+
+
 PEOPLE_WORDS = re.compile(r"\b(eyes?|hair|faces?|blush|chest|adults?|lash(es)?|chibi|proportions?|skin|body|bodies|lips|nose)\b", re.I)
 
 
@@ -114,7 +123,9 @@ def pick_expr(series, cid, name, text):
     labels = meta["labels"] + [x["label"] for x in meta.get("extra", [])]
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
-           + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits.")
+           + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits. "
+             "Choose a tearful or crying expression only if the acting text itself mentions tears or crying; for quiet, calm or "
+             "restrained acting answer 0.")  # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069)
     body = {"model": LLM_MODEL, "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": ask}]}
     req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
@@ -143,7 +154,8 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     NAMES = names(series)
     refs, lines = [], []
     # 클로즈업은 장소를 맨 뒤로: 맨 앞에 두면 그 방 구도를 따라 넓은 컷이 되고 인물이 한 번 더 나왔다(p079 얼굴 꽉 찬 컷이 방 전경 + 재민 둘)
-    close = "close-up" in (p.get("shot") or "")
+    # 인서트·탑뷰·디테일도 장소를 앞에 두면 그 넓은 구도를 따라 그렸다(2026-10-18 추몽 p017·p018·p068·p078) → 클로즈업처럼 뒤에
+    close = any(w in (p.get("shot") or "") for w in ("close-up", "insert", "top view", "detail"))
     loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") else None
     if loc and not close:
         refs.append(loc)
@@ -195,9 +207,9 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     extra = series / "prompts" / "rules_extra.txt"
     if n:
         count = (f"Exactly {n} {'person' if n == 1 else 'people'}" + (" from the references" if extras else " in the panel")
-                 + (" plus the over-the-shoulder foreground figure described in CAMERA" if p.get("camera") else "") + ", each appearing only once."
+                 + (" plus the over-the-shoulder foreground figure described in CAMERA" if is_ots(p.get("camera")) else "") + ", each appearing only once."
                  + (f" Besides them only these unnamed people: {extras}." if extras else
-                    " No other people anywhere in the frame, not even small in the background." if n == 1 and not p.get("camera") else ""))
+                    " No other people anywhere in the frame, not even small in the background." if n == 1 and not is_ots(p.get("camera")) else ""))
     else:
         count = f"No main characters. Only these unnamed people: {extras}." if extras else "No people in the panel."
     sj = series / "series.json"  # 작품마다 사람 규칙(기본은 성인 작품용 문장, 학생이 나오는 작품은 series.json 의 people_rule)

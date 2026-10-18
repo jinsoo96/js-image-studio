@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import LLM_MODEL, LLM_URL, graph, pick_expr, upload  # noqa: E402
+from comfy_panel import LLM_MODEL, LLM_URL, graph, is_ots, pick_expr, upload  # noqa: E402
 
 
 def refine_prompt(series, p, expr=True):
@@ -66,7 +66,7 @@ def find_extras(img_path: Path, series, p) -> list:
     wear = {c: o for c, o in (p.get("outfit") or {}).items()}
     who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" (wears {wear[c]})" if c in wear else "") for c in chars) or "nobody"
     ask = (f"This webtoon panel should show exactly {len(chars)} {'person' if len(chars) == 1 else 'people'}: {who}."
-           + (" An over-the-shoulder figure seen from behind in the foreground is also expected and is NOT extra." if p.get("camera") else "")
+           + (" An over-the-shoulder figure seen from behind in the foreground is also expected and is NOT extra." if is_ots(p.get("camera")) else "")
            + (f" These unnamed people are also expected and are NOT extra: {p['extras']}." if p.get("extras") else "")
            + "\nLook at the image. List every EXTRA person who should not be there: duplicates of the same person (keep the one whose clothes match), "
            "strangers, and small background figures. Describe each extra person in one short phrase by clothes and position "

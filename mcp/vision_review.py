@@ -67,7 +67,8 @@ def spec_text(series_dir: Path, ep: Path, pid: str) -> str:
         if p.get("camera"):
             lines.append("카메라: " + p["camera"])
             # 2026-10-18 시험: 어깨 너머 숏 앞의 뒷모습을 '설명에 없는 사람'으로 걸었다(등장인물 칸엔 화면 속 주인공만 있다)
-            lines.append(f"기대 사람 수: {len(p.get('chars') or chars)}명 + 카메라 설명의 앞에 걸린 뒷모습(어깨) 1명. 그 뒷모습은 설명에 있는 사람이다")
+            if re.search(r"over[- ]the[- ]shoulder|shoulder[- ]over|\bOTS\b|어깨 너머", p["camera"], re.I):  # 어깨 너머 숏일 때만(측면·바스트 지시도 카메라 칸에 쓴다)
+                lines.append(f"기대 사람 수: {len(p.get('chars') or chars)}명 + 카메라 설명의 앞에 걸린 뒷모습(어깨) 1명. 그 뒷모습은 설명에 있는 사람이다")
         if p.get("acting"):
             lines.append("연기: " + p["acting"])
         if p.get("extras"):  # 이름 없는 군중은 설명에 있는 사람이다(추몽: 공중전화 줄, 반 아이들)
