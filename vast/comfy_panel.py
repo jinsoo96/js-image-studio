@@ -124,7 +124,8 @@ def pick_expr(series, cid, name, text):
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits. "
-             "Choose a tearful or crying expression only if the acting text itself mentions tears or crying; for quiet, calm or "
+             "Choose a tearful or crying expression only if the acting text says the character is crying or has tears "
+             "(phrases like 'no tears' or 'dry eyes' mean NOT crying); for quiet, calm or "
              "restrained acting answer 0.")  # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069)
     body = {"model": LLM_MODEL, "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": ask}]}

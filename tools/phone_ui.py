@@ -15,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -382,6 +383,77 @@ def kind_band(spec, ep):
     return img
 
 
+SERIF = Path(__file__).resolve().parents[1] / "fonts" / "NotoSerifKR-Variable.ttf"  # 한자까지 있는 명조(나눔명조엔 한자가 없다)
+
+
+def serif(size, weight="Regular"):
+    fnt = ImageFont.truetype(str(SERIF), size)
+    fnt.set_variation_by_name(weight)
+    return fnt
+
+
+def _hex(c):
+    return tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def kind_cover(spec, ep):
+    """작품 표지·다음 화 카드(글자 디자인). 2026-10-18 사용자 "제목은 추몽(한자)로, 디자인도 알잘딱".
+    spec: {"title": "추몽", "hanja": "追夢", "show_hanja": true, "label": "", "subtitle": "1화 「음성사서함」", "quote": "…",
+           "credit": "글·그림: …", "top": "#2b333f", "bottom": "#12161d", "accent": "#c8b07c", "bg": "panels_hf/p019.png", "h": 1700}
+    바탕은 위→아래 색 흐름 + bg 그림(아주 어둡고 흐리게, 위아래로 스며들게), 큰 한자를 은은하게 깔고,
+    한글 제목·작은 한자·선·부제·한 줄을 한 덩어리로 세로 가운데에, 작가는 맨 아래."""
+    W, H = 1344, int(spec.get("h", 1700))
+    top, bottom, accent = _hex(spec.get("top", "#2b333f")), _hex(spec.get("bottom", "#12161d")), _hex(spec.get("accent", "#c8b07c"))
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / (H - 1)
+        d.line([(0, y), (W, y)], fill=tuple(round(top[k] + (bottom[k] - top[k]) * t) for k in range(3)))
+    if spec.get("bg") and (Path(ep) / spec["bg"]).exists():  # 작품의 상징 그림(삐삐 등)을 어둡고 흐리게, 위아래 경계 없이
+        src = Image.open(Path(ep) / spec["bg"]).convert("L").filter(ImageFilter.GaussianBlur(4))
+        bh = round(src.height * W / src.width)
+        src = src.resize((W, bh), Image.LANCZOS)
+        layer = Image.merge("RGB", [src.point(lambda v, c=c: int(v * c / 255)) for c in (150, 165, 185)])
+        yy = np.linspace(0, 1, bh)[:, None]
+        fade = np.minimum(np.clip(yy / 0.35, 0, 1), np.clip((1 - yy) / 0.35, 0, 1))  # 위·아래 35% 씩 스며듦
+        alpha = (fade * float(spec.get("bg_strength", 0.2)) * 255).astype(np.uint8)
+        mask = Image.fromarray(np.repeat(alpha, W, axis=1))
+        img.paste(layer, (0, int((H - bh) * 0.4)), mask)
+    title, hanja = spec.get("title", ""), spec.get("hanja", "")
+    if hanja:  # 큰 한자를 배경 무늬처럼 은은하게
+        over = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        od = ImageDraw.Draw(over)
+        big = serif(int(min(W * 0.5, H * 0.55)), "ExtraLight")
+        for k, ch in enumerate(hanja):
+            od.text((W / 2 + (k - (len(hanja) - 1) / 2) * W * 0.44, H * 0.44), ch, font=big, fill=(255, 255, 255, 20), anchor="mm")
+        img.paste(over, (0, 0), over)
+    d = ImageDraw.Draw(img)
+    size = 300 if H >= 1400 else 200
+    while size > 100 and d.textlength(title, font=serif(size, "Bold")) > W * 0.8:
+        size -= 10
+    blocks = []  # (높이, 그리기)
+    if spec.get("label"):
+        blocks.append((80, lambda y: d.text((W / 2, y + 40), spec["label"], font=serif(44, "Light"), fill=accent, anchor="mm")))
+    blocks.append((size * 1.05, lambda y: d.text((W / 2, y + size * 0.52), title, font=serif(size, "Bold"), fill=(242, 238, 228), anchor="mm")))
+    if hanja and spec.get("show_hanja", True):
+        blocks.append((100, lambda y: d.text((W / 2, y + 50), hanja, font=serif(72, "Medium"), fill=accent, anchor="mm")))
+    blocks.append((70, lambda y: d.line([(W / 2 - 120, y + 35), (W / 2 + 120, y + 35)], fill=accent, width=2)))
+    if spec.get("subtitle"):
+        blocks.append((90, lambda y: d.text((W / 2, y + 45), spec["subtitle"], font=serif(56, "Medium"), fill=(232, 228, 220), anchor="mm")))
+    if spec.get("quote"):
+        lines = wrap_px(d, spec["quote"], serif(34, "Light"), W * 0.7)
+        blocks.append((30 + 52 * len(lines), lambda y, lines=lines: [d.text((W / 2, y + 40 + 52 * k), ln, font=serif(34, "Light"), fill=(170, 176, 186), anchor="mm")
+                                                                    for k, ln in enumerate(lines)]))
+    total = sum(h for h, _ in blocks)
+    y = (H - (150 if spec.get("credit") else 0) - total) / 2
+    for h, draw in blocks:
+        draw(y)
+        y += h
+    if spec.get("credit"):
+        d.text((W / 2, H - 100), spec["credit"], font=serif(34, "Regular"), fill=(150, 158, 168), anchor="mm")
+    return img
+
+
 def wrap_px(d, text, fnt, max_w):
     """글자 폭 기준 줄 바꿈(한글은 띄어쓰기 단위, 넘치면 글자 단위)."""
     out, cur = [], ""
@@ -413,7 +485,7 @@ def main():
     spec = panel["composite"]
     img = {"title": kind_title, "profile": kind_profile, "chat": kind_chat, "calendar": kind_calendar,
            "insta": kind_insta, "calls": kind_calls, "blocked": kind_blocked, "search": kind_search,
-           "notice": kind_notice, "band": kind_band}[spec["kind"]](spec, ep)
+           "notice": kind_notice, "band": kind_band, "cover": kind_cover}[spec["kind"]](spec, ep)
     out = ep / "panels" / f"{pid}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)

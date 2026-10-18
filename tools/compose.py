@@ -266,7 +266,9 @@ def main():
         cover = cover.resize((W, round(cover.height * W / cover.width)), Image.LANCZOS)
         placed.append((cover, y))
         y += cover.height
-    if board.get("title_card"):
+    # 첫 컷이 표지 카드(phone_ui cover: 제목·화·작가가 들어 있음)면 흰 제목 카드는 겹쳐서 빼다(2026-10-18 추몽)
+    first_cover = bool(panels) and (panels[0].get("composite") or {}).get("kind") == "cover"
+    if board.get("title_card") and not first_cover:
         card = Image.new("RGB", (W, 360 if board.get("credit") else 300), bg)
         draw_lines(ImageDraw.Draw(card), [board["title_card"]], lettering.font("narration", 1.5), W / 2, 150, fill="#1a1024")
         if board.get("credit"):  # 작가 표기(글·그림), 2026-10-14
