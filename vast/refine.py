@@ -483,7 +483,34 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
     if best and best[1] != dst.read_bytes() and best[0] < len(probs):
         dst.write_bytes(best[1])
         log(f"  {pid}: 가장 나은 판으로 되돌림")
+    # 고치기 사다리의 마지막 칸: 다시 그려도 안 고쳐진 시선·방향은 편집으로 돌린다(외출 p004 박 과장: 다시 그리면 또 정면, 편집은 한 번에 됐다)
+    if best[2] and best[2] <= {"시선", "좌우시선"} and fix_facing(c, cache, dst, series, ep_dir, p, seed, log):
+        return
     log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
+
+
+TURN = ("In <image1>, turn only these people so that their face and shoulders point toward the person or thing they are dealing with, in profile or "
+        "three-quarter view, instead of facing the viewer: {who}. Keep everything else in <image1> exactly the same: who is in the panel, faces, "
+        "clothes, hands and what they hold, positions, the place, the light, the camera angle and the framing.")
+
+
+def fix_facing(c, cache, dst: Path, series, ep_dir: Path, p, seed, log=print) -> bool:
+    """독자 쪽을 향한 사람만 편집으로 돌린다. 다시 확인해 시선 문제가 없어지면 True(아니면 원본으로 되돌리고 False)."""
+    who = facing_check(dst) + camera_gaze(dst)
+    if not who:
+        return False
+    before = dst.read_bytes()
+    g = graph(TURN.format(who="; ".join(dict.fromkeys(who))), [upload(c, dst, cache)], 0, 0, seed % 100000 + 29, 8, 1024, turbo=True, edit=True)
+    g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/turned"
+    hist = c.wait(c.queue(g), 600)
+    c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+    left = facing_check(dst) + camera_gaze(dst)
+    if left:
+        dst.write_bytes(before)
+        log(f"  {p['id']}: 방향 편집도 안 됨({'; '.join(left)[:80]}) → 되돌림")
+        return False
+    log(f"  {p['id']}: 독자 쪽을 향한 사람을 편집으로 돌림 → 통과")
+    return True
 
 
 def main():
