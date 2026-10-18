@@ -61,9 +61,10 @@ def candidate_prompt(series: Path, kind: str, name: str):
     else:
         # 그림체 글의 눈·머리·얼굴 문장이 사람을 불러냈다(호프집 시안 앞에 여자, comfy_panel 의 사람 없는 컷과 같은 문제) → 빼고 빈 장소를 못 박는다
         prompt = strip_people(prompt)
-        # 장소 글 자체에 "뒤쪽 손님들"이 있는 곳(호프집)은 "아무도 없음"과 부딪혀 앞 테이블에 사람을 앉혔다 → 앞·가운데만 비우게
-        prompt += ("\n\nNobody in the foreground or middle ground: every table, seat and doorway near the camera is empty. "
-                   "At most tiny, blurred background figures, and only if the location text asks for them.")
+        # 장소 글 자체에 "뒤쪽 손님들"이 있는 곳(호프집)은 "아무도 없음"과 부딪혀 앞 테이블에 사람을 앉혔다 → 앞·가운데만 비우게.
+        # 가구 이름은 쓰지 않는다: "every table, seat … is empty" 라고 썼더니 길·골목·빈 방마다 빈 탁자와 의자를 그려 넣었다(2026-10-18 추몽 시안 7곳)
+        prompt += ("\n\nThe foreground and middle ground are free of people. Only the objects named in the location text are there; "
+                   "add no extra furniture. At most tiny, blurred background figures, and only if the location text asks for them.")
     return prompt, refs
 
 
