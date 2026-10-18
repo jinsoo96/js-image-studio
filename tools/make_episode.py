@@ -148,6 +148,9 @@ def main():
     missing = [i for i in new if not (ep / "panels_hf" / f"{i}.png").exists()]
     if missing:
         raise SystemExit(f"그림이 없는 컷: {','.join(missing)}(다시 부르면 그 컷만 다시 그린다)")
+    if new:  # 같은 장면 앞뒤 컷의 이어짐(자세·소품·옷·얼굴·그림체·좌우). 컷 하나씩 보는 연출 확인으로는 못 잡았다(2026-10-18 외출 1화)
+        cc = run([PY, TOOLS / "continuity_check.py", ep, "--only", ",".join(new)], "장면 이어짐 점검", allow_fail=True, capture=True)
+        look += [l.strip() for l in cc.stdout.splitlines() if l.startswith("이어짐 ")]
     if args.until == "draw":
         return
 

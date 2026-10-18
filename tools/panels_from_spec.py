@@ -58,6 +58,29 @@ def recurring_extras(panels, need=3):
     return out
 
 
+SEATED = re.compile(r"\b(seated|sits?|sitting|on (a|the|her|his) (stool|chair|seat|sofa|bench))\b", re.I)
+BACK = re.compile(r"\b(from behind|back view|backs? to (us|the camera)|seen from the back)\b", re.I)
+
+
+def staging_lint(panels, board) -> list:
+    """컷 설명의 연출 문법 경고(skills/panel-spec '연출 문법'). 2026-10-18 외출 1화에서 컷 설명 탓에 생긴 실수를 글 단계에서 막는다."""
+    out, prev = [], None
+    for p in panels:
+        t = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
+        loc = str(p.get("location") or "")
+        if p["chars"] and re.search(r"bus(?!_stop)|car_|_car|taxi|train|subway", loc) and not re.search(r"windshield|front of the bus|toward the back|direction of travel|driver'?s seat", t, re.I):
+            out.append(f"{p['id']} 탈것인데 좌석·운전석 방향이 없다(버스는 앞에서 뒤를 보면 좌석이 카메라를 향함, 한국 차는 운전석 왼쪽)")
+        if re.search(r"\blean(s|ing)?\b", t, re.I) and not SEATED.search(t) and prev and prev["location"] == p["location"] and SEATED.search(prev["t"]):
+            out.append(f"{p['id']} 앞 컷에서 앉아 있었는데 이 컷은 'lean'만 있다(seated 를 다시 쓴다, 안 쓰면 일어선 사람을 그렸다)")
+        if re.search(r"\bmugs?\b|\bcups?\b|\bglass(es)? of\b", t, re.I) and not re.search(r"\b(beer|coffee|soju|wine|tea|water)\b", t, re.I):
+            out.append(f"{p['id']} 잔의 종류가 없다(beer mug·coffee cup 처럼, 개수까지)")
+        has_line = any(d.get("type") in ("speech", "thought") for d in (board.get(p["id"], {}).get("dialogue") or []))
+        if p["chars"] and has_line and BACK.search(t):
+            out.append(f"{p['id']} 대사가 있는 컷인데 뒷모습이다(말하는 얼굴이 보이게)")
+        prev = {"location": p["location"], "t": t}
+    return out
+
+
 def main():
     ep = Path(sys.argv[1]).resolve()
     series = ep.parents[1]
@@ -103,7 +126,10 @@ def main():
     no_act = [p["id"] for p in panels if p["chars"] and "acting" not in p]
     crowded = [p["id"] for p in panels if "close-up" in p["shot"] and len(p["chars"]) > 1 and not p.get("camera")]  # 클로즈업은 한 사람(panel-spec 규칙)
     again = recurring_extras(panels)
+    lint = staging_lint(panels, {p["id"]: p for p in board["panels"]})
     (ep / "panels.json").write_text(json.dumps(panels, ensure_ascii=False, indent=1), encoding="utf-8")
+    for line in lint:
+        print("연출 문법:", line)
     print(f"새로 그릴 컷 {len(panels)}, 가져다 쓴 컷 {len(reuse)}(이번에 복사 {copied}), 빠진 컷 {missing}, 연기 없는 인물 컷 {no_act}"
           + (f", 콘티에 없는 번호 {unknown}" if unknown else "") + (f", 없는 재사용 그림 {bad_reuse}" if bad_reuse else "")
           + (f", 인물 둘 이상인 클로즈업 {crowded}(한 사람만 남기거나 medium·어깨 너머 숏 camera 로)" if crowded else "")

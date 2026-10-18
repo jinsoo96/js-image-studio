@@ -194,6 +194,79 @@ def camera_gaze(img_path: Path) -> list:
         return []
 
 
+def _vlm(images: list, text: str, max_tokens=300) -> dict:
+    """그림 여러 장 + 질문 하나를 그림 보는 모델에 묻고 JSON 을 받는다. 실패하면 빈 dict."""
+    import base64
+    import io
+    import urllib.request
+    from PIL import Image
+    content = []
+    for p in images:
+        img = Image.open(p).convert("RGB")
+        img.thumbnail((1280, 1280))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=90)
+        content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
+    content.append({"type": "text", "text": text})
+    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
+            "messages": [{"role": "user", "content": content}]}
+    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
+        return json.loads(re.search(r"\{.*\}", txt, re.S).group())
+    except Exception:
+        return {}
+
+
+# 연출 논리(2026-10-18 외출 1화 사용자 지적: 버스에 거꾸로 앉음, 운전석 반대, 대화 상대 대신 독자를 보는 사람, 앉아야 할 사람이 서 있음,
+# 맥주 두 잔이 세 잔·커피잔, 대사하는 사람 뒤통수). 여러 항목을 한꺼번에 묻는 검수(vision_review)는 이걸 다 통과시켰다 → 따로 묻는다.
+# 근거: 영화 연출의 연속성 원칙(180도 법칙·시선 일치·소품 연속성), skills/panel-spec 의 '연출 문법'.
+LOGIC_ASK = """You are a strict script supervisor checking ONE webtoon panel for staging mistakes a careful reader would notice.
+The panel should show: {desc}
+Check only these and answer from what you actually see:
+1. Real-world logic: does anything work the wrong way? For example passengers in a bus or train sitting backwards relative to the direction of travel, a car driven from the wrong side (in Korea the driver sits on the LEFT side of the car behind the steering wheel), a person standing or leaning while the description has them seated, objects floating or in impossible places.
+2. Conversation: if two or more people are talking or interacting, are they turned toward each other? A person whose face and body point at the viewer instead of the person they are talking to is a mistake.
+3. Props: do the number and kind of drinks, cups and key objects match the description (for example exactly two beer mugs, not three; beer mugs, not coffee cups)?
+4. Faces: if a person is speaking or reacting in this moment, is their face visible? Only the back of the head is a mistake unless the description asks for a back view.
+Only report clear mistakes. Do not report small differences in exactly where someone's eyes point, as long as people who talk look toward each other.
+Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
+
+FACING_ASK = """Several people are in this webtoon panel and they are dealing with each other. For EACH person, look at the direction of their FACE and SHOULDERS:
+do they point toward the other person (profile or three-quarter view toward them), or do they point straight toward the viewer like posing for a group photo?
+A person whose shoulders and face are square to the viewer while talking to someone beside them is a mistake, even if their eyes glance sideways.
+Answer JSON only: {"facing_viewer": ["short description of each person facing the viewer instead of the others"]} (empty list if none)."""
+
+
+def facing_check(img_path: Path) -> list:
+    """대화하는 사람이 상대가 아니라 독자 쪽으로 몸·얼굴을 두고 서 있나(외출 p004 박희재: 눈만 옆을 보고 몸은 정면이라 시선 검사를 통과했다)."""
+    return [str(x) for x in _vlm([img_path], FACING_ASK).get("facing_viewer", []) if x]
+
+
+def logic_check(img_path: Path, p: dict, era: str = "") -> list:
+    desc = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
+    desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
+    ask = LOGIC_ASK.format(desc=desc)
+    if era:  # 시대 소품(외출 1화: 2008년에 스마트폰·태블릿)
+        ask = ask.replace("Only report clear mistakes.", f"5. Period: {era} Any object from a later time is a mistake.\nOnly report clear mistakes.")
+    return [str(x) for x in _vlm([img_path], ask).get("problems", []) if x]
+
+
+CONT_ASK = """Image 1 is the previous panel and image 2 is the next panel of the SAME scene in a webtoon (continuous time).
+What happens in panel 2: {desc}
+List differences between the two panels that a reader would notice as continuity mistakes, unless the text above explains them:
+a person who was sitting is now standing (or the reverse); the number or kind of drinks, cups or props on the table changes; clothes, hairstyle or glasses change; a person looks like a different person (face, age, build); the drawing style changes (line, coloring, proportions, realism); the left-right positions of the people swap.
+Only report clear mistakes. Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
+
+
+def continuity_pair(prev_img: Path, img: Path, p: dict) -> list:
+    """같은 장면의 앞 컷과 이 컷을 나란히 보고 이어짐이 깨진 곳(자세·소품·옷·얼굴·그림체·좌우)."""
+    desc = " ".join(str(p.get(k) or "") for k in ("action", "acting"))
+    desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
+    return [str(x) for x in _vlm([prev_img, img], CONT_ASK.format(desc=desc)).get("problems", []) if x]
+
+
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만) + 팔·손 개수(따로 묻기)로 본다. (결과, 걸린 항목)
     팔·손이 남으면 '몸' 으로 걸고, 구도처럼 다시 그린다(편집으로 팔 하나만 지우기는 잘 안 된다)."""
@@ -212,6 +285,18 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         if seen:
             probs.add("시선")
             r["고칠점"] = (str(r.get("고칠점") or "") + " 독자를 쳐다본다: " + "; ".join(seen)).strip()
+    if len(p.get("chars") or []) >= 2 and not is_ots(p.get("camera")) and not re.search(r"from behind|back view|backs", str(p.get("camera") or "") + str(p.get("action") or ""), re.I):
+        facing = facing_check(img_path)
+        if facing:
+            probs.add("시선")
+            r["고칠점"] = (str(r.get("고칠점") or "") + " 상대 대신 독자 쪽을 향함: " + "; ".join(facing)).strip()
+    if p.get("chars") or p.get("extras"):
+        sj = Path(series) / "series.json"
+        era = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else "") or ""
+        bad = logic_check(img_path, p, era)
+        if bad:
+            probs.add("논리")
+            r["고칠점"] = (str(r.get("고칠점") or "") + " 연출 논리: " + "; ".join(bad)).strip()
     return r, probs
 
 
@@ -266,12 +351,11 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
         if attempt >= retries:
             break
         attempt += 1
-        if "시선" in probs:  # 독자를 보면 정면 표정 칸·머리 대신 3/4 머리로 다시(정면 참고가 고개 방향까지 끌고 간다)
-            try:
-                render(seed + 7919 * attempt, turned=True)
-            except TypeError:
-                render(seed + 7919 * attempt)
-        else:
+        # 다시 그릴 때 지난 판에서 걸린 점을 그리기 지시에 붙인다(시드만 바꾸면 같은 실수를 되풀이했다)
+        note = str(r.get("고칠점") or "")[:600]
+        try:
+            render(seed + 7919 * attempt, turned="시선" in probs, note=note)
+        except TypeError:  # note·turned 를 모르는 옛 render
             render(seed + 7919 * attempt)
         log(f"  {pid}: 다시 그림({attempt}회)")
     if best and best[1] != dst.read_bytes() and best[0] < len(probs):
