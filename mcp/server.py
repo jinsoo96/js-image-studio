@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "mcp"))
 import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷 그림 + 컷 설명)
 sys.path.insert(0, str(ROOT / "tools"))
 import new_series as ns  # noqa: E402  새 작품 열기(설정 한 장 → 작품 폴더)
+import gates  # noqa: E402  하네스 관문(콘티·컷 설명 격리 judge, 통과해야 그린다)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
@@ -42,10 +43,10 @@ DOCS = {"CLAUDE": "CLAUDE.md", "README": "README.md", "LESSONS": "LESSONS.md", "
 SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md", "ASSETS": "ASSETS.md"}
 
 mcp = FastMCP("webtoon-studio", instructions=(
-    "이미지 스튜디오 작업실(지금 템플릿: 세로 스크롤 웹툰, D+18·무대 뒤). 처음엔 guide() 로 규칙을 읽고 status() 로 상태를 본다. "
-    "힉스필드 작화는 크레딧(돈)을 쓴다: estimate_draw 로 비용을 보고 사용자에게 확인받은 뒤 draw_panels(confirm_credits=비용). "
-    "vast_draw 는 회사 공용 GPU 로 크레딧 없이 그린다(결과는 panels_hf_vast, 본편 채택은 vast_adopt). "
-    "오래 걸리는 일은 job_id 를 돌려주니 job_status 로 확인한다. 사용자에게는 한국어로 답한다."))
+    "웹툰 하네스(이미지 스튜디오의 웹툰 템플릿). 붙이면 끝: 별도 시스템 프롬프트 없이 이 MCP 만으로 새 작품·다음 화를 만든다. "
+    "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 도구 결과 끝의 '다음:' 을 따른다. "
+    "콘티·컷 설명은 prepare_episode 의 관문(격리 judge)을 통과해야 make_episode 가 그린다. 그린 그림은 검수가 스스로 다시 그린다. "
+    "오래 걸리는 일은 job_id 를 돌려주니 기다리지 말고 알린 뒤 답을 끝낸다. 사용자에게는 한국어로 답한다."))
 
 
 # ── 내부 도우미 ───────────────────────────────────────────────
@@ -145,17 +146,9 @@ def _ids(text: str) -> list:
 # ── 읽기 도구 ─────────────────────────────────────────────────
 @mcp.tool()
 def guide() -> str:
-    """작업실 규칙과 쓰는 순서(CLAUDE.md 전문 + 이 MCP 도구 쓰는 법). 작업을 시작하기 전에 꼭 한 번 읽는다."""
-    tips = ("\n\n## 이 MCP 도구로 일하는 순서\n"
-            "0) 이미지 스튜디오 구조: 템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 일을 시작하기 전에 read_skill() 로 목록을 보고, 그 일의 스킬(read_skill('continuity') 등)을 읽고 따른다\n"
-            "1) status() 로 작품·회차·크레딧 확인 → 2) read_doc 으로 작품 README·STYLE, LESSONS 해당 장을 읽는다\n"
-            "3) 새 회차는 new_episode 로 앞 회차 틀을 복사하고, read_file 로 열어 사용자 이야기에 맞게 고친 뒤 write_file 로 쓴다\n"
-            "4) prepare_episode → estimate_draw → 사용자에게 비용 확인 → draw_panels(confirm_credits=비용) → job_status\n"
-            "5) review_panels 로 그림 검수(그림을 보는 모델이 판정) + contact_sheet 경로를 사용자에게 → 사용자가 동의한 컷만 build_panels.py 고쳐 redraw_panels → compose → job_status(막는 경고 0 확인) → export\n"
-            "크레딧은 개인 결제다. 시안 남발 금지, 재사용 먼저, 끝나면 남은 크레딧을 알린다.\n"
-            "vast(크레딧 0, 회사 공용 GPU): vast_status → vast_draw(turbo·expr 기본) → job_status → contact_sheet/review_panels(folder='vast') "
-            "→ 걸린 컷은 seed 바꿔 vast_draw → 사용자가 고른 컷만 vast_adopt → compose. 새 인물이면 vast_make_assets.")
-    return (ROOT / "CLAUDE.md").read_text(encoding="utf-8") + tips
+    """웹툰 하네스 안내: 단계(작품 열기 → 콘티 → 컷 설명 → 그리기 → 이어짐 → 합성·출판), 단계마다 통과해야 하는 관문, 돈·장비·내용 규칙.
+    어떤 에이전트든 일을 시작하기 전에 꼭 한 번 부른다(이 MCP 는 따로 시스템 프롬프트가 필요 없다)."""
+    return (ROOT / "mcp" / "HARNESS.md").read_text(encoding="utf-8")
 
 
 @mcp.tool()
@@ -544,7 +537,10 @@ def new_series(spec: str) -> str:
      "style": "English art style paragraph (line, coloring, light, faces, proportions)",
      "cast": {"<id>": {"ko": "이름", "en": "English Name (age)", "role": "역할", "who": "English appearance (adult: ethnicity, age, height, build, hair, eyes, face)",
                        "main": "English default outfit", "exprs": "six English expressions, comma separated"}},
-     "locations": {"<name>": "English description: place, time of day, light, furniture"}}
+     "locations": {"<name>": "English description: place, time of day, light, furniture"},
+     "era": "시대(한국어, 예: 2000년대 후반 서울)", "era_rule": "English period rule for every image (phones, cars, signs of that time)",
+     "people_rule": "English rule for people (ages, proportions, restrained expressions)"}
+    직함·호칭은 cast 의 role 에 적는다(콘티 관문이 대사의 호칭과 맞춰 본다). era_rule 은 그리기 지시와 그림 검수에 들어간다.
     폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 다음: new_episode(slug, "ep001") → 콘티 → set_panels →
     make_episode(에셋 점검에서 인물 시트·장소 시안을 vast 로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
     try:
@@ -664,14 +660,16 @@ def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", re
     need = [p["id"] for p in board.get("panels", []) if not p.get("composite") and p["id"] not in spec["panels"] and p["id"] not in spec["reuse"]]
     return (f"컷 설명 {len(add_p)}개 넣음(지금 표에 {len(spec['panels'])}컷, 장면 배치 {len(spec['scenes'])}, 재사용 {len(spec['reuse'])}). "
             + (f"아직 설명이 없는 콘티 컷: {', '.join(need)}. " if board else "storyboard.json 이 아직 없다(prepare_episode 를 먼저). ")
-            + ("\n" + "\n".join(notes) if notes else ""))
+            + ("\n" + "\n".join(notes) if notes else "")
+            + ("\n다음: " + ("남은 컷 설명을 set_panels 로 채운다." if need else "prepare_episode 로 관문 채점을 받는다(통과해야 그린다).")))
 
 
 # ── 준비·비용 ─────────────────────────────────────────────────
 @mcp.tool()
 def prepare_episode(series: str, episode: str) -> str:
-    """회차의 make_storyboard.py → build_panels.py 를 돌려 storyboard.json·panels.json 을 다시 만든다(크레딧 안 씀).
-    재사용 컷 복사도 build_panels 가 한다. 결과의 '빠진 컷'·'연기 없는 인물 컷'이 비어 있어야 한다."""
+    """회차의 make_storyboard.py → build_panels.py 를 돌려 storyboard.json·panels.json 을 다시 만들고, 관문(격리 judge)으로 콘티·컷 설명을 채점한다(크레딧 안 씀).
+    관문 기준표는 skills/storyboard/judge.json · skills/panel-spec/judge.json(하네스 s08 judge 와 같은 꼴, 합격 0.8, 꼭 지킬 기준은 하나라도 어기면 걸림).
+    걸리면 결과의 '고칠 점'대로 make_storyboard.py(edit_file)나 컷 설명(set_panels)을 고치고 다시 부른다. 두 관문을 다 통과해야 make_episode 가 그린다."""
     ep = _episode(series, episode)
     out = []
     for name in ("make_storyboard.py", "build_panels.py"):
@@ -679,6 +677,12 @@ def prepare_episode(series: str, episode: str) -> str:
             out.append(f"## {name}\n" + _run([PY, str(ep / name)], timeout=25))
         else:
             out.append(f"## {name} 없음(앞 회차를 본떠 먼저 만든다)")
+    if (ep / "storyboard.json").exists():
+        out.append("## 관문\n" + _run([PY, str(TOOLS / "gates.py"), str(ep), "all"], timeout=600))
+        st = gates.status(ep)
+        out.append("다음: " + ("관문 통과. 사용자에게 컷 목록을 보여 주고 '그릴까요?'로 답을 끝낸다. 그리라고 하면 make_episode."
+                              if all(st.values()) else
+                              "관문에 걸린 곳을 고친다(콘티는 edit_file 로 make_storyboard.py, 컷 설명은 set_panels). 고친 뒤 prepare_episode 를 다시 부른다."))
     return "\n".join(out)
 
 
@@ -859,7 +863,7 @@ VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); 
 
 
 @mcp.tool()
-def make_episode(series: str, episode: str, accept_new: bool = False, until: str = "export", check: bool = True) -> str:
+def make_episode(series: str, episode: str, accept_new: bool = False, until: str = "export", check: bool = True, skip_gates: bool = False) -> str:
     """한 화를 끝까지 한 번에(어느 작품이든, 크레딧 0): 콘티 준비 → 에셋 점검 → vast 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기.
     콘티(make_storyboard.py·build_panels.py)는 먼저 써 둔다(new_episode 로 틀을 열고 이야기대로 고침).
     이 화에 처음 나오는 장소·인물이 있으면 vast 로 시안을 만들어 assets/_candidates/ 에 두고 멈춘다(job 이 '실패'로 끝나고 로그에 '확인 필요').
@@ -872,6 +876,12 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
         return "콘티 파일이 없다. new_episode 로 틀을 열고 이야기대로 make_storyboard.py·build_panels.py 를 고친 뒤 부른다"
     if _running_job(ep):
         return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    # 하네스 관문: 콘티·컷 설명 관문을 지금 파일 그대로 통과했어야 그린다(규칙은 프롬프트가 아니라 관문이 강제). skip_gates 는 사용자가 직접 시킬 때만
+    st = gates.status(ep)
+    if not skip_gates and not all(st.values()):
+        miss = [k for k, v in st.items() if not v]
+        return (f"관문을 아직 통과하지 않았다({', '.join('콘티' if m == 'storyboard' else '컷 설명' for m in miss)}). "
+                "prepare_episode 를 불러 채점 결과의 고칠 점을 고친 뒤 다시 부른다(콘티나 컷 설명을 고치면 관문을 다시 받아야 한다).")
     cmd = [PY, str(TOOLS / "make_episode.py"), str(_series(series)), ep.name, "--until", until]
     cmd += (["--accept-new"] if accept_new else []) + ([] if check else ["--no-check"])
     job = _start_job("make_episode", ep, [{"label": f"한 화 만들기({ep.name}, ~{until})", "cmd": cmd, "review_codes": [3]}])
