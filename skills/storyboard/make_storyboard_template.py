@@ -28,6 +28,8 @@ def add(pid, shot, scene, chars, *dlg, aspect=None, **kw):
             item["pos"] = x[2]
         if x[0] == "monologue" and len(x) > 3:
             item["style"] = x[3]
+        elif x[0] in ("speech", "thought") and len(x) > 3:  # 넷째 칸 = 말하는 인물 id(who): 말풍선 자리를 컷 설명의 좌우로 코드가 정한다
+            item["who"] = x[3]
         d.append(item)
     P.append({"id": pid, "shot": shot, "aspect": aspect or ASPECT_OF[shot], "mode": "drama", "scene": scene, "characters": chars, "dialogue": d, **kw})
 
@@ -47,7 +49,7 @@ add("p001", "wide", "none", [], aspect="wide", gap_after=400,
 
 # ── 컷: 아래 예시를 지우고 이야기대로 쓴다(장면마다 넓은 컷 하나로 공간을 보여 주고, 대화는 어깨 너머 숏으로)
 # add("p002", "wide", "<장소>", ["<인물1>", "<인물2>"], (N, "해설 한 줄.", AB))
-# add("p003", "close", "<장소>", ["<인물1>"], (S, "대사.", TL))
+# add("p003", "close", "<장소>", ["<인물1>"], (S, "대사.", TL, "<인물1>"))  # 넷째 칸 who: 두 사람 컷은 꼭 쓴다(말풍선 자리를 코드가 정함)
 
 board = {"series": SPEC["slug"], "episode": EP, "version": "v1", "title": SPEC["title"], "title_card": f"{EP}화",
          "credit": CREDIT, "color_harmonize": 0, "why": "make_storyboard.py 가 정본.", "panels": P}

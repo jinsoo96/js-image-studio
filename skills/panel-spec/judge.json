@@ -8,12 +8,14 @@
    "description": "앉아 있는 장면은 컷마다 seated·sitting 을 쓴다. 'leans forward' 만 쓰지 않는다. 자세가 앞 컷과 이어진다."},
   {"name": "props", "weight": 1.0, "hard": true,
    "description": "장면의 소품(잔·휴대폰 등)은 컷마다 같은 말로 종류와 개수까지 쓴다(exactly two 500cc beer mugs)."},
-  {"name": "vehicles", "weight": 1.0, "hard": true,
-   "description": "탈것 안 컷은 좌석·운전석 방향을 쓴다(한국 차는 운전석이 왼쪽, 버스·지하철 승객은 진행 방향을 본다)."},
   {"name": "speaking_face", "weight": 1.0, "hard": true,
    "description": "대사가 있는 인물은 얼굴이 보이게 적혀 있다(뒷모습은 말 없는 컷만)."},
   {"name": "period", "weight": 1.0, "hard": true,
    "description": "소품·기기가 작품 시대와 맞다(예: 2008년이면 폴더폰, 스마트폰·태블릿 없음)."},
+  {"name": "balloon_side", "weight": 1.0, "hard": false,
+   "description": "말풍선 자리(TL·top-left = 화면 왼쪽 인물, TR·top-right = 화면 오른쪽 인물)가 그 대사를 하는 인물이 컷 설명에서 서는 쪽과 같다. 대사 내용으로 누가 말하는지 판단한다(예: 운전하는 여자 친구가 화면 오른쪽인데 그녀의 대사가 TL 이면 위반)."},
+  {"name": "acting_fit", "weight": 1.0, "hard": false,
+   "description": "표정 연기(acting)가 이 장면의 감정과 맞는다. 서운함·외로움·체념 장면에 smile 류를 쓰지 않는다(쓰면 밝게 웃는 얼굴로 그려졌다)."},
   {"name": "shot_variety", "weight": 0.5, "hard": false,
    "description": "같은 장면의 연속 컷은 샷 크기·각도가 다르다. 줌인·줌아웃·높이를 섞는다."}
  ]

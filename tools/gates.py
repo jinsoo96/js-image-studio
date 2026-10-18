@@ -128,6 +128,12 @@ def judge_storyboard(ep: Path) -> dict:
             "passed": total >= crit["threshold"] and not hard, "hash": _hash(ep / "storyboard.json")}
 
 
+def _talk(panel: dict) -> str:
+    """컷의 말·생각 대사를 말풍선 자리와 함께('(top-right) 눈 좀 붙여.'). 말풍선 자리 관문(balloon_side)이 본다."""
+    lines = [f"({d.get('pos', '?')}) {d.get('text', '')}" for d in panel.get("dialogue", []) if d.get("type") in ("speech", "thought")]
+    return " / ".join(lines) or "없음"
+
+
 def judge_panels(ep: Path) -> dict:
     sys.path.insert(0, str(ROOT / "tools"))
     from panels_from_spec import staging_lint
@@ -139,7 +145,7 @@ def judge_panels(ep: Path) -> dict:
     for k in range(0, len(panels), CHUNK):
         part = panels[k:k + CHUNK]
         mat = "\n".join(
-            f"{p['id']} 대사:{' / '.join(d.get('text', '') for d in board.get(p['id'], {}).get('dialogue', []) if d.get('type') in ('speech', 'thought')) or '없음'}\n"
+            f"{p['id']} 대사:{_talk(board.get(p['id'], {}))}\n"
             f"  {json.dumps({x: p.get(x) for x in ('chars', 'location', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
             for p in part)
         setting, mat = _setting(ep.parents[1]), re.sub(r" SPACE \(identical.*?\"", '"', mat)
