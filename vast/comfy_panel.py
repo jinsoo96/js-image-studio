@@ -126,6 +126,10 @@ def pick_expr(series, cid, name, text):
     if not re.search(r"\b(tears?|tearful|crying|cries|cry|sob\w*|weep\w*)\b", said, re.I):
         keep = [k for k, lb in enumerate(labels) if not re.search(r"tear|cry|crying|sob|weep|welling", lb, re.I)]
         files, labels = [files[k] for k in keep], [labels[k] for k in keep]
+    # 홍조도 같다: 연기 글이 붉어진다고 하지 않으면 볼·귀가 빨간 칸을 뺀다. 마흔여섯 재석이 다락에서 얼굴이 빨갛게 나왔다(2026-10-18 추몽 사용자 지적)
+    if not re.search(r"\b(blush\w*|flush\w*|red(dened)? (face|cheeks|ears)|embarrass\w*|shy)\b", text, re.I):
+        keep = [k for k, lb in enumerate(labels) if not re.search(r"blush|red ears|red cheeks|flush|fluster|shy|embarrass", lb, re.I)]
+        files, labels = [files[k] for k in keep], [labels[k] for k in keep]
     ask = (f"A webtoon panel describes this acting:\n{text}\n\nWhich of these expressions of {name} is the closest match for {name}'s face in this panel?\n"
            + "\n".join(f"{i}. {lb}" for i, lb in enumerate(labels, 1))
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits. "
@@ -146,7 +150,13 @@ def pick_expr(series, cid, name, text):
     return (files[k - 1], labels[k - 1]) if 1 <= k <= len(labels) else None
 
 
-def qwen_refs(series, p, episode=None, front=False, expr=False):
+def wants_camera(p) -> bool:
+    """컷 설명이 인물에게 카메라(독자)를 보라고 했나. 그때만 정면 시선을 둔다."""
+    return bool(re.search(r"(look\w*|star\w*|fac\w*|gaz\w*) (straight |directly )?(at|into|toward) (the )?(camera|viewer|reader)",
+                          " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera")), re.I))
+
+
+def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     """같은 컷 설명(panels.json)으로 Qwen 용 짧은 프롬프트와 참고 그림을 만든다. 2026-10-15 시험에서 정한 것:
     - 힉스필드 프롬프트(약 4천 자, 맥락·규칙·연기 일반론)를 그대로 쓰면 연기가 묻힌다(p045 울 컷이 무표정, 짧게 쓰니 눈물·입술 깨묾이 나옴)
       → 컷·연기·동작·옷·카메라를 앞에, 그림체는 뒤에, 규칙은 한 줄
@@ -169,12 +179,20 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     bind = {}
     for cid in p.get("chars", []):
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
+        # turned: 독자를 봐서 다시 그릴 때. 정면 표정 칸·정면 머리가 고개 방향까지 끌고 갔다(2026-10-18 추몽 p016) → 시트의 3/4 머리만 넣는다
+        turn = series / "assets" / "vast_refs" / f"{cid}_turn.png"
+        if turned and turn.exists():
+            refs.append(turn)
+            bind[cid] = len(refs)
+            lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s head in three-quarter view (identity only: same face, eyes, hairstyle and hair color).")
+            continue
         pk = pick_expr(series, cid, NAMES[cid], p.get("acting") or p["action"]) if expr else None
         if pk:
             refs.append(series / "assets" / "vast_refs" / pk[0])
             bind[cid] = len(refs)
             lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s face with the expression to act in this panel ({pk[1]}): give {NAMES[cid]} this exact "
-                         "facial expression (eyebrows, eyelids, eyes, mouth, tears, blush) and the same face and hair, but not its crop, background or outfit.")
+                         "facial expression (eyebrows, eyelids, eyes, mouth) and the same face and hair, but not its crop, background, outfit or "
+                         "head direction: the reference faces front only because it is a reference sheet.")
             print(f"  {p['id']} {cid}: 표정 칸 {pk[0]} {pk[1]}", flush=True)
             continue
         kinds = [("bust", "neutral bust portrait (identity only: same face, eyes, hairstyle and hair color)")]
@@ -194,6 +212,11 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
     n = len(chars)
     if n:
         lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
+    # 참고 얼굴이 모두 정면이라 거의 모든 컷이 독자를 쳐다봤다(2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐").
+    # 연출이 카메라를 보라고 할 때만 정면, 아니면 영화 스틸처럼 인물은 행동의 상대(사람·물건)를 본다. 부정어 대신 보이는 상태로 쓴다
+    gaze = ("GAZE: a candid film still. Every person's eyes, head and body are turned toward the person or the thing they are dealing with "
+            "in this moment (three-quarter view, profile or from behind as the staging needs), unaware of the camera."
+            if n and not wants_camera(p) else "")
     action = p["action"]
     # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔고(p079),
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
@@ -225,7 +248,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False):
                  "One single panel: no text, no speech bubbles, no sound effects, no panel border.")
     parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.",
              f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
-             action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", count,
+             action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,
              ("REFERENCES: " + " ".join(lines)) if lines else "", style,
              f"COLOR AND TEXTURE OF THIS PANEL: {p['look']}" if p.get("look") else "",
              text_rule
@@ -293,12 +316,13 @@ def main():
         dst = out / f"{p['id']}.png"
         log = lambda m: print(m, flush=True)  # noqa: E731
 
-        def render(sd):
-            names = [upload(c, r, cache) for r in refs]
+        def render(sd, turned=False):
+            pr, rf = (qwen_refs(series, p, expr=False, turned=True) if turned else (prompt, refs))
+            names = [upload(c, r, cache) for r in rf]
             steps = args.steps or (8 if args.turbo else 40)
             from make_workflow import build as ui_build  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
-            ui = ui_build(prompt, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
-            hist = c.wait(c.queue(graph(prompt, names, w, h, sd, steps, args.ref_res, args.turbo), ui), timeout=1200)
+            ui = ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
+            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo), ui), timeout=1200)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")

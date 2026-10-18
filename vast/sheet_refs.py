@@ -78,6 +78,34 @@ def crop_refs(sheet: Path):
     return front, face, bust
 
 
+def turn_head(sheet: Path):
+    """시트 두 번째 전신(3/4 측면)의 머리. 정면 머리·정면 표정 칸만 넣으면 인물이 독자를 쳐다봤다(2026-10-18 추몽 p016)
+    → 독자를 봐서 다시 그릴 때 이 머리를 넣는다. 전신 열은 위아래 한 덩어리, 표정 칸 열은 여러 덩어리라 그걸로 가른다."""
+    im = Image.open(sheet).convert("RGB")
+    a = np.asarray(im).astype(np.int16)
+    h, w, _ = a.shape
+    border = np.concatenate([a[:8].reshape(-1, 3), a[-8:].reshape(-1, 3), a[:, :8].reshape(-1, 3), a[:, -8:].reshape(-1, 3)])
+    ink = np.abs(a - np.median(border, axis=0)).sum(axis=2) > 90
+    bodies = []
+    for x0, x1 in runs(ink.mean(axis=0) > 0.015):
+        if len(runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=6, min_len=int(0.12 * h))) >= 2:
+            break  # 표정 칸 열부터는 전신이 아니다
+        if x1 - x0 > 0.22 * w:  # 전신 둘이 팔끝으로 붙었다(crop_refs 와 같은 가르기)
+            prof = ink[:, x0:x1].mean(axis=0)
+            lo, hi = int((x1 - x0) * 0.3), int((x1 - x0) * 0.7)
+            mid = x0 + lo + int(np.argmin(prof[lo:hi]))
+            bodies += [(x0, mid), (mid, x1)]
+        else:
+            bodies.append((x0, x1))
+    if len(bodies) < 2:
+        raise ValueError(f"{sheet.name}: 3/4 전신을 못 찾음")
+    x0, x1 = bodies[1]
+    rr = runs(ink[:, x0:x1].mean(axis=1) > 0.004, min_gap=6)
+    ya, yb = rr[0] if rr else (0, h)
+    body = im.crop((max(0, x0 - 24), max(0, ya - 24), min(w, x1 + 24), min(h, yb + 24)))
+    return body.crop((0, 0, body.width, int(body.height * 0.19)))
+
+
 def expr_tiles(series: Path, out: Path):
     """표정 시트(4x3, 12칸)를 칸마다 잘라 <id>_expr_01..12.png, 칸 이름은 시트를 만든 프롬프트(prompts/expr_<id>.txt)의 표정 목록 순서 그대로 <id>_expr.json.
     (2026-10-15 사용자 "연기 강도 강하게": Qwen 은 참고 얼굴의 표정을 그대로 따라 그리니, 컷 연기에 맞는 칸을 골라 넣는다)"""
@@ -117,6 +145,10 @@ def main():
         front.save(out / f"{cid}_front.png")
         face.save(out / f"{cid}_face.png")
         bust.save(out / f"{cid}_bust.png")
+        try:
+            turn_head(s).save(out / f"{cid}_turn.png")
+        except Exception as e:
+            print(cid, "3/4 머리 실패", e)
         print(cid, "전신", front.size, "얼굴", face.size)
 
 

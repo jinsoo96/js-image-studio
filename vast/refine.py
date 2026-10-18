@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import LLM_MODEL, LLM_URL, graph, is_ots, pick_expr, upload  # noqa: E402
+from comfy_panel import LLM_MODEL, LLM_URL, graph, is_ots, pick_expr, upload, wants_camera  # noqa: E402
 
 
 def refine_prompt(series, p, expr=True):
@@ -163,6 +163,37 @@ def extra_limbs(img_path: Path) -> list:
             if x.get("extra_limb") or (x.get("arms") or 0) > 2 or (x.get("hands") or 0) > 2]
 
 
+GAZE_ASK = ("Look only at where each person in this webtoon panel is looking. Is any person's face turned to the front with the eyes looking "
+            "straight out of the picture at the viewer, as if posing for the camera? A person looking at another person, at an object, down, "
+            "to the side or away does not count. Answer JSON only: {\"at_viewer\": [\"short description of each person looking at the viewer\"]} "
+            "(empty list if nobody).")
+
+
+def camera_gaze(img_path: Path) -> list:
+    """독자(카메라)를 정면으로 보는 사람(짧은 질문 하나로 따로 묻는다). 여러 항목 검수에선 놓쳤다
+    (2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐", p016 다락에서 정면 미소가 통과). 실패하면 빈 목록."""
+    import base64
+    import io
+    import urllib.request
+    from PIL import Image
+    img = Image.open(img_path).convert("RGB")
+    img.thumbnail((1280, 1280))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=90)
+    body = {"model": VLM_MODEL, "temperature": 0.0, "max_tokens": 200, "chat_template_kwargs": {"enable_thinking": False},
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
+                {"type": "text", "text": GAZE_ASK}]}]}
+    req = urllib.request.Request(VLM_URL + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            txt = json.loads(r.read().decode())["choices"][0]["message"]["content"]
+        return [str(x) for x in json.loads(re.search(r"\{.*\}", txt, re.S).group()).get("at_viewer", []) if x]
+    except Exception:
+        return []
+
+
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만) + 팔·손 개수(따로 묻기)로 본다. (결과, 걸린 항목)
     팔·손이 남으면 '몸' 으로 걸고, 구도처럼 다시 그린다(편집으로 팔 하나만 지우기는 잘 안 된다)."""
@@ -175,6 +206,12 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     if limbs:
         probs.add("몸")
         r["고칠점"] = (str(r.get("고칠점") or "") + " 팔·손이 남는다: " + "; ".join(limbs)).strip()
+    p = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
+    if p.get("chars") and not wants_camera(p) and not is_ots(p.get("camera")):  # 어깨 너머 숏은 앞사람(카메라 쪽)을 보는 게 맞다(p047)
+        seen = camera_gaze(img_path)
+        if seen:
+            probs.add("시선")
+            r["고칠점"] = (str(r.get("고칠점") or "") + " 독자를 쳐다본다: " + "; ".join(seen)).strip()
     return r, probs
 
 
@@ -229,7 +266,13 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
         if attempt >= retries:
             break
         attempt += 1
-        render(seed + 7919 * attempt)
+        if "시선" in probs:  # 독자를 보면 정면 표정 칸·머리 대신 3/4 머리로 다시(정면 참고가 고개 방향까지 끌고 간다)
+            try:
+                render(seed + 7919 * attempt, turned=True)
+            except TypeError:
+                render(seed + 7919 * attempt)
+        else:
+            render(seed + 7919 * attempt)
         log(f"  {pid}: 다시 그림({attempt}회)")
     if best and best[1] != dst.read_bytes() and best[0] < len(probs):
         dst.write_bytes(best[1])
