@@ -282,6 +282,54 @@ def side_check(series, img_path: Path, p: dict, layout: str = "") -> list:
     return []
 
 
+FRAME_ASK = """Is this picture a CLOSE detail (an object or hands filling most of the frame, background blurred) or a WIDE view that shows a whole room or place with its furniture?
+Answer JSON only: {"view": "close" | "wide"}"""
+
+PRESENCE_ASK = """In this webtoon scene these people are present at this moment, even if this panel does not show them: {who}.
+Where they are, from the neighbouring panels: {where}
+This panel: {this}
+Look at the picture. Does it clearly show the exact spot where one of them is (for example the seat right next to the visible person, or the bed they lie on) and that spot is EMPTY, so the person seems to have vanished?
+Not a mistake: a tight close-up that leaves them out of frame; a person who sits across from the visible person or on the camera's side (their place is behind the camera, not in the picture); empty seats or tables that belong to nobody.
+Answer JSON only: {{"vanished": ["name of each person whose own spot is visible and empty"]}}"""
+
+
+def where_now(series, ep_dir: Path, pid: str, who: list) -> str:
+    """앞뒤 컷의 컷 설명에서 그 사람의 자리를 말하는 문장을 모은다(장면 인원 검사에 넘긴다)."""
+    from hf_panel import names
+    nm = names(series)
+    spec = {p["id"]: p for p in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8"))}
+    order = [b["id"] for b in json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8"))["panels"] if b["id"] in spec]
+    k, loc = order.index(pid), spec[pid].get("location")
+    near = [spec[i] for i in order[max(0, k - 3):k + 3] if i != pid and spec[i].get("location") == loc]
+    out = []
+    for c in who:
+        short = re.sub(r"\s*\(.*?\)", "", nm.get(c, c)).split()[-1]
+        for p in near:
+            for s in re.split(r"(?<=[.;])\s+", str(p.get("action") or "")):
+                if short in s and s not in out:
+                    out.append(s.strip())
+    return " ".join(out)[:600]
+
+
+def scene_present(ep_dir: Path, pid: str) -> list:
+    """앞뒤 컷(같은 장소, 앞 두 컷·뒤 두 컷)으로 '지금 이 장면에 있는' 사람을 구한다. 앞에도 있고 뒤에도 있거나(뒤에 같은 장소 컷이 없으면 앞만)
+    이 컷에는 없는 인물. 사람이 사라진 컷을 잡는 데 쓴다(2026-10-18 외출: 인서트에 빈 침대, 택시 클로즈업에 빈 옆자리)."""
+    sb, pj = ep_dir / "storyboard.json", ep_dir / "panels.json"
+    if not sb.exists() or not pj.exists():
+        return []
+    spec = {p["id"]: p for p in json.loads(pj.read_text(encoding="utf-8"))}
+    order = [b["id"] for b in json.loads(sb.read_text(encoding="utf-8"))["panels"] if b["id"] in spec]
+    if pid not in order:
+        return []
+    k, loc = order.index(pid), spec[pid].get("location")
+    before = [spec[i] for i in order[max(0, k - 2):k] if spec[i].get("location") == loc]
+    after = [spec[i] for i in order[k + 1:k + 3] if spec[i].get("location") == loc]
+    had = set(c for p in before for c in p.get("chars") or [])
+    later = set(c for p in after for c in p.get("chars") or [])
+    present = had & later if after else had
+    return sorted(present - set(spec[pid].get("chars") or []))
+
+
 def logic_check(img_path: Path, p: dict, era: str = "") -> list:
     desc = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
     desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
@@ -338,6 +386,21 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
             r["고칠점"] = (str(r.get("고칠점") or "") + " 상대 대신 독자 쪽을 향함: " + "; ".join(facing)).strip()
     sc = ep_dir / "panels_spec.json"
     layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("location") or "", "") if sc.exists() else "")
+    shot = str(p.get("shot") or "")
+    if any(w in shot for w in ("insert", "detail", "top view")) and _vlm([img_path], FRAME_ASK).get("view") == "wide":
+        probs.add("구도")
+        r["고칠점"] = (str(r.get("고칠점") or "") + " 인서트인데 방 전체가 나왔다: 물건만 화면을 채우는 접사로").strip()
+    absent = scene_present(ep_dir, pid)
+    if absent:
+        from hf_panel import names
+        nm = names(series)
+        this = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)[:300]
+        vanished = _vlm([img_path], PRESENCE_ASK.format(who=", ".join(nm.get(c, c) for c in absent),
+                                                       where=where_now(series, ep_dir, pid, absent) or layout[:300], this=this)).get("vanished", [])
+        if vanished:
+            probs.add("인원")
+            r["고칠점"] = (str(r.get("고칠점") or "") + " 장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
+                        + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부(어깨)를 화면 끝에").strip()
     swapped = side_check(series, img_path, p, layout)
     if swapped:
         probs.add("좌우")

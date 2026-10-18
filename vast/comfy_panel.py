@@ -175,7 +175,10 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     # 클로즈업은 장소를 맨 뒤로: 맨 앞에 두면 그 방 구도를 따라 넓은 컷이 되고 인물이 한 번 더 나왔다(p079 얼굴 꽉 찬 컷이 방 전경 + 재민 둘)
     # 인서트·탑뷰·디테일도 장소를 앞에 두면 그 넓은 구도를 따라 그렸다(2026-10-18 추몽 p017·p018·p068·p078) → 클로즈업처럼 뒤에
     close = any(w in (p.get("shot") or "") for w in ("close-up", "insert", "top view", "detail"))
-    loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") else None
+    # 인서트(손·소품 접사)엔 장소 그림을 아예 넣지 않는다: 뒤에 '배경 색만'이라 붙여도 방 전체를 그려, 앞 컷에 누워 있던 상수의 침대가 비어
+    # 사람이 사라진 꼴이 됐다(2026-10-18 외출 p021·p025 사용자 지적)
+    insert = any(w in (p.get("shot") or "") for w in ("insert", "top view", "detail"))
+    loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") and not insert else None
     if loc and not close:
         refs.append(loc)
         lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")
@@ -253,7 +256,11 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     text_rule = (f"One single panel: no speech bubbles, no sound effects, no panel border. The only readable text drawn in the picture: {p['text_in_image']}; "
                  "no other letters, signs or logos." if p.get("text_in_image") else
                  "One single panel: no text, no speech bubbles, no sound effects, no panel border.")
-    parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.",
+    framing = ("FRAMING: a macro close-up. The object or hands fill most of the frame; behind them only a soft, dark, out-of-focus blur. "
+               "No room overview, no furniture layout, no bed, no people." if insert else
+               "FRAMING: a tight close-up. The head and shoulders fill most of the frame; only a small, softly blurred part of the place shows."
+               if "close-up" in (p.get("shot") or "") else "")
+    parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.", framing,
              f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
              action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,
              ("REFERENCES: " + " ".join(lines)) if lines else "", style,
