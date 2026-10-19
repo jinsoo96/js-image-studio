@@ -85,11 +85,13 @@ class Comfy:
             b = r.read()
             return b if raw else json.loads(b.decode("utf-8")) if b else None
 
-    def upload_image(self, path: Path, name: str = "") -> str:
+    def upload_image(self, path: Path, name: str = "", subfolder: str = "", ctype: str = "image/png") -> str:
+        """서버 input/(subfolder/) 에 올린다. 학습 데이터 폴더는 그림과 같은 이름의 캡션 .txt 도 같이 올린다(lora.py)."""
         name = name or path.name
         bnd = uuid.uuid4().hex
-        body = (f"--{bnd}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\nContent-Type: image/png\r\n\r\n").encode() \
-            + path.read_bytes() + f"\r\n--{bnd}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n--{bnd}--\r\n".encode()
+        sub = f"\r\n--{bnd}\r\nContent-Disposition: form-data; name=\"subfolder\"\r\n\r\n{subfolder}" if subfolder else ""
+        body = (f"--{bnd}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\nContent-Type: {ctype}\r\n\r\n").encode() \
+            + path.read_bytes() + f"\r\n--{bnd}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue{sub}\r\n--{bnd}--\r\n".encode()
         return self.req("/upload/image", body, ctype=f"multipart/form-data; boundary={bnd}")["name"]
 
     def queue(self, prompt: dict, workflow: dict | None = None) -> str:

@@ -1191,6 +1191,75 @@ def vast_make_assets(series: str, character: str = "all", what: str = "both") ->
 
 
 @mcp.tool()
+def loras(series: str = "") -> str:
+    """인물 LoRA 상태. server: vast ComfyUI 에 있는 LoRA 파일(webtoon/… 는 여기서 학습한 것). series 를 주면 registered: 그 작품에 등록된 인물별 LoRA
+    {file, trigger, model(학습한 판, 그 판으로 그릴 때만 붙는다), strength, on, steps, images, train_s}, can_train: 학습할 수 있는 인물(cast 에 있고 표정 은행이 있는 사람).
+    train_workflow: 학습에 쓰는 서버 워크플로우(역할 train_lora). training_disabled 가 있으면 지금 이 서버에선 학습하지 않는다(이유·대안)."""
+    sys.path.insert(0, str(VAST))
+    import lora as L
+    out = {"server": L.server_loras()}
+    m = _draw_models()
+    out["train_workflow"] = {k: v["roles"].get("train_lora") for k, v in m.items() if "train_lora" in v.get("own_roles", [])}
+    if series:
+        blocked = L.training_block(_series(series))
+        if blocked:
+            out["training_disabled"] = blocked
+    if series:
+        sd = _series(series)
+        out["series"] = sd.name
+        out["registered"] = L.registry(sd)
+        out["can_train"] = L.people(sd)
+    return json.dumps(out, ensure_ascii=False)
+
+
+@mcp.tool()
+def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learning_rate: float = 0.0, panels: int = 12) -> str:
+    """인물 LoRA 를 vast 에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로). 학습 데이터는 도구가 만든다: 표정 은행(정면 상반신) + 기본 전신 +
+    그 인물 혼자 나온 잘 된 컷 panels 장(그림 보는 모델이 사람 한 명·얼굴이 보이는 것만 고른다), 캡션 맨 앞에 trigger(작품_인물).
+    서버 워크플로우(역할 train_lora, 화면에서 값을 고칠 수 있다)로 학습하고, 끝나면 작품의 lora/loras.json 에 등록해 그 판으로 그리는 컷에 자동으로 붙는다.
+    steps·rank·learning_rate 가 0 이면 워크플로우 값(기본 1500 · 16 · 0.0001). 시간은 loras() 의 train_s(앞서 학습한 시간)를 참고, 처음이면 1~3시간.
+    학습 중엔 같은 GPU 로 그리기가 느려진다. 끝나면 vast_draw 로 몇 컷 그려 보고 set_lora 로 강도를 맞추거나 끈다."""
+    sys.path.insert(0, str(VAST))
+    import lora as L
+    sd = _series(series)
+    who = [c.strip() for c in character.split(",") if c.strip()]
+    who = L.people(sd) if who == ["all"] else who
+    bad = [c for c in who if c not in L.people(sd)]
+    if bad or not who:
+        return _fail("unknown_character", given=character, candidates=L.people(sd) + ["all"],
+                     reason="설정에 있고 표정 은행(vast_make_assets)이 있는 인물만 학습한다. 여럿은 쉼표로, 전부는 all")
+    tw = L.training_block(sd)
+    if tw:  # 학습 워크플로우 데이터에 막아 둔 이유(extra.webtoon.disabled)가 있으면 작업을 띄우지 않는다
+        return _fail("training_disabled", given=character, reason=tw,
+                     alternative="다른 GPU 에서 학습한 LoRA 파일을 서버 loras/webtoon/ 에 두고 set_lora(series, character, file=…) 로 등록")
+    _ensure_idle(sd)
+    steps_list = []
+    for c in who:  # 여럿이면 한 작업 안에서 차례로(공용 GPU 큐를 한 번에 하나만 쓴다)
+        cmd = [PY, str(VAST / "lora.py"), "train", str(sd), c, "--panels", str(panels)]
+        for flag, v in (("--steps", steps), ("--rank", rank), ("--lr", learning_rate)):
+            if v:
+                cmd += [flag, str(v)]
+        steps_list.append({"label": f"인물 LoRA 학습({c})", "cmd": cmd})
+    job = _start_job("lora_train", sd, steps_list)
+    return json.dumps({"job": job, "next": f"job_wait('{job}') 를 되풀이(학습은 오래 걸린다), 끝나면 loras('{sd.name}')"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_lora(series: str, character: str, strength: float = -1, on: bool = True, file: str = "") -> str:
+    """작품에 등록된 인물 LoRA 를 고친다: strength(0~1.5, 얼굴이 너무 굳거나 그림체가 무너지면 내린다, -1 은 그대로) · on(False 면 붙이지 않는다) ·
+    file(서버 LoRA 파일 이름으로 바꾸기, loras() 의 server 목록). 다음에 그리는 컷부터 바뀐다."""
+    sys.path.insert(0, str(VAST))
+    import lora as L
+    sd = _series(series)
+    if character not in L.registry(sd) and not file:
+        return _fail("no_lora", given=character, registered=sorted(L.registry(sd)), reason="학습한 LoRA 가 없다: lora_train 으로 학습하거나 file 로 지정")
+    if file and file not in L.server_loras():
+        return _fail("unknown_lora_file", given=file, candidates=_near(file, L.server_loras()))
+    cur = L.set_entry(sd, character, {"strength": strength if strength >= 0 else None, "on": on, "file": file or None})
+    return json.dumps({"series": sd.name, "character": character, "lora": cur}, ensure_ascii=False)
+
+
+@mcp.tool()
 def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     """vast 로 그린 컷을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
     사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""

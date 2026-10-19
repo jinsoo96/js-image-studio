@@ -327,9 +327,111 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     return wf
 
 
+TRAIN_GUIDE = """# 인물 LoRA 학습 (Qwen Image 2.1 UC) — 2단계 중 ②
+서버 ComfyUI 기본 노드만 쓴다(확장 설치 없음). 작업실 도구 `vast/lora.py train <작품> <인물>`(MCP lora_train)이 ① → 모델 내리기 → ② 순서로 돌린다.
+
+① `webtoon_lora_dataset_uc`: input/ 폴더(그림 + 같은 이름 캡션 .txt) → VAE·글 인코더로 학습 데이터(잠재·글) → datasets/webtoon/<trigger> 에 저장
+② 이 워크플로우: 저장된 학습 데이터 → 해상도 버킷 → TrainLoraNode(UC 모델) → SaveLoRA · 손실 그래프
+
+한 워크플로우로 이으면 ①에서 올린 글 인코더(약 9GB)가 VRAM 에 남은 채 학습이 돌아 메모리가 모자랐다(2026-10-19, 28.8GB 에서 멈춤). 나누면 학습만 다시 돌릴 때 ①을 건너뛴다.
+
+**값**(이 노드 값이 도구의 기본): rank 16 · lr 0.0001 · AdamW · LoRA 는 bf16 · 기울기 체크포인트 깊이 2(블록마다, 1 은 모델 통째라 절약이 없다) · 해상도 버킷(그림 크기가 제각각이라).
+모델이 fp8 이라 bypass_mode(가중치를 고치지 않고 LoRA 를 옆에 붙여 학습) + training_dtype none + quantized_backward(fp8 그대로 역전파). bf16 으로 학습하면 가중치를 풀어 쥐어 31GB 를 넘겼다.
+
+**결과**: output/loras/webtoon/<trigger>_<스텝>_steps_00001_.safetensors (LoRA 목록에 webtoon/… 로 보인다) · 손실 그래프 output/webtoon_studio/.
+그릴 때는 생성 워크플로우의 '인물 LoRA' 노드에 도구가 넣고 켠다(작품의 lora/loras.json)."""
+
+DATASET_GUIDE = """# 인물 LoRA 학습 데이터 만들기 (Qwen Image 2.1 UC) — 2단계 중 ①
+input/ 아래 폴더 하나에 그림과 같은 이름의 캡션 .txt(001.png + 001.txt). 작업실 도구가 표정 은행 + 기본 전신 + 혼자 나온 잘 된 컷으로 만들어 올린다.
+캡션 맨 앞 낱말(trigger, 예: d18jaemin)을 그릴 때 이름 옆에 붙인다.
+결과는 datasets/webtoon/<trigger>. 다음은 ② `webtoon_train_lora_uc`."""
+
+
+# 학습을 막아 둔 이유(워크플로우 데이터 extra.webtoon.disabled, 도구 lora.train·MCP lora_train 이 읽고 학습하지 않는다). 고치면 빈 문자열로.
+TRAIN_DISABLED = ("이 서버(공용 RTX 5090 32GB, ComfyUI 0.37)에서 Qwen Image 2.1 UC fp8 학습이 안 된다(2026-10-19): 1024 해상도는 체크포인트 깊이 2·fp8 역전파로도 "
+                  "VRAM 31GB 초과, 512 해상도 3스텝은 ComfyUI 가 학습 중 재시작됐다(두 번). 다른 GPU 에서 학습한 LoRA 파일을 loras/webtoon/ 에 두고 "
+                  "set_lora(file=…) 로 등록하면 그리기에는 붙는다.")
+
+
+def build_lora_dataset(folder="3d", model="uc"):
+    """① 학습 데이터 워크플로우(화면 형식): 폴더(그림+캡션) → MakeTrainingDataset(VAE·글 인코더) → SaveTrainingDataset."""
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 360), [DATASET_GUIDE], title="사용법")
+    g.group("1. 인코더", 0, 0, 380, 260, "#3f789e")
+    clip = g.node("CLIPLoader", (20, 50), (340, 106), [CLIP, "qwen_image", "default"], outputs=[("CLIP", "CLIP")])
+    vae = g.node("VAELoader", (20, 180), (340, 58), [VAE], outputs=[("VAE", "VAE")])
+    g.group("2. 데이터", 400, 0, 760, 260, "#a1309b")
+    data = g.node("LoadImageTextDataSetFromFolder", (420, 50), (340, 82), [folder], outputs=[("images", "IMAGE"), ("texts", "STRING")],
+                  title="데이터 폴더 (input/ 아래, 그림 + 같은 이름 .txt)")
+    make = g.node("MakeTrainingDataset", (420, 150), (340, 100), [], inputs=[("images", "IMAGE"), ("vae", "VAE"), ("clip", "CLIP"), ("texts", "STRING")],
+                  outputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")])
+    save = g.node("SaveTrainingDataset", (800, 50), (340, 106), ["webtoon/dataset", 1000],
+                  inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")], title="학습 데이터 저장 (datasets/ 아래)")
+    g.link(data, 0, make, "images")
+    g.link(data, 1, make, "texts")
+    g.link(vae, 0, make, "vae")
+    g.link(clip, 0, make, "clip")
+    g.link(make, 0, save, "latents")
+    g.link(make, 1, save, "conditioning")
+    wf = g.dump()
+    wf["extra"]["webtoon"] = {"model": model, "role": "lora_dataset", "label": "인물 LoRA 학습 데이터 만들기(①, 학습은 webtoon_train_lora_uc)"}
+    return wf
+
+
+def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="uc"):
+    """② 인물 LoRA 학습 워크플로우(화면 형식): 저장된 학습 데이터 → 해상도 버킷 → TrainLoraNode → SaveLoRA · 손실 그래프.
+    TrainLoraNode 위젯 순서는 서버 노드 정의(object_info)에서 읽는다(버전마다 칸이 늘었다)."""
+    from saved_workflow import _node_spec, _widget_names
+    tv = {"batch_size": 1, "grad_accumulation_steps": 1, "steps": steps, "learning_rate": lr, "rank": rank, "optimizer": "AdamW",
+          # fp8 모델: training_dtype none + quantized_backward. bf16 으로 두면 층마다 가중치를 bf16 으로 풀어 역전파용으로 쥐고 있어
+          # 10스텝 시험도 VRAM 31GB 를 넘겼다(2026-10-19, offloading 을 켜도 같음)
+          "loss_function": "MSE", "seed": 0, "training_dtype": "none", "lora_dtype": "bf16", "quantized_backward": True, "algorithm": "LoRA",
+          # checkpoint_depth 2 = 트랜스포머 블록 하나하나. 1 은 모델 전체를 한 덩어리로 감싸(nodes_train.find_modules_at_depth 가 루트에서 1 을 센다)
+          # 절약이 없어 같은 31GB 초과였다
+          "gradient_checkpointing": True, "checkpoint_depth": 2, "offloading": False, "existing_lora": "[None]", "bucket_mode": True, "bypass_mode": True}
+    names = _widget_names(_node_spec("TrainLoraNode"))
+    miss = [n for n in names if n and n not in tv]
+    if miss:
+        sys.exit(f"서버 TrainLoraNode 에 모르는 칸이 있다: {miss}")
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 700), [TRAIN_GUIDE], title="사용법")
+    g.group("1. 모델 · 학습 데이터", 0, 0, 380, 360, "#3f789e")
+    unet = g.node("UNETLoader", (20, 50), (340, 82), [UNET, "default"], outputs=[("MODEL", "MODEL")])
+    data = g.node("LoadTrainingDataset", (20, 160), (340, 82), [dataset], outputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
+                  title="학습 데이터 (① 이 datasets/ 에 저장한 것)")
+    bucket = g.node("ResolutionBucket", (20, 270), (340, 60), [], inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
+                    outputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")])
+    g.group("2. 학습", 400, 0, 760, 620, "#b58b2a")
+    train = g.node("TrainLoraNode", (420, 50), (360, 560), [tv[n] for n in names if n],
+                   inputs=[("model", "MODEL"), ("latents", "LATENT"), ("positive", "CONDITIONING")],
+                   outputs=[("lora", "LORA_MODEL"), ("loss_map", "LOSS_MAP"), ("steps", "INT")])
+    save = g.node("SaveLoRA", (800, 50), (340, 82), ["loras/webtoon/lora", steps], inputs=[("lora", "LORA_MODEL")])
+    loss = g.node("LossGraphNode", (800, 170), (340, 300), ["webtoon_studio/lora_loss"], inputs=[("loss", "LOSS_MAP")])
+    # SaveLoRA 의 steps(파일 이름에 들어가는 스텝 수)는 도구가 학습 스텝과 같은 값으로 채운다
+    g.link(data, 0, bucket, "latents")
+    g.link(data, 1, bucket, "conditioning")
+    g.link(unet, 0, train, "model")
+    g.link(bucket, 0, train, "latents")
+    g.link(bucket, 1, train, "positive")
+    g.link(train, 0, save, "lora")
+    g.link(train, 1, loss, "loss")
+    wf = g.dump()
+    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": "인물 LoRA 학습(②, Qwen Image 2.1 UC, 서버 기본 학습 노드)"}
+    if TRAIN_DISABLED:
+        wf["extra"]["webtoon"]["disabled"] = TRAIN_DISABLED
+    return wf
+
+
 def main():
     if sys.argv[1:2] == ["library"]:
         return library("--force" in sys.argv)
+    if sys.argv[1:2] == ["train"]:  # 인물 LoRA 학습 워크플로우 둘(① 데이터 ② 학습, 2026-10-19 사용자 "로라 쓰는 거 필요해, 노드 만들어서 워크플로우 구성해서, UC 기반")
+        c = Comfy()
+        for name, wf in (("webtoon_lora_dataset_uc.json", build_lora_dataset()), ("webtoon_train_lora_uc.json", build_train())):
+            c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
+            (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+            print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
+        return
     if sys.argv[1:2] == ["anima"]:  # Anima 판 생성 워크플로우를 서버에 저장(2026-10-19 사용자 "anima 버전 하나 만들어주라")
         wf = build_anima()
         c = Comfy()

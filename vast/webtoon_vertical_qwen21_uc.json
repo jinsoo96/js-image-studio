@@ -1,8 +1,8 @@
 {
  "id": "fbae10da-cd39-4577-bacc-5c4b13f950e2",
  "revision": 0,
- "last_node_id": 18,
- "last_link_id": 31,
+ "last_node_id": 20,
+ "last_link_id": 34,
  "nodes": [
   {
    "id": 1,
@@ -48,7 +48,7 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      1
+      32
      ],
      "slot_index": 0
     }
@@ -748,12 +748,92 @@
     "Node name for S&R": "VAEDecode"
    },
    "widgets_values": []
+  },
+  {
+   "id": 18,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    -190
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 4,
+   "title": "인물 LoRA 1 (도구가 그 컷 인물 것을 넣고 켠다)",
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 32
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      33
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "",
+    0.8
+   ]
+  },
+  {
+   "id": 19,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    -70
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 4,
+   "title": "인물 LoRA 2 (도구가 그 컷 인물 것을 넣고 켠다)",
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 33
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "",
+    0.8
+   ]
   }
  ],
  "links": [
   [
    1,
-   2,
+   19,
    0,
    5,
    0,
@@ -926,6 +1006,22 @@
    13,
    0,
    "IMAGE"
+  ],
+  [
+   32,
+   2,
+   0,
+   18,
+   0,
+   "MODEL"
+  ],
+  [
+   33,
+   18,
+   0,
+   19,
+   0,
+   "MODEL"
   ]
  ],
  "groups": [

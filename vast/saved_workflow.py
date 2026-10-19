@@ -76,7 +76,9 @@ def models(refresh: bool = False) -> dict:
         for n in nodes:
             v = (n.get("widgets_values") or [None])[0]
             folder = {"UNETLoader": "diffusion_models", "LoraLoaderModelOnly": "loras", "CLIPLoader": "text_encoders", "VAELoader": "vae"}.get(n.get("type"))
-            if folder and isinstance(v, str) and n.get("mode", 0) != 2:
+            if str(n.get("title", "")).startswith(LORA_SLOT):  # 인물 LoRA 칸은 비어 있는 게 기본(그 컷 인물 것을 도구가 넣는다)
+                continue
+            if folder and isinstance(v, str) and v and n.get("mode", 0) != 2:
                 used.setdefault(folder, []).append(v)
         unet = (used.get("diffusion_models") or ["?"])[0]
         out[mid] = {"gen": d["roles"]["vertical"], "roles": dict(d["roles"]), "refs": bool(meta.get("refs", True)), "label": meta.get("label") or unet,
@@ -185,12 +187,25 @@ def _widget_names(spec: dict) -> list:
     return names
 
 
-def to_api(ui: dict, turbo=None, refine=None) -> dict:
+LORA_SLOT = "인물 LoRA"  # 생성 워크플로우에서 그 컷 인물의 LoRA 를 넣는 노드의 제목 머리(vast/lora.py slots 가 단다)
+
+
+def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
     """UI 형식 → API 형식. 우회(mode 4) 노드는 같은 타입 입력으로 건너 이어 주고, 끈(mode 2) 노드와 메모처럼 화면에만 있는 노드는 뺀다.
     turbo 가 True/False 면 이름에 turbo 가 든 LoRA 를 켜거나 우회한다(부르는 쪽 스텝 8·40 에 맞춤).
-    refine 이 True/False 면 제목이 '2차 다듬기'로 시작하는 노드(잠재 확대 + 두 번째 샘플러)를 켜거나 우회한다."""
+    refine 이 True/False 면 제목이 '2차 다듬기'로 시작하는 노드(잠재 확대 + 두 번째 샘플러)를 켜거나 우회한다.
+    loras([{file, strength}], lora.for_panel)를 주면 제목이 '인물 LoRA' 로 시작하는 노드에 차례로 넣어 켜고 남는 노드는 우회한다.
+    노드가 모자라면(슬롯 없는 워크플로우) 모델 로더 바로 뒤에 LoRA 노드를 이어 붙인다."""
     nodes = {n["id"]: n for n in ui["nodes"]}
     meta = (ui.get("extra") or {}).get("webtoon") or {}
+    more = []
+    if loras is not None:
+        slots = sorted((n for n in nodes.values() if str(n.get("title", "")).startswith(LORA_SLOT)), key=lambda n: str(n.get("title")))
+        for k, n in enumerate(slots):
+            n["mode"] = 0 if k < len(loras) else 4
+            if k < len(loras):
+                n["widgets_values"] = [loras[k]["file"], float(loras[k].get("strength", 0.8))]
+        more = list(loras[len(slots):])
     if turbo is not None:
         for n in nodes.values():
             if n["type"] == "LoraLoaderModelOnly" and "turbo" in str((n.get("widgets_values") or [""])[0]).lower():
@@ -229,6 +244,17 @@ def to_api(ui: dict, turbo=None, refine=None) -> dict:
                     inputs[i["name"]] = s
         api[nid] = {"class_type": n["type"], "inputs": inputs}
     api = _renumber(_first_stage(api))
+    if more:  # 슬롯이 모자란 만큼 모델 로더(UNETLoader) 바로 뒤에 사슬로: 모델을 받던 입력은 마지막 LoRA 에서 받는다
+        src = next((k for k, v in api.items() if v["class_type"] == "UNETLoader"), None)
+        if src:
+            users = [(k, nm) for k, v in api.items() for nm, x in v["inputs"].items() if x == [src, 0]]
+            prev = [src, 0]
+            for i, lz in enumerate(more, 1):
+                api[f"L{i}"] = {"class_type": "LoraLoaderModelOnly",
+                                "inputs": {"model": prev, "lora_name": lz["file"], "strength_model": float(lz.get("strength", 0.8))}}
+                prev = [f"L{i}", 0]
+            for k, nm in users:
+                api[k]["inputs"][nm] = prev
     if turbo is not None and meta.get("cfg"):  # 판마다 터보·일반 cfg 가 다르면 워크플로우 데이터대로(Anima 1 · 4), 두 번째 샘플러도 같이
         for k, v in api.items():
             if v["class_type"] == "KSampler":

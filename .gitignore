@@ -18,6 +18,9 @@ series/*/episodes/*/out/
 series/*/episodes/*/review/
 series/*/episodes/*/render_run.log
 series/*/episodes/*/render_status.json
+# 인물 LoRA 학습 데이터(그린 컷·에셋 사본)와 손실 그래프. 캡션 목록 data.json 만 올린다
+series/*/lora/*/data/
+series/*/lora/*/loss.png
 **/_rejected/
 **/_candidates/
 # 원작 원고(남의 글): 콘티 관문이 장면 목록(beats.json)과 대조하는 정본. 작업 PC 에만

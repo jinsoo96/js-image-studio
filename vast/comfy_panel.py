@@ -59,7 +59,20 @@ def strip_people(text: str) -> str:
 _SAVED_WARNED = False
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False):
+def lora_for(series, chars, model=None) -> list:
+    """이 컷 인물들의 학습한 LoRA(series.json loras, 지금 그리는 판으로 학습한 것만). 모듈을 못 부르면 없음."""
+    try:
+        from lora import for_panel
+        from saved_workflow import pick
+        return for_panel(series, chars, model or pick(series)[0])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
+
+
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
     edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
@@ -69,15 +82,18 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
     global _SAVED_WARNED
     try:
         from saved_workflow import fill, load_ui, models, pick, refs_model, takes_refs, to_api, workflow_for
-        _, gen, ed = pick(series)
+        mid, gen, ed = pick(series)
         ui = load_ui(workflow_for(role, series) if role else (ed if edit else gen))
         if ref_names and not edit and not takes_refs(ui):
-            ui = load_ui(models()[refs_model()]["gen"])
+            mid = refs_model()
+            ui = load_ui(models()[mid]["gen"])
         mp = ((ui.get("extra") or {}).get("webtoon") or {}).get("max_pixels")  # 판이 학습된 크기(Anima 는 약 100만 화소). 더 큰 캔버스는 같은 장면을 타일처럼 반복해 그렸다(2026-10-19 외출 p112 4분할)
         if mp and w * h > mp:
             k = (mp / (w * h)) ** 0.5
             w, h = max(512, int(w * k) // 32 * 32), max(512, int(h * k) // 32 * 32)
-        return fill(to_api(ui, turbo=turbo, refine=bool(refine)), prompt, ref_names, w, h, seed, steps, ref_res)
+        # 인물 LoRA 는 컷 생성에만(고치기·에셋·시안은 그대로). 그 판으로 학습한 것만 붙는다(lora.for_panel)
+        lz = lora_for(series, chars, mid) if chars and not edit and not role and not NO_LORA else None
+        return fill(to_api(ui, turbo=turbo, refine=bool(refine), loras=lz), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
             print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
@@ -262,9 +278,15 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
     if close or p.get("camera"):
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
+    # 학습한 LoRA 가 있는 인물은 이름 옆에 그 trigger 를 붙인다(학습 캡션 맨 앞 낱말, lora.build_data)
+    trig = {} if NO_LORA else {x["who"]: x["trigger"] for x in lora_for(series, p.get("chars", [])) if x.get("trigger")}
     for cid, k in bind.items():
         short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
-        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} (the person in <image{k}>)", action, count=1)
+        tag = f"{trig[cid]}, " if cid in trig else ""
+        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} ({tag}the person in <image{k}>)", action, count=1)
+    for cid in [c for c in trig if c not in bind and c in NAMES]:
+        short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
+        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} ({trig[cid]})", action, count=1)
     outfit = " ".join(f"{NAMES[c]} wears: {o}." for c, o in (p.get("outfit") or {}).items())
     sp = series / "prompts" / "style.txt"
     style = (sp if sp.exists() else series / "prompts" / "style_v2.txt").read_text(encoding="utf-8").strip()
@@ -359,7 +381,10 @@ def main():
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
     ap.add_argument("--refine", action="store_true", help="2차 다듬기(잠재 확대 + 낮은 강도로 한 번 더): 얼굴·선이 또렷해지지만 컷당 시간이 약 1.5배")
     ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
+    ap.add_argument("--no-lora", action="store_true", help="학습한 인물 LoRA(series.json loras)를 이번엔 붙이지 않는다(견줘 보기)")
     args = ap.parse_args()
+    global NO_LORA
+    NO_LORA = args.no_lora
     if args.model:  # saved_workflow.pick 이 환경변수를 먼저 본다(이 작업만)
         os.environ["WEBTOON_MODEL"] = args.model.strip().lower()
     series = Path(args.series_dir)
@@ -407,7 +432,8 @@ def main():
             from make_workflow import build as ui_build, build_anima  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
             ui = (build_anima(pr, size=(w, h), steps=steps, seed=sd, turbo=args.turbo) if text_only else
                   ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel"))
-            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine), ui), timeout=1800)
+            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine,
+                                                 chars=p.get("chars")), ui), timeout=1800)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")
