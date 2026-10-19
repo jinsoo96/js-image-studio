@@ -482,7 +482,8 @@ def kind_flip(spec, ep):
     """2000년대 폴더폰을 펼친 화면(위 작은 액정, 아래 자판). 스마트폰 이전 시대 작품용(2026-10-18 비금경 「외출」, 2000년대 후반).
     spec: {"time": "17:42", "screen": "sms", "from": "정은영 과장", "text": "...", "date": "10/03"}   받은 문자 하나
           {"time": "21:03", "screen": "missed", "calls": [{"name": "강영원 PM", "time": "18:02"}, ...]}   부재중 전화
-          {"time": "...", "screen": "send", "to": "정은영 과장", "text": "..."}   보내는 문자"""
+          {"time": "...", "screen": "send", "to": "정은영 과장", "text": "..."}   보내는 문자
+          {"time": "16:02", "screen": "inbox", "messages": [{"from": "여자 친구", "time": "14:10", "text": "..."}, ...]}   쌓인 받은 문자 목록"""
     W, H = 832, 1216
     img = room_bg(W, H)
     d = ImageDraw.Draw(img)
@@ -513,6 +514,19 @@ def kind_flip(spec, ep):
             d.text((sx0 + 18, y + 26), "☏ " + cl.get("name", ""), font=f(24), fill=ink, anchor="lm")
             d.text((sx1 - 18, y + 26), cl.get("time", ""), font=f(20, bold=False), fill=sub, anchor="rm")
             y += 54
+    elif scr == "inbox":
+        msgs = spec.get("messages", [])
+        d.text(((sx0 + sx1) / 2, y + 14), f"받은 문자 {len(msgs)}통", font=f(26), fill=accent, anchor="mm")
+        y += 46
+        for m in msgs:
+            d.line([(sx0 + 12, y), (sx1 - 12, y)], fill=(180, 192, 210), width=1)
+            d.text((sx0 + 18, y + 22), "✉ " + m.get("from", ""), font=f(22), fill=ink, anchor="lm")
+            d.text((sx1 - 18, y + 22), m.get("time", ""), font=f(18, bold=False), fill=sub, anchor="rm")
+            line = (wrap_px(d, m.get("text", ""), f(20, bold=False), sx1 - sx0 - 40) or [""])[0]
+            d.text((sx0 + 22, y + 50), line, font=f(20, bold=False), fill=sub, anchor="lm")
+            y += 72
+            if y > sy1 - 90:
+                break
     else:
         who = spec.get("from") if scr == "sms" else spec.get("to")
         label = ("받은 문자" if scr == "sms" else "보내는 문자") + (f"  {spec['date']}" if spec.get("date") else "")
@@ -525,7 +539,7 @@ def kind_flip(spec, ep):
             ty += 38
     # 아래 소프트키 줄
     d.rectangle([sx0, sy1 - 34, sx1, sy1], fill=(198, 214, 232))
-    keys = ("답장", "확인", "삭제") if scr == "sms" else ("통화", "확인", "메뉴") if scr == "missed" else ("전송", "", "취소")
+    keys = ("답장", "확인", "삭제") if scr in ("sms", "inbox") else ("통화", "확인", "메뉴") if scr == "missed" else ("전송", "", "취소")
     for k, t in enumerate(keys):
         d.text((sx0 + (sx1 - sx0) * (k * 2 + 1) / 6, sy1 - 17), t, font=f(18, bold=False), fill=ink, anchor="mm")
     # 자판: 방향키 + 숫자판

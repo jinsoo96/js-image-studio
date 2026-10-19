@@ -28,7 +28,7 @@ SHEET = ("IMAGE: character design reference sheet on a plain light warm-gray bac
          "same person standing in a row (front, three-quarter, side profile, back), consistent proportions. Right: a 3x2 grid of head-and-shoulders "
          "expressions: {exprs}.")
 LOC_HEAD = ("IMAGE: background art for a Korean webtoon, an empty location with NO people, wide establishing view, eye level, detailed but clean, "
-            "same illustration style and light as described, no text, no signs with readable letters, no logos.")
+            "same illustration style and light as described, no text anywhere: shop signs, signboards and menu boards are plain blank colored panels with no letters or characters at all (no Korean, Chinese or English), no logos.")  # 읽을 글자 금지만 적으면 중국어 같은 글자를 간판에 그렸다(2026-10-19 외출 장소 시안 넷)
 ID = re.compile(r"[a-z][a-z0-9_]{0,31}")
 SLUG = re.compile(r"[a-z][a-z0-9-]{1,40}")
 CAST_KEYS = ("ko", "en", "role", "who", "main", "exprs")

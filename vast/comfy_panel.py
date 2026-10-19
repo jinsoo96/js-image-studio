@@ -258,6 +258,8 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     # 시대 규칙(series.json era_rule): 2008년 작품에 스마트폰이 일곱 컷 나왔다(2026-10-18 외출 1화) → 그리기 지시에 시대 소품을 박는다
     sjd = json.loads(sj.read_text(encoding="utf-8")) if sj.exists() else {}
     era_rule = sjd.get("era_rule") or ""
+    # 연기 세기는 작품마다(series.json acting_rule). 고정 문장 '강하고 즉시 읽히는 연기'가 잔잔한 표정 작품(외출)과 부딪혔다
+    acting_rule = sjd.get("acting_rule") or "strong, instantly readable webtoon expression and body language"
     if era_rule:
         people_rule = f"{people_rule} {era_rule}"
     # 시대 소품 중 휴대폰 규칙은 컷 설명에 휴대폰이 나올 때만 붙인다. 늘 붙였더니 열세 컷에서 설명에 없는 휴대폰을 손에 쥐여 줬다(외출 1화)
@@ -266,12 +268,14 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     text_rule = (f"One single panel: no speech bubbles, no sound effects, no panel border. The only readable text drawn in the picture: {p['text_in_image']}; "
                  "no other letters, signs or logos." if p.get("text_in_image") else
                  "One single panel: no text, no speech bubbles, no sound effects, no panel border.")
-    framing = ("FRAMING: a macro close-up. The object or hands fill most of the frame; behind them only a soft, dark, out-of-focus blur. "
+    # 인서트 배경을 늘 '어두운 흐림'으로 적었더니 낮 호프의 건배 컷이 밤처럼 나왔다(2026-10-19 외출 p110·p119) → 그 컷의 때와 빛을 따른다
+    framing = ("FRAMING: a macro close-up. The object or hands fill most of the frame; behind them only a soft out-of-focus blur in the colors "
+               "and light of the place and time the panel text describes. "
                "No room overview, no furniture layout, no bed, no people." if insert else
                "FRAMING: a tight close-up. The head and shoulders fill most of the frame; only a small, softly blurred part of the place shows."
                if "close-up" in (p.get("shot") or "") else "")
     parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.", framing,
-             f"ACTING (strong, instantly readable webtoon expression and body language): {p['acting']}" if p.get("acting") else "",
+             f"ACTING ({acting_rule}): {p['acting']}" if p.get("acting") else "",
              action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,
              ("REFERENCES: " + " ".join(lines)) if lines else "", style,
              f"COLOR AND TEXTURE OF THIS PANEL: {p['look']}" if p.get("look") else "",

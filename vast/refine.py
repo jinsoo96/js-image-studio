@@ -137,7 +137,6 @@ def _vlm(images: list, text: str, max_tokens=300) -> dict:
     import base64
     import io
     from PIL import Image
-    from judge_ep import JudgeDown, chat
     content = []
     for p in images:
         img = Image.open(p).convert("RGB")
@@ -146,16 +145,38 @@ def _vlm(images: list, text: str, max_tokens=300) -> dict:
         img.save(buf, "JPEG", quality=90)
         content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
     content.append({"type": "text", "text": text})
-    try:
-        txt = chat(content, max_tokens=max_tokens)
-        m = re.search(r"\{.*\}", txt, re.S)
-        if not m:
-            raise ValueError("JSON 없는 답: " + txt[:80])
-        return json.loads(m.group())
-    except (JudgeDown, ValueError) as e:
-        JUDGE_FAILS["n"] += 1
-        JUDGE_FAILS["last"] = str(e)[:160]
-        return {}
+    return _ask_json(content, max_tokens)
+
+
+def _json_from(txt: str) -> dict:
+    """답 글에서 첫 JSON 객체를 꺼낸다. 처음 '{' 부터 끝 '}' 까지 통째로 읽으면 뒤에 붙은 설명이나 두 번째 객체 때문에 깨졌다
+    (2026-10-19 외출 1화 검사: 'Extra data'·'Expecting delimiter' 로 검사불가가 여러 컷)."""
+    dec = json.JSONDecoder()
+    for m in re.finditer(r"\{", txt):
+        try:
+            obj = dec.raw_decode(txt[m.start():])[0]
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise ValueError("JSON 없는 답: " + txt[:80])
+
+
+def _ask_json(content: list, max_tokens: int) -> dict:
+    """판정 모델에 묻고 JSON 을 받는다. 답이 잘리거나 깨지면 토큰을 두 배로 한 번 더 묻고, 그래도 못 받으면 JUDGE_FAILS 를 올리고 빈 dict."""
+    from judge_ep import JudgeDown, chat
+    last = None
+    for mt in (max_tokens, max_tokens * 2):
+        try:
+            return _json_from(chat(content, max_tokens=mt))
+        except ValueError as e:
+            last = e
+        except JudgeDown as e:
+            last = e
+            break
+    JUDGE_FAILS["n"] += 1
+    JUDGE_FAILS["last"] = str(last)[:160]
+    return {}
 
 
 PRESENCE_ASK = """In this webtoon scene these people are present at this moment, even if this panel does not show them: {who}.
@@ -223,24 +244,26 @@ def _looks(series, p) -> str:
 
 def _text_json(text: str, max_tokens=200) -> dict:
     """그림 없이 글만 판정 모델에 묻고 JSON 을 받는다(못 받으면 빈 dict, JUDGE_FAILS 를 올린다)."""
-    from judge_ep import JudgeDown, chat
-    try:
-        m = re.search(r"\{.*\}", chat([{"type": "text", "text": text}], max_tokens=max_tokens), re.S)
-        return json.loads(m.group()) if m else {}
-    except (JudgeDown, ValueError) as e:
-        JUDGE_FAILS["n"] += 1
-        JUDGE_FAILS["last"] = str(e)[:160]
-        return {}
+    return _ask_json([{"type": "text", "text": text}], max_tokens)
 
 
 def _compare(check: dict, fill: dict, img_path: Path) -> list:
-    """비교형 항목: expect(글만 보고 기대값 {이름: 값}) · observe(그림을 보고 관찰값 {이름: 값})를 따로 묻고, 둘 다 값이 있는데 다른 이름만 걸린 점으로."""
-    want = _text_json(check["expect"].format(**fill))
+    """비교형 항목: expect(글만 보고 기대값 {이름: 값}) · observe(그림을 보고 관찰값 {이름: 값})를 따로 묻고, 둘 다 값이 있는데 맞지 않는 이름만 걸린 점으로.
+    conflicts(기준표 데이터)가 있으면 그 짝만 어긋남으로 본다(예: 시선 'down' 과 'left' 는 함께 일어날 수 있어 어긋남이 아니다). 없으면 값이 다르면 어긋남."""
+    want = _text_json(check["expect"].format(**fill), max_tokens=check.get("max_tokens", 200))
     got = _vlm([img_path], check["observe"].format(**fill), max_tokens=check.get("max_tokens", 200))
     skip = set(check.get("unknown", ["unknown", "unclear", "none", ""]))
-    return [check["problem"].format(name=k, want=v, got=got[k]) for k, v in want.items()
-            if isinstance(v, str) and v.lower() not in skip and isinstance(got.get(k), str) and got[k].lower() not in skip
-            and got[k].lower() != v.lower()]
+    pairs = {frozenset(x) for x in check.get("conflicts", [])}
+    low = {str(k).lower(): v for k, v in got.items()}
+    out = []
+    for k, v in want.items():
+        g = low.get(str(k).lower())
+        if not (isinstance(v, str) and isinstance(g, str)) or v.lower() in skip or g.lower() in skip or v.lower() == g.lower():
+            continue
+        if pairs and frozenset((v.lower(), g.lower())) not in pairs:
+            continue
+        out.append(check["problem"].format(name=k, want=v, got=g))
+    return out
 
 
 def run_checks(series, img_path: Path, p: dict, layout: str = "") -> dict:
@@ -317,7 +340,7 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         notes.append("팔·손이 남는다: " + "; ".join(limbs))
     p = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
     sc = ep_dir / "panels_spec.json"
-    layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("location") or "", "") if sc.exists() else "")
+    layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("scene") or p.get("location") or "", "") if sc.exists() else "")
     absent = scene_present(ep_dir, pid)
     if absent:
         from hf_panel import names

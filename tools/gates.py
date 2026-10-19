@@ -231,7 +231,7 @@ def judge_panels(ep: Path) -> dict:
             for p in part)
         mat = re.sub(r" SPACE \(identical.*?\"", '"', mat)
         # 장면 배치(자리표)는 장소마다 한 번: 공간 기준(누가 어디 앉아 있고 어느 각도에서 누가 보여야 하나)을 채점하려면 필요하다
-        locs = {p.get("location") for p in part}
+        locs = {p.get("scene") or p.get("location") for p in part}
         if any(scenes.get(l) for l in locs):
             mat = "장면 배치:\n" + "\n".join(f"  {l}: {scenes[l]}" for l in sorted(x for x in locs if x and scenes.get(x))) + "\n\n" + mat
         setting = _setting(ep.parents[1])

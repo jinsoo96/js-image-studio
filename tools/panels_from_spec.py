@@ -7,6 +7,7 @@ panels_spec.json:
   "panels": {"p003": {"chars": ["jaemin"], "outfit": {"jaemin": "white dress shirt, navy slacks"}, "location": "office",
                       "shot": "wide shot", "action": "영어로 그 컷에서 일어나는 일", "acting": "표정·몸짓", "camera": "어깨 너머 숏이면"}}
   "scenes": {"office": "장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}   ← 인물이 있는 그 장소의 컷마다 붙는다
+            같은 장소가 한 화 안에서 다른 때(배치가 바뀐 뒤)에 또 나오면 그 컷에 "scene": "office_night" 처럼 자리표 이름을 적는다(없으면 장소 이름)
   "reuse":  {"p010": "episodes/ep001/panels_hf/p012.png"}                         ← 앞 화 그림을 그대로 쓰는 컷
 """
 import json
@@ -61,7 +62,7 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
     for k in range(0, len(todo), 12):
         part = todo[k:k + 12]
         items = "\n".join(f"[{b['id']}] people: {', '.join(short[c] for c in spec[b['id']]['chars'] if c in short)}; panel text: "
-                          f"{spec[b['id']].get('action', '')} {spec[b['id']].get('camera', '')}; scene layout: {scenes.get(spec[b['id']].get('location') or '', '')}"
+                          f"{spec[b['id']].get('action', '')} {spec[b['id']].get('camera', '')}; scene layout: {scenes.get(spec[b['id']].get('scene') or spec[b['id']].get('location') or '', '')}"
                           for b in part)
         try:
             txt = chat([{"type": "text", "text": SIDE_ASK.format(items=items)}], max_tokens=900)
@@ -129,11 +130,12 @@ def main():
         chars = sp.get("chars", [])
         action = sp.get("action", "")
         loc = sp.get("location")
-        if loc in scenes and chars and not sp.get("camera"):  # 어깨 너머 숏은 카메라 칸에 배치가 있다
-            action = f"{action} SPACE (identical in every panel of this scene): {scenes[loc]}"
+        key = sp.get("scene") or loc  # 자리표 이름(같은 장소라도 때가 다르면 배치가 다르다)
+        if key in scenes and chars and not sp.get("camera"):  # 어깨 너머 숏은 카메라 칸에 배치가 있다
+            action = f"{action} SPACE (identical in every panel of this scene): {scenes[key]}"
         e = {"id": pid, "chars": chars, "outfit": sp.get("outfit", {}), "location": loc, "shot": norm_shot(sp.get("shot", "medium shot")),
              "aspect": sp.get("aspect") or ASPECT.get(by_id[pid].get("aspect", "landscape"), "3:2"), "action": action}
-        for k in ("acting", "camera", "refs_extra", "outfit_sheets", "extras", "text_in_image", "look", "view"):
+        for k in ("acting", "camera", "refs_extra", "outfit_sheets", "extras", "text_in_image", "look", "view", "scene"):
             if sp.get(k):
                 e[k] = sp[k]
         panels.append(e)

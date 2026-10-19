@@ -40,7 +40,7 @@ import gates  # noqa: E402  하네스 관문(콘티·컷 설명 격리 judge, �
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
-SHEETS = ROOT / "state" / "mcp_sheets"
+SHEETS = ROOT / "exports" / "_sheets"  # 링크(/files/)가 나가는 곳. state 아래에 두면 경로만 줄 수 있어 에이전트가 agent app ShareFile 로 옮기려다 실패했다(2026-10-19)
 # WEBTOON_QUEUE_FRONT: agent app 에서 시킨 작업은 공용 ComfyUI 큐의 앞에 넣는다(comfy_client.queue). 작업실의 큰 배치(장소 시안·한 화 그리기) 뒤에 서서
 # 한 컷이 10분 걸렸고, 에이전트가 기다리다 멈췄다(2026-10-19 agent app)
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "WEBTOON_QUEUE_FRONT": "1"}
@@ -58,7 +58,7 @@ FILE_TYPES = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4"}
 
 mcp = FastMCP("webtoon-studio", instructions=(
     "웹툰 하네스(이미지 스튜디오의 웹툰 템플릿). 붙이면 끝: 별도 시스템 프롬프트 없이 이 MCP 만으로 새 작품·다음 화를 만든다. "
-    "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 도구 결과 끝의 '다음:' 을 따른다. "
+    "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 작업 결과는 JSON(state·review·drawn·links)이다. "
     "콘티·컷 설명은 prepare_episode 의 관문(격리 judge)을 통과해야 make_episode 가 그린다. 그린 그림은 검수가 스스로 다시 그린다. "
     "오래 걸리는 일은 job_id 를 돌려주니 기다리지 말고 알린 뒤 답을 끝낸다. 사용자에게는 한국어로 답한다."))
 
@@ -160,6 +160,18 @@ def _running_job(ep: Path):
     return None
 
 
+class JobBusy(Exception):
+    """그 회차(작품)에 아직 도는 작업이 있음. 메시지는 JSON(도는 작업 번호·상태): 에이전트가 그 번호로 job_wait 한다."""
+
+
+def _ensure_idle(ep: Path):
+    """도는 작업이 있으면 JobBusy. 작업을 띄우는 도구가 파일을 옮기기 전에 부르고, _start_job 도 마지막에 한 번 더 본다.
+    도구마다 다른 문장('도는 작업이 있다. 끝난 뒤 부른다')만 돌려줬더니 에이전트가 기다릴 번호를 몰라 같은 호출을 몇 초 간격으로 되풀이했다(2026-10-19 agent app)."""
+    busy = _running_job(ep)
+    if busy:
+        raise JobBusy(json.dumps({"error": "busy", "running_job": busy, "running": json.loads(job_status(busy, tail_lines=5))}, ensure_ascii=False))
+
+
 class RepeatedJob(Exception):
     """같은 입력으로 같은 작업을 짧은 간격에 다시 부름. 메시지는 JSON(이전 작업 번호·상태) — MCP 가 도구 오류로 돌려준다."""
 
@@ -181,6 +193,7 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
     """작업을 띄운다(모든 작업 도구가 여기를 거친다). 같은 지문의 작업을 REPEAT_MIN 분 안에 다시 부르면 띄우지 않고 RepeatedJob:
     에이전트가 '사람 눈으로 확인'을 실패로 읽고 같은 컷만 열 번 다시 그렸다(2026-10-19 agent app, D+18 2화 p022). 도구마다 막지 않고 여기 한 곳에서."""
     JOBS.mkdir(parents=True, exist_ok=True)
+    _ensure_idle(ep)
     fp = _fingerprint(kind, ep, steps)
     since = time.time() - REPEAT_MIN * 60
     for f in sorted(JOBS.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
@@ -200,9 +213,11 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
     return job_id
 
 
-def _ids(text: str) -> list:
-    """컷 번호 목록. "30" 처럼 숫자만 주면 p030 으로 읽는다(agent app 시험에서 에이전트가 숫자만 넣었다)."""
-    return [f"p{int(x):03d}" if x.isdigit() else x for x in re.split(r"[,\s]+", text or "") if x]
+def _ids(text) -> list:
+    """컷 번호 목록. 쉼표·빈칸으로 나눈 글, JSON 배열 글('["p022"]'), 목록 무엇이든 받는다. "30" 처럼 숫자만 주면 p030.
+    (agent app 가 JSON 배열 글로 넘겨 '["p022"]' 를 번호로 읽고 '없는 번호'로 거절했다, 2026-10-19)"""
+    items = text if isinstance(text, (list, tuple)) else re.split(r"[,\s\[\]\"']+", str(text or ""))
+    return [f"p{int(x):03d}" if x.isdigit() else x for x in (str(i).strip() for i in items) if x]
 
 
 # ── 읽기 도구 ─────────────────────────────────────────────────
@@ -311,8 +326,8 @@ def _folder(folder: str) -> str:
 
 @mcp.tool()
 def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
-    """검수용 모아보기 그림(컷 번호 붙임)을 만들고 파일 경로를 돌려준다. ids(쉼표) 또는 scene(장소 이름)으로 고른다.
-    비우면 새로 그린 컷 전부. folder="vast" 면 vast 로 그린 컷(panels_hf_vast). 사용자에게 경로를 알려 직접 보게 한다."""
+    """검수용 모아보기 그림(컷 번호 붙임)을 만들고 JSON(sheet 경로·link 원격 링크)을 돌려준다. ids(쉼표) 또는 scene(장소 이름)으로 고른다.
+    비우면 새로 그린 컷 전부. folder="vast" 면 vast 로 그린 컷(panels_hf_vast). 사용자에게는 link 를 준다."""
     ep = _episode(series, episode)
     sub = _folder(folder)
     pj = _panels_json(ep)
@@ -348,7 +363,20 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", fol
     SHEETS.mkdir(parents=True, exist_ok=True)
     out = SHEETS / f"{_series(series).name}_{ep.name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
-    return f"모아보기 {len(tiles)}컷: {out}"
+    return json.dumps({"sheet": str(out), "link": _link(out), "panels": len(tiles)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def file_link(paths: str, series: str = "") -> str:
+    """작업실 안 그림·PDF 의 원격 링크(사용자가 브라우저로 여는 주소). paths 는 쉼표로 여러 개. 이 PC 의 파일이라 agent app 작업 공간의 도구(ShareFile·cp)로는 못 옮긴다."""
+    out = {}
+    for one in [x.strip() for x in re.split(r"[,\n]+", paths or "") if x.strip()]:
+        try:
+            f = _existing(one, series)
+            out[one] = _link(f) or "(link unavailable: not under exports/ or series/, or no public URL)"
+        except (NotFound, ValueError) as e:
+            out[one] = json.loads(str(e)) if str(e).startswith("{") else str(e)
+    return json.dumps(out, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -395,6 +423,65 @@ def _inside(rel: str) -> Path:
     return p
 
 
+class NotFound(Exception):
+    """없는 경로. 메시지는 JSON(받은 경로·비슷한 실제 경로 후보)."""
+
+
+def _seg_ok(given: str, real: str) -> bool:
+    return real == given or real.startswith(given)  # 작품 이름은 앞부분만 줘도 된다(d-plus-18 → d-plus-18-hf)
+
+
+def _existing(rel: str, series: str = "", want_dir: bool = False) -> Path:
+    """있는 파일·폴더를 찾는다. 작업실 기준 → series 폴더 기준 → 받은 경로의 마디가 순서대로 들어 있는 실제 경로(마디는 앞부분 일치 허용).
+    하나로 좁혀지면 그것, 아니면 NotFound(후보 목록). 에이전트가 series/·episodes/·-hf 를 빼고 부르거나 series 를 따로 넘겨,
+    '파일 없음'만 받고 경로를 바꿔 가며 수십 번 다시 불렀다(2026-10-19 agent app, build_panels.py 를 18번)."""
+    norm = rel.replace("\\", "/").strip()
+    root_name = ROOT.name.lower()
+    low = norm.lower()
+    if root_name in low:  # 'D:/webtoon-studio/series/...' 같은 절대 경로
+        norm = norm[low.index(root_name) + len(root_name):]
+    norm = norm.lstrip("/")
+    tries = [norm]
+    if series:
+        try:
+            tries.insert(0, (_series(series) / norm).relative_to(ROOT).as_posix())
+        except ValueError:
+            pass
+    for r in tries:
+        q = _inside(r)
+        if q.exists() and q.is_dir() == want_dir:
+            return q
+    parts = [x for x in norm.split("/") if x and x != "."]
+    if not parts:
+        return _inside(".")
+    name = parts[-1]
+    found = []
+    for f in (ROOT / "series").rglob(name if "*" not in name else "_"):
+        if f.is_dir() != want_dir or any(x.startswith((".", "_")) for x in f.relative_to(ROOT).parts[:-1]):
+            continue
+        real = f.relative_to(ROOT).parts[:-1]
+        k = 0
+        for seg in real:
+            if k < len(parts) - 1 and _seg_ok(parts[k], seg):
+                k += 1
+        if k == len(parts) - 1:
+            found.append(f)
+    if series:
+        sp = _series(series)
+        found = [f for f in found if sp in f.parents] or found
+    if len(found) > 1:  # 받은 마디와 글자 차이가 가장 적은 것 하나면 그것
+        cost = lambda f: len(f.relative_to(ROOT).as_posix()) - len(norm)  # noqa: E731
+        best = min(cost(f) for f in found)
+        top = [f for f in found if cost(f) == best]
+        if len(top) == 1:
+            found = top
+    if len(found) == 1:
+        return found[0]
+    raise NotFound(json.dumps({"error": "not_found", "path": rel, "candidates": [f.relative_to(ROOT).as_posix() for f in found[:8]],
+                               "root": "paths are relative to D:/webtoon-studio, e.g. series/<series>/episodes/<episode>/build_panels.py"},
+                              ensure_ascii=False))
+
+
 def _writable(p: Path) -> bool:
     rel = p.relative_to(ROOT.resolve()).as_posix()
     if p.suffix.lower() not in TEXT_EXT:
@@ -405,11 +492,9 @@ def _writable(p: Path) -> bool:
 
 
 @mcp.tool()
-def list_files(path: str = "series") -> str:
-    """작업실 안 폴더의 파일 목록(작업실 기준 경로, 예: series/d-plus-18-hf/episodes/ep002_v2). 그림 폴더는 개수만 센다."""
-    p = _inside(path)
-    if not p.is_dir():
-        return f"폴더가 아니다: {path}"
+def list_files(path: str = "series", series: str = "") -> str:
+    """작업실 안 폴더의 파일 목록(작업실 기준 경로, 예: series/d-plus-18-hf/episodes/ep002_v2. series 를 주면 그 작품 폴더 기준). 그림 폴더는 개수만 센다."""
+    p = _existing(path, series, want_dir=True)
     out = []
     for c in sorted(p.iterdir()):
         if c.is_dir():
@@ -421,9 +506,9 @@ def list_files(path: str = "series") -> str:
 
 
 @mcp.tool()
-def read_file(path: str, offset: int = 0, max_chars: int = 12000) -> str:
-    """작업실 안 글 파일 읽기(작업실 기준 경로). 긴 파일은 offset 으로 이어 읽는다. 콘티(make_storyboard.py)·컷 설명(build_panels.py)·문서를 볼 때."""
-    p = _inside(path)
+def read_file(path: str, offset: int = 0, max_chars: int = 12000, series: str = "") -> str:
+    """작업실 안 글 파일 읽기(작업실 기준 경로, series 를 주면 그 작품 폴더 기준). 긴 파일은 offset 으로 이어 읽는다. 콘티(make_storyboard.py)·컷 설명(build_panels.py)·문서를 볼 때."""
+    p = _existing(path, series)
     if p.suffix.lower() not in TEXT_EXT:
         return "글 파일(.py .json .md .txt .html)만 읽는다. 그림은 contact_sheet 로"
     t = p.read_text(encoding="utf-8")
@@ -511,14 +596,13 @@ def append_file(path: str, content: str) -> str:
 
 
 @mcp.tool()
-def edit_file(path: str, old: str, new: str) -> str:
+def edit_file(path: str, old: str, new: str, series: str = "") -> str:
     """파일에서 old 글을 new 로 바꾼다(old 는 파일에 정확히 한 번 있어야 한다). 컷 하나·대사 한 줄처럼 일부만 고칠 때. 파이썬이면 바꾼 뒤 문법 검사."""
+    path = _existing(path, series).relative_to(ROOT).as_posix()
     try:
         p = _guard(path, new)
     except ValueError as e:
         return str(e)
-    if not p.exists():
-        return "파일이 없다"
     t = p.read_text(encoding="utf-8")
     n = t.count(old)
     if n != 1:
@@ -535,11 +619,9 @@ def edit_file(path: str, old: str, new: str) -> str:
 
 
 @mcp.tool()
-def check_file(path: str) -> str:
+def check_file(path: str, series: str = "") -> str:
     """나눠 쓴 파일을 검사한다: .py 는 파이썬 문법, .json 은 JSON. 오류면 줄 번호와 그 근처를 보여 준다(edit_file 로 고친다)."""
-    p = _inside(path)
-    if not p.exists():
-        return "파일이 없다"
+    p = _existing(path, series)
     t = p.read_text(encoding="utf-8")
     try:
         if p.suffix == ".py":
@@ -646,9 +728,7 @@ def redo_candidate(series: str, kind: str, name: str) -> str:
     if kind not in ("sheet", "location"):
         return "kind 는 sheet 또는 location"
     cand = s / "assets" / "_candidates" / (f"locations/{name}.png" if kind == "location" else f"{name}_sheet.png")
-    running = _running_job(s)
-    if running:
-        return f"이 작품에 도는 작업이 있다({running}). job_wait 로 끝난 뒤 부른다"
+    _ensure_idle(s)
     if cand.exists():
         rej = s / "assets" / "_candidates" / "_rejected"
         rej.mkdir(parents=True, exist_ok=True)
@@ -675,7 +755,8 @@ def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", re
       "shot": "wide shot", "action": "영어로 이 컷에서 일어나는 일", "acting": "영어로 표정·눈썹·입·몸짓", "camera": "대화 컷이면 어깨 너머 숏 설명"}}
       chars 는 cast.json 의 인물 id, location 은 assets/locations 의 장소 이름. 인물이 있는 컷은 acting 을 꼭 쓴다.
       넓은 컷은 양옆 배치, 대화 컷은 듣는 사람 어깨 너머 숏(camera), 혼자 클로즈업은 한 사람만, 화면 좌우는 장면 내내 같게.
-    scenes: JSON {"office": "그 장소의 장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}. reuse: JSON {"p010": "episodes/ep001/panels_hf/p012.png"}.
+    scenes: JSON {"office": "그 장소의 장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}. 같은 장소가 한 화 안에서 배치가 바뀐 뒤 또 나오면
+      scenes 에 {"office_night": "..."} 를 더하고 그 컷에 "scene": "office_night" 를 적는다. reuse: JSON {"p010": "episodes/ep001/panels_hf/p012.png"}.
     끝나면 prepare_episode 로 panels.json 을 만들고 '빠진 컷'·'연기 없는 인물 컷'이 비었는지 본다."""
     ep = _episode(series, episode)
     sd = _series(series)
@@ -777,9 +858,7 @@ def _draw(series: str, episode: str, ids: list, confirm_credits: float, kind: st
     c = _credits()
     if c is not None and c < cost:
         return f"크레딧이 모자라다(남은 {c}, 필요 {cost:.2f})"
-    busy = _running_job(ep)
-    if busy:
-        return f"이 회차에 도는 작업이 있다({busy}). 같은 컷을 겹쳐 그리면 안 된다. job_status 로 끝난 뒤 부른다"
+    _ensure_idle(ep)
     cmd = [PY, str(TOOLS / "hf_panel.py"), str(_series(series)), str(ep / "panels.json"), "--episode", ep.name, "--n", "1", "--only", ",".join(todo)]
     job = _start_job(kind, ep, [{"label": f"{len(todo)}컷 그리기(예상 {cost:.2f} 크레딧)", "cmd": cmd},
                                 {"label": "합성용으로 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]}], note)
@@ -809,8 +888,7 @@ def redraw_panels(series: str, episode: str, ids: str, reason: str, confirm_cred
     cost = len(want) * COST_PER_PANEL
     if confirm_credits < cost:
         return f"확인 값이 모자라다: 예상 {cost:.2f} 크레딧. 사용자 확인 뒤 confirm_credits={cost:.2f}"
-    if _running_job(ep):
-        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(ep)
     rej = ep / "panels_hf" / "_rejected"
     rej.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%m%d%H%M")
@@ -857,8 +935,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
         return "aspect 는 9:16·2:3·3:4·1:1·4:3·3:2·16:9 중 하나"
     if not (sd / "assets" / "vast_refs").is_dir():
         return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
-    if _running_job(ep):
-        return "이 회차에 도는 작업이 있다. job_status 로 끝난 뒤 부른다"
+    _ensure_idle(ep)
     cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
     cmd += ["--turbo"] if turbo else []
     cmd += ["--expr"] if expr else []
@@ -882,8 +959,7 @@ def vast_make_assets(series: str, character: str = "all", what: str = "both") ->
     if character != "all" and not (sd / "assets" / f"{character}_sheet.png").exists():
         return f"{character}_sheet.png 가 없다(인물 시트를 먼저 만든다). 있는 인물: " + ", ".join(
             sorted(p.name[:-len('_sheet.png')] for p in (sd / "assets").glob("*_sheet.png")))
-    if _running_job(sd):
-        return "이 작품에 도는 에셋 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(sd)
     steps = [{"label": "시트에서 참고 그림 자르기", "cmd": [PY, str(VAST / "sheet_refs.py"), str(sd)]},
              {"label": f"에셋 만들기({character}, {what})", "cmd": [PY, str(VAST / "make_assets.py"), str(sd), character, what, "--res", "768"]}]
     job = _start_job("vast_assets", sd, steps)
@@ -901,8 +977,7 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     miss = [i for i in want if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
     if miss:
         return f"vast 그림이 없는 컷: {', '.join(miss)}(vast_draw 로 먼저 그린다)"
-    if _running_job(ep):
-        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(ep)
     rej = ep / "panels_hf" / "_rejected"
     rej.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%m%d%H%M")
@@ -936,8 +1011,7 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
         return "until 은 assets · draw · compose · export"
     if not (ep / "make_storyboard.py").exists() or not (ep / "build_panels.py").exists():
         return "콘티 파일이 없다. new_episode 로 틀을 열고 이야기대로 make_storyboard.py·build_panels.py 를 고친 뒤 부른다"
-    if _running_job(ep):
-        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(ep)
     # 하네스 관문: 콘티·컷 설명 관문을 지금 파일 그대로 통과했어야 그린다(규칙은 프롬프트가 아니라 관문이 강제). skip_gates 는 사용자가 직접 시킬 때만
     st = gates.status(ep)
     if not skip_gates and not all(st.values()):
@@ -969,8 +1043,7 @@ def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = 
         return "panels.json 에 새로 그릴 컷이 없다(prepare_episode 를 먼저)"
     if len(pj) > VAST_MAX * 2:
         return f"새 컷이 {len(pj)}개라 너무 많다. 나눠서 vast_draw 한 뒤 다시 부른다"
-    if _running_job(src):
-        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(src)
     dst = src.parent / f"{src.name}_vast"
     if not dst.exists():  # 콘티·대사·컷 설명·재사용·합성 컷은 본편에서. 본편의 그린 컷·결과물·시험 폴더는 빼고
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("out", "review", "panels_hf", "panels_hf_*", "_rejected", "__pycache__",
@@ -998,8 +1071,7 @@ def compose(series: str, episode: str) -> str:
     """합성: 컷 놓기 → 합성 재료 컷(카톡 등) → 말풍선 합성 → PDF → 기계 점검(qa_gate·check_bubbles). 크레딧 안 씀.
     job_status 결과에서 '막는 경고 0' 과 '얼굴을 가리거나 ... 0' 을 확인한다."""
     ep = _episode(series, episode)
-    if _running_job(ep):
-        return "이 회차에 도는 작업이 있다. 끝난 뒤 부른다"
+    _ensure_idle(ep)
     steps = [{"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]},
              {"label": "합성·PDF", "cmd": [PY, str(TOOLS / "run_episode.py"), str(ep)]},
              {"label": "기계 점검", "cmd": [PY, str(TOOLS / "qa_gate.py"), str(ep)], "allow_fail": True},
@@ -1058,6 +1130,17 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
         out["elapsed_s"] = int(end - time.mktime(time.strptime(st["started"], fmt)))
     out["panels_done"] = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
     review = _job_review(spec, st.get("started", ""))
+    epd = Path(spec.get("episode_dir", ""))
+    drawn = {}
+    for stp in spec.get("steps", []):
+        cmd = [str(x) for x in stp.get("cmd", [])]
+        if "--only" in cmd:
+            for pid in cmd[cmd.index("--only") + 1].split(","):
+                f = next((epd / d / f"{pid}.png" for d in ("panels_hf_vast", "panels_hf") if (epd / d / f"{pid}.png").exists()), None)
+                if f is not None and f.stat().st_mtime >= JOBS.joinpath(f"{job_id}.json").stat().st_mtime:
+                    drawn[pid] = _link(f) or str(f)
+    if drawn:
+        out["drawn"] = drawn
     if review:
         out["review"] = review
         if state == "done":
@@ -1073,14 +1156,14 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
 
 
 @mcp.tool()
-def job_wait(job_id: str, seconds: int = 25, tail_lines: int = 30) -> str:
-    """작업이 끝날 때까지 최대 seconds 초(25초까지) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
-    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 6번까지(약 2분 반). 그래도 running 이면 사용자에게 작업 번호·끝난 컷 수·예상 시간을 알리고 답을 끝낸다
+def job_wait(job_id: str, seconds: int = 80, tail_lines: int = 30) -> str:
+    """작업이 끝날 때까지 최대 seconds 초(85초까지, 주소 방식의 응답 한도 100초 안쪽) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
+    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 4번까지(약 5분). 그래도 running 이면 사용자에게 작업 번호·끝난 컷 수·예상 시간을 알리고 답을 끝낸다
     (사용자가 '다 됐어?' 하면 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다. sleep 같은 다른 도구로 기다리지 않는다.
     (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
     if not re.fullmatch(r"[\w-]+", job_id):
         return json.dumps({"error": "bad_job_id"})
-    end = time.time() + max(1, min(int(seconds), 25))
+    end = time.time() + max(1, min(int(seconds), 85))  # 25초 상한이라 그림 한 장 기다리는 데 20번을 불렀다(2026-10-19 agent app)
     while time.time() < end:
         if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "running"):
             break
