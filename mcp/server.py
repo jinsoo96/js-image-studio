@@ -15,6 +15,7 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
 import ctypes
+import io
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont  # 맨 위에서 미리 읽는다(툴 안 첫 import 는 Windows 에서 멈출 수 있다)
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Image as McpImage
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import FileResponse, PlainTextResponse
 
@@ -325,8 +327,8 @@ def _folder(folder: str) -> str:
 
 
 @mcp.tool()
-def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
-    """검수용 모아보기 그림(컷 번호 붙임)을 만들고 JSON(sheet 경로·link 원격 링크)을 돌려준다. ids(쉼표) 또는 scene(장소 이름)으로 고른다.
+def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> list:
+    """검수용 모아보기를 만들어 그림 자체와 JSON(sheet 경로·link 원격 링크)을 돌려준다(그림을 직접 보고 판단한다). ids(쉼표) 또는 scene(장소 이름)으로 고른다.
     비우면 새로 그린 컷 전부. folder="vast" 면 vast 로 그린 컷(panels_hf_vast). 사용자에게는 link 를 준다."""
     ep = _episode(series, episode)
     sub = _folder(folder)
@@ -363,7 +365,13 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", fol
     SHEETS.mkdir(parents=True, exist_ok=True)
     out = SHEETS / f"{_series(series).name}_{ep.name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
-    return json.dumps({"sheet": str(out), "link": _link(out), "panels": len(tiles)}, ensure_ascii=False)
+    # 그림을 결과에 같이 싣는다: 링크만 주면 링크가 잠겨 있어(Cloudflare Access) 에이전트가 그림을 못 보고 모아보기를 되풀이하다
+    # agent app 반복 방지에 끊겼다(2026-10-19). agent app 는 MCP 결과의 그림을 그대로 모델에 넘긴다(agent-workflow connector_mcp injector)
+    view = sheet.copy()
+    view.thumbnail((1280, 1280))
+    buf = io.BytesIO()
+    view.save(buf, "JPEG", quality=80)
+    return [json.dumps({"sheet": str(out), "link": _link(out), "panels": len(tiles)}, ensure_ascii=False), McpImage(data=buf.getvalue(), format="jpeg")]
 
 
 @mcp.tool()
