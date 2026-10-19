@@ -35,6 +35,8 @@
 - make_episode·vast_draw 는 job_id 를 돌려준다. 기다리지 말고 작업 번호와 예상 시간을 알리고 답을 끝낸다. 사용자가 "다 됐어?" 하면 job_status 한 번.
 - job_status 는 JSON 이다. state 가 needs_review 면 실패가 아니라 사람 확인 차례다: review(컷·issues·note)나 candidates 를 사용자에게 보여 주고 답을 끝낸다. links 가 있으면 그 링크를 준다.
 - 그리는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다. 쓸 수 있는 판·모델·참고 그림을 받는지·모델 파일이 서버에 있는지는 draw_models() 로 본다(서버에서 워크플로우를 저장하거나 지우면 목록이 따라 바뀐다). 작품 전체를 바꿀 땐 set_model, 컷 몇 장만 시험할 땐 vast_draw(model=...). 참고 그림을 못 받는 판은 글로만 그리고 고치기는 기본 판의 편집으로 한다. 한 화 안에서는 판을 섞지 않는다.
+- 찾아볼 때는 파일을 읽어 짐작하지 말고 도구로 묻는다: find(컷 번호·낱말·인물 이름 → 작품·회차·컷과 status), panel_info(컷 하나의 콘티·컷 설명·그림 위치), list_panels(회차의 컷 목록), list_jobs(돌았거나 도는 작업), draw_models(그릴 수 있는 판). 컷 번호는 p22·22·p022 어느 꼴로 줘도 도구가 실제 번호로 풀어 준다. 같은 번호가 여러 회차(ep002 · ep002_v2 · _vast 복사본)에 있으면 find 결과의 episode 를 보고 사용자가 말한 회차를 고른다.
+- 도구 오류는 JSON 이다: error(종류) · given(내가 준 값) · reason · candidates(실제로 있는 값)가 있으면 그 중에서 골라 한 번만 다시 부른다. attempt 는 같은 실패를 몇 번째 보는지다: 2 이상이면 같은 호출을 되풀이하지 말고, 받은 오류를 그대로 사용자에게 알리고 어떻게 할지 묻는다.
 - 도구 오류가 JSON 이면 그 값대로 한다: busy 는 running_job 을 job_wait 로 기다린다(같은 도구를 다시 부르지 않는다). not_found 는 candidates 중 맞는 경로로 한 번 다시 부른다(경로를 짐작해 바꿔 가며 되풀이하지 않는다).
 - 그림·모아보기·PDF 를 사용자에게 보여 줄 때는 결과의 link·drawn·links 주소를 준다. 이 MCP 의 파일은 작업실 PC 에 있어 agent app 작업 공간의 ShareFile·Bash·Read 로는 열리지 않는다. 이미 있는 그림은 file_link 로 주소를 받는다. 그림을 직접 봐야 하면 contact_sheet: 결과에 그림이 같이 온다(링크는 잠겨 있어 WebFetch 로는 안 열린다). 한 번 보고 판단한다.
 - 같은 입력(같은 명령·같은 콘티·컷 설명)으로 같은 작업을 다시 부르면 도구가 repeated_job 오류와 이전 작업을 돌려준다. 같은 걸 다시 돌려도 같은 결과다: 사용자와 무엇을 바꿀지 정해 컷 설명을 고치거나 seed 를 바꾼 뒤 부른다.

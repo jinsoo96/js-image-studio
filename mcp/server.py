@@ -93,18 +93,18 @@ def _series(name: str) -> Path:
     p = ROOT / "series" / key
     if not (p.is_dir() and (p / "episodes").is_dir()) or key.startswith("_"):
         known = sorted(d.name for d in (ROOT / "series").iterdir() if d.is_dir() and not d.name.startswith("_"))
-        raise ValueError(f"작품을 찾지 못했다: {name}. 있는 작품: {', '.join(known)}")
+        raise ValueError(_fail("unknown_series", given=name, candidates=_near(name, known) or known, series=known))
     return p
 
 
 def _episode(series: str, episode: str) -> Path:
-    m = re.fullmatch(r"\s*(\d+)\s*화\s*", episode or "")  # "1화" 도 받는다(agent app 시험에서 에이전트가 이렇게 불렀다)
-    episode = f"ep{int(m.group(1)):03d}" if m else episode
-    if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode.strip()):
-        raise ValueError("회차 이름은 ep001, ep002_v2 같은 꼴이다(vast 판 회차는 뒤에 _vast)")
-    p = _series(series) / "episodes" / episode.strip()
-    if not p.is_dir():
-        raise ValueError(f"회차 폴더가 없다: {p.relative_to(ROOT)}")
+    m = re.fullmatch(r"\s*(?:ep)?\s*0*(\d+)\s*(?:화)?\s*", episode or "", re.I)  # "1화"·"ep2"·"2" 도 받는다(agent app 에이전트가 이렇게 불렀다)
+    episode = f"ep{int(m.group(1)):03d}" if m else (episode or "").strip()
+    sd = _series(series)
+    p = sd / "episodes" / episode
+    if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode) or not p.is_dir():
+        have = sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir())
+        raise ValueError(_fail("unknown_episode", given=episode, series=sd.name, candidates=_near(episode, have) or have, episodes=have))
     return p
 
 
@@ -213,6 +213,95 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
     subprocess.Popen([PY, str(ROOT / "mcp" / "job_runner.py"), str(f)], cwd=ROOT, env=ENV, creationflags=flags,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     return job_id
+
+
+_ATTEMPTS: dict = {}
+
+
+def _attempt(kind: str, given) -> int:
+    """같은 실패(종류+받은 값)를 15분 안에 몇 번째 보는지. 오류 JSON 의 attempt 로 실어, 에이전트가 같은 호출을 되풀이하는 중임을 스스로 알게 한다."""
+    key = f"{kind}|{json.dumps(given, ensure_ascii=False, sort_keys=True, default=str)}"
+    now = time.time()
+    hist = [x for x in _ATTEMPTS.get(key, []) if now - x < 900] + [now]
+    _ATTEMPTS[key] = hist
+    return len(hist)
+
+
+def _fail(error: str, **data) -> str:
+    """구조화된 오류 JSON(도구 오류로 올릴 때 ValueError(_fail(...)))."""
+    return json.dumps({"error": error, **data, "attempt": _attempt(error, data)}, ensure_ascii=False)
+
+
+def _near(given: str, pool: list, n: int = 5) -> list:
+    """받은 이름과 가까운 실제 이름(같은 숫자·앞부분 일치·글자 포함 순)."""
+    g = (given or "").strip().lower()
+    num = re.sub(r"\D", "", g)
+    score = []
+    for x in pool:
+        xl = x.lower()
+        s = (3 if num and re.sub(r"\D", "", xl) == num else 0) + (2 if xl.startswith(g) or g.startswith(xl) else 0) + (1 if g and (g in xl or xl in g) else 0)
+        if num and s == 0:
+            d = abs(int(re.sub(r"\D", "", xl) or 0) - int(num)) if re.sub(r"\D", "", xl).isdigit() and num.isdigit() else 999
+            s = 0.5 if d <= 2 else 0
+        if s:
+            score.append((-s, x))
+    return [x for _, x in sorted(score)][:n]
+
+
+def _pid_key(x: str):
+    """컷 번호의 숫자·꼬리 글자 (22, "") — p22 · P022 · 22 · 22p · p10b 를 같은 방식으로 본다."""
+    s = (x or "").strip().lower()
+    m = re.fullmatch(r"p?0*(\d+)([a-z]*)", s)
+    if m and not (m.group(2) == "p" and not s.startswith("p")):
+        return int(m.group(1)), m.group(2)
+    m = re.fullmatch(r"0*(\d+)\s*p", s)  # "22p"(사용자가 컷 번호를 이렇게 부른다)
+    return (int(m.group(1)), "") if m else None
+
+
+def _catalog(ep: Path) -> dict:
+    """회차의 컷 전부 {번호: {status, board, spec, reuse}}. status: new(컷 설명이 있어 그린다) · composite(합성 재료) · reuse(앞 화·다른 판 그림을 그대로) ·
+    no_description(콘티엔 있는데 컷 설명이 없다)."""
+    board = (_json(ep / "storyboard.json", {}) or {}).get("panels", [])
+    draw = {x["id"]: x for x in _panels_json(ep)}
+    reuse = (_json(ep / "panels_spec.json", {}) or {}).get("reuse", {})
+    out = {}
+    for b in board:
+        i = b["id"]
+        if i in draw:
+            st = "new"
+        elif b.get("composite"):
+            st = "composite"
+        elif i in reuse or (ep / "panels" / f"{i}.png").exists():
+            st = "reuse"
+        else:
+            st = "no_description"
+        out[i] = {"status": st, "board": b, "spec": draw.get(i), "reuse": reuse.get(i)}
+    return out
+
+
+def _pids(ep: Path, text, pool: str = "draw") -> list:
+    """컷 번호 입력을 실제 번호로 푼다(p22·P22·22·22p·["p022"] 모두 p022). pool="draw": 컷 설명이 있어 그릴 수 있는 컷만, "any": 콘티의 컷 전부.
+    풀리지 않으면 ValueError(JSON): 못 푼 값마다 reason(unknown · reuse · composite · no_description)과 가까운 실제 번호(candidates), 그 컷이 재사용이면 그림 출처."""
+    raw = _ids(text)
+    if not raw:
+        return []
+    cat = _catalog(ep)
+    byk = {}
+    for i in cat:
+        byk.setdefault(_pid_key(i), []).append(i)
+    out, bad = [], []
+    for g in raw:
+        i = g if g in cat else next(iter(byk.get(_pid_key(g)) or []), None) if len(byk.get(_pid_key(g)) or []) == 1 else None
+        if i is None:
+            bad.append({"given": g, "reason": "unknown", "candidates": _near(g, list(cat))})
+        elif pool == "draw" and cat[i]["status"] != "new":
+            bad.append({"given": g, "panel": i, "reason": cat[i]["status"], **({"reuse_source": cat[i]["reuse"]} if cat[i]["reuse"] else {})})
+        else:
+            out.append(i)
+    if bad:
+        raise ValueError(_fail("unknown_panels" if any(b["reason"] == "unknown" for b in bad) else "not_drawable", episode=ep.name, problems=bad,
+                               drawable=sum(1 for v in cat.values() if v["status"] == "new")))
+    return out
 
 
 def _ids(text) -> list:
@@ -326,6 +415,77 @@ def _folder(folder: str) -> str:
     raise ValueError('folder 는 비우거나(힉스필드 본편) "vast"')
 
 
+def _ep_dirs(series: str = ""):
+    sers = [_series(series)] if series else sorted(d for d in (ROOT / "series").iterdir() if d.is_dir() and (d / "episodes").is_dir() and not d.name.startswith("_"))
+    for s in sers:
+        for e in sorted(d for d in (s / "episodes").iterdir() if d.is_dir() and (d / "storyboard.json").exists()):
+            yield s, e
+
+
+def _images_of(ep: Path, pid: str) -> dict:
+    out = {}
+    for key, rel in (("final", f"panels/{pid}.png"), ("hf", f"panels_hf/{pid}.png"), ("vast", f"panels_hf_vast/{pid}.png")):
+        f = ep / rel
+        if f.exists():
+            out[key] = _link(f) or str(f)
+    return out
+
+
+@mcp.tool()
+def find(query: str, series: str = "", limit: int = 12) -> str:
+    """찾기: 컷 번호('p22'·'22p'·'p022'), 인물·장소 이름, 대사·행동 글의 낱말로 작품·회차·컷을 찾아 정확한 식별자와 상태를 준다. 파일을 읽어 짐작하지 말고 이걸로 먼저 찾는다.
+    컷 번호를 주면 그 번호가 있는 모든 회차(vast 판 복사본 포함)와 컷마다 status(new = 컷 설명이 있어 그린다 · reuse = 앞 화·다른 판 그림을 그대로 · composite = 합성 재료 ·
+    no_description)와 그림이 어디 있는지(images)를 준다. 글을 주면 낱말이 모두 든 컷(대사·행동·연기·장소·인물 이름)을 준다. series 로 좁힌다."""
+    q = (query or "").strip()
+    if not q:
+        return _fail("empty_query")
+    key = _pid_key(q) if len(q) <= 6 else None
+    toks = [x for x in re.split(r"\s+", q.lower()) if x]
+    hits, cast_hits = [], []
+    for s, e in _ep_dirs(series):
+        cat = _catalog(e)
+        cast = _json(s / "cast.json", {}) or {}
+        names = {c: f"{v.get('ko', '')} {v.get('en', '')}".lower() for c, v in cast.items() if isinstance(v, dict)}
+        for pid, c in cat.items():
+            b, sp = c["board"], c["spec"] or {}
+            if key is not None:
+                ok = _pid_key(pid) == key
+            else:
+                hay = " ".join([pid, str(b.get("scene", "")), " ".join(d.get("text", "") for d in b.get("dialogue", [])),
+                                " ".join(f"{x} {names.get(x, '')}" for x in b.get("characters", [])),
+                                str(sp.get("action", "")), str(sp.get("acting", "")), str(sp.get("location", ""))]).lower()
+                ok = all(t in hay for t in toks)
+            if ok:
+                dl = [d.get("text", "") for d in b.get("dialogue", []) if d.get("text")]
+                hits.append({"series": s.name, "episode": e.name, "panel": pid, "status": c["status"], "shot": b.get("shot"), "scene": b.get("scene"),
+                             "characters": b.get("characters", []), "text": (dl[0] if dl else "")[:80], "images": _images_of(e, pid)})
+    if key is None:
+        for s in ([_series(series)] if series else sorted(d for d in (ROOT / "series").iterdir() if d.is_dir() and (d / "series.json").exists() and not d.name.startswith("_"))):
+            cast = _json(s / "cast.json", {}) or {}
+            for c, v in cast.items():
+                if isinstance(v, dict) and all(t in f"{c} {v.get('ko', '')} {v.get('en', '')}".lower() for t in toks):
+                    cast_hits.append({"series": s.name, "character": c, "ko": v.get("ko"), "role": v.get("role")})
+    n = max(1, min(int(limit), 40))
+    out = {"query": q, "total": len(hits), "hits": hits[:n]}
+    if cast_hits:
+        out["characters"] = cast_hits[:n]
+    if not hits and not cast_hits:
+        out["error"] = "nothing_found"
+    return json.dumps(out, ensure_ascii=False)
+
+
+@mcp.tool()
+def panel_info(series: str, episode: str, panel: str) -> str:
+    """컷 하나의 모든 것(JSON): status(new · reuse · composite · no_description), 콘티(장면·구도·인물·대사), 컷 설명(장소·옷·행동·연기·카메라), 그림이 있는 곳(images 링크),
+    재사용이면 출처, 검수에서 사람 확인으로 남은 것(review). 컷 설명 파일(build_panels.py, 22KB)을 읽어 그 컷을 찾는 대신 이걸 쓴다. 번호는 p22·22 처럼 줘도 풀어 준다."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    c = _catalog(ep)[pid]
+    return json.dumps({"series": _series(series).name, "episode": ep.name, "panel": pid, "status": c["status"], "storyboard": c["board"], "description": c["spec"],
+                       "reuse_source": c["reuse"], "images": _images_of(ep, pid),
+                       "review": (_json(ep / "review" / "staging.json", {}) or {}).get(pid)}, ensure_ascii=False)
+
+
 @mcp.tool()
 def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> list:
     """검수용 모아보기를 만들어 그림 자체와 JSON(sheet 경로·link 원격 링크)을 돌려준다(그림을 직접 보고 판단한다). ids(쉼표) 또는 scene(장소 이름)으로 고른다.
@@ -333,7 +493,7 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", fol
     ep = _episode(series, episode)
     sub = _folder(folder)
     pj = _panels_json(ep)
-    want = _ids(ids)
+    want = _pids(ep, ids, "any")
     sel = [p for p in pj if (not want or p["id"] in want) and (not scene or p.get("location") == scene)]
     if want:  # 재사용·합성 컷도 번호로 고를 수 있게
         sel_ids = [p["id"] for p in sel] + [i for i in want if i not in {p["id"] for p in sel}]
@@ -401,9 +561,9 @@ def review_panels(series: str, episode: str, ids: str = "", scene: str = "", fol
     sub = _folder(folder)
     vision_review.DIRS[:] = [sub] if sub != "panels_hf" else ["panels_hf", "panels"]
     try:
-        pick = vision_review.pick_ids(ep, ids, scene)
+        pick = vision_review.pick_ids(ep, ",".join(_pids(ep, ids, "any")), scene)
     except ValueError as e:
-        return str(e)
+        raise
     if not pick:
         return "검수할 컷이 없다(ids·scene 을 확인)"
     if len(pick) <= SYNC_REVIEW_MAX:  # 컷마다 모델을 두 번 부른다: 8컷은 한 호출이 60초를 넘겨 agent app 가 끊었다
@@ -894,13 +1054,10 @@ def estimate_draw(series: str, episode: str, ids: str = "") -> str:
     """그릴 컷과 예상 크레딧. ids 를 비우면 panels.json 에서 아직 그림이 없는 컷 전부. 그리기 전에 이 결과를 사용자에게 보여 확인받는다."""
     ep = _episode(series, episode)
     pj = {p["id"]: p for p in _panels_json(ep)}
-    want = _ids(ids) or [i for i in pj if not (ep / "panels_hf" / f"{i}.png").exists()]
-    bad = [i for i in want if i not in pj]
-    todo = [i for i in want if i in pj]
+    todo = _pids(ep, ids) or [i for i in pj if not (ep / "panels_hf" / f"{i}.png").exists()]
     c = _credits()
     return (f"그릴 컷 {len(todo)}개: {', '.join(todo) or '없음'}\n예상 크레딧 {len(todo) * COST_PER_PANEL:.2f}(장당 {COST_PER_PANEL}, 검열 오탐은 무료)\n"
-            f"남은 크레딧 {c}\n" + (f"panels.json 에 없는 번호(그릴 수 없음): {', '.join(bad)}\n" if bad else "") +
-            f"한 번에 {MAX_PANELS}컷까지. 기준 컷(SCENES anchor)이 먼저 그려져 있어야 한다.")
+            f"남은 크레딧 {c}\n한 번에 {MAX_PANELS}컷까지. 기준 컷(SCENES anchor)이 먼저 그려져 있어야 한다.")
 
 
 # ── 크레딧을 쓰는 도구 ────────────────────────────────────────
@@ -930,7 +1087,7 @@ def draw_panels(series: str, episode: str, ids: str, confirm_credits: float) -> 
     """컷을 힉스필드로 그린다(크레딧 사용). ids: 쉼표로 컷 번호(빈 값이면 아직 없는 컷 전부).
     confirm_credits 는 estimate_draw 의 예상 크레딧 이상이어야 돈다(사용자 확인을 받은 값). 끝나면 합성용 폴더에도 놓는다."""
     ep = _episode(series, episode)
-    want = _ids(ids) or [p["id"] for p in _panels_json(ep) if not (ep / "panels_hf" / f"{p['id']}.png").exists()]
+    want = _pids(ep, ids) or [p["id"] for p in _panels_json(ep) if not (ep / "panels_hf" / f"{p['id']}.png").exists()]
     return _draw(series, episode, want, confirm_credits, "draw")
 
 
@@ -939,12 +1096,9 @@ def redraw_panels(series: str, episode: str, ids: str, reason: str, confirm_cred
     """검수에서 걸린 컷을 다시 그린다(크레딧 사용). 지금 그림은 panels_hf/_rejected/ 로 옮기고 새로 그린다.
     먼저 build_panels.py 의 그 컷 설명(행동·연기·카메라)을 고치고 prepare_episode 를 돌린 뒤 부른다. reason 에 걸린 이유를 적는다."""
     ep = _episode(series, episode)
-    want = _ids(ids)
+    want = _pids(ep, ids)
     if not want:
         return "다시 그릴 컷 번호를 준다"
-    pj = {p["id"] for p in _panels_json(ep)}
-    if [i for i in want if i not in pj]:
-        return f"panels.json 에 없는 번호: {', '.join(i for i in want if i not in pj)}(재사용·합성 컷은 다시 그리지 않는다)"
     cost = len(want) * COST_PER_PANEL
     if confirm_credits < cost:
         return f"확인 값이 모자라다: 예상 {cost:.2f} 크레딧. 사용자 확인 뒤 confirm_credits={cost:.2f}"
@@ -984,10 +1138,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     ep = _episode(series, episode)
     sd = _series(series)
     pj = [p["id"] for p in _panels_json(ep)]
-    want = _ids(ids) or [i for i in pj if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
-    bad = [i for i in want if i not in pj]
-    if bad:
-        return f"panels.json 에 없는 번호: {', '.join(bad)}(재사용·합성 컷은 그리지 않는다)"
+    want = _pids(ep, ids) or [i for i in pj if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
     if not want:
         return "그릴 컷이 없다(vast 그림이 다 있다. 다시 그리려면 ids 를 준다)"
     if len(want) > VAST_MAX:
@@ -1038,7 +1189,7 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     """vast 로 그린 컷을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
     사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""
     ep = _episode(series, episode)
-    want = _ids(ids)
+    want = _pids(ep, ids, "any")
     if not want:
         return "채택할 컷 번호를 준다"
     miss = [i for i in want if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
