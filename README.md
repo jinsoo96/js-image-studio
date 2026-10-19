@@ -1,8 +1,10 @@
 # 이미지 스튜디오 작업실 (`webtoon-studio`)
 
-템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 핵심 코어는 ComfyUI 워크플로우이고, agent platform 이 그 워크플로우를 캔버스 노드로 붙여 쓴다. 지금 템플릿은 웹툰(D+18 · 무대 뒤). 스킬은 `skills\`, agent platform 에서 바로 그리는 길은 `vast\README.md`.
+템플릿 = 스킬 + ComfyUI 워크플로우 + 출력 형식. 핵심 코어는 ComfyUI 워크플로우다. 지금 템플릿은 웹툰(D+18 · 무대 뒤 · 추몽 · 외출). 스킬은 `skills\`.
 
-세로 스크롤 웹툰을 만드는 작업실. 사용자가 이야기를 주면 콘티 → ComfyUI 작화(vast, Qwen Image 2.1) → 말풍선 합성 → PDF·epub·예고편까지 만든다. 힉스필드(Seedream 5.0 Pro)는 1·2화 정본과 ComfyUI 로 안 되는 컷에만 쓴다.
+세로 스크롤 웹툰을 만드는 작업실. 사용자가 이야기를 주면 콘티 → 관문(격리 judge) → ComfyUI 작화(vast, Qwen Image 2.1 **Uncensored**가 기본) → 검수·고치기 → 말풍선 합성 → PDF·epub·예고편까지 만든다. 힉스필드(Seedream 5.0 Pro)는 D+18 1·2화 정본과 ComfyUI 로 안 되는 컷에만 쓴다.
+
+**어느 PC 에서든 agent app 로 쓴다**: 작업실 MCP 는 이 레포가 있는 PC(24시간) 한 대에서 돌고, 다른 PC 는 agent app 에 주소 `https://webtoon.js-96.com/mcp` 를 한 번 등록해 그 MCP 를 부른다(레포를 받을 필요 없음). 아래 "agent app·Qwen 에서 쓰기".
 세션 규칙은 `CLAUDE.md`, 사용자가 짚은 문제와 막는 법은 `LESSONS.md`, 지금 상태는 `worklogs\OPEN-ISSUES.md`.
 
 ## 폴더 지도
@@ -94,7 +96,8 @@ $ep = "series\d-plus-18-hf\episodes\ep003"
 | `comfy.py` | 이름은 예전 것이지만 ROOT·load_json 등 공용 함수가 있어 지금 도구들도 읽는다. 지우지 않는다 |
 | `render.py` · `runpod_cloud.py` · `train_lora.py` | ComfyUI 작화·RunPod 파드·LoRA 학습. 쓰려면 `worklogs\2026-10-04-runpod.md`·`2026-10-history.md` 먼저 |
 
-## 다른 PC 에서 시작하기(레포 `github.com/jinsoo96/webtoon-studio`, 비공개)
+## 다른 PC 에서 작업실을 새로 차리기(레포 `github.com/jinsoo96/webtoon-studio`, 비공개)
+다른 PC 에서 **작업만** 할 거면 이 절이 아니라 아래 "agent app·Qwen 에서 쓰기"(주소 등록)다. 이 절은 작업실 자체(그리는 기계)를 옮기거나 하나 더 차릴 때.
 1. 받기: `git clone https://github.com/jinsoo96/webtoon-studio.git` (D: 가 아니어도 된다. 경로는 상대 경로로 돈다)
 2. 파이썬: `uv venv .venv --python 3.12` → `uv pip install --python .venv\Scripts\python.exe -r requirements.txt`
 3. 힉스필드 CLI(`hf.exe`)를 깔고 로그인, 위치가 기본값(`D:\.claude\tools\higgsfield\hf.exe`)과 다르면 환경변수 `HF_CLI` 로 준다. 계정이 달라도 참고 그림은 `state\hf_uploads\<계정>.json` 에 새로 쌓인다.
@@ -102,10 +105,19 @@ $ep = "series\d-plus-18-hf\episodes\ep003"
 5. 얼굴 찾기·배경 지우기 모델(`models\detect`·`models\u2net`)은 레포에 없다. 말풍선 얼굴 피하기·오프닝 표지에 필요하면 처음 PC 에서 복사해 온다.
 
 ## agent app·Qwen 에서 쓰기
-`mcp\server.py` 를 agent app 설정의 로컬 MCP 로 붙이면 agent platform 에이전트(사내 vLLM `qwen3.8-27b` 등)가 작업실 도구 31개를 쓴다(vast 로 크레딧 없이 그리고 한 화를 PDF 까지 엮는 vast_draw·vast_episode 등 5개 포함). 붙이는 법·에이전트 설정·시스템 프롬프트(`mcp\AGENT_PROMPT.md`)는 `mcp\README.md`. 크레딧을 쓰는 도구는 예상 비용 확인 값이 있어야 돈다.
+작업실 MCP(`mcp\server.py`, 도구 34개)를 agent platform 에이전트가 agent app 를 거쳐 부른다. agent-server 에이전트는 둘이고 도구·스킬은 같다: 「새 웹툰 생성기」(새 작품) · 「웹툰 이어 그리기」(다음 화). 모델은 사내 vLLM `qwen3.8-27b`.
+
+```
+어느 PC 의 agent app ──https + 열쇠 헤더──▶ Cloudflare Access ──터널──▶ 작업실 PC 127.0.0.1:7440/mcp ──▶ 이 레포 · vast GPU
+```
+- **작업실 PC**: 예약작업 `WEBTOON-MCP-http`(부팅 때 자동) → `mcp\serve_http.cmd` → `server.py --http`. `server.py` 를 고치면 이 예약작업을 다시 띄운다(방법 `mcp\README.md`).
+- **다른 PC 에서 처음 한 번**: agent app 설치·같은 계정 로그인 → 설정 > MCP 맨 위 **"로컬 MCP 사용" 켜기** → 서버 추가(종류 `http`, 주소 `https://webtoon.js-96.com/mcp`, 헤더 `CF-Access-Client-Id`·`CF-Access-Client-Secret`) 또는 JSON 가져오기 → "연결됨 · 도구 34개" 확인. 열쇠 값은 레포에 없다(작업실 PC 의 비밀값 파일).
+- **PC 마다 등록하는 이유**: agent app 의 MCP 목록은 PC 마다 따로고, agent platform 서버는 도구 호출을 대화를 시작한 PC 로 보낸다. 등록 안 한 PC·웹 브라우저에서 시작한 대화엔 웹툰 도구가 없다.
+- 결과 PDF·컷은 `https://webtoon.js-96.com/files/…` 링크로 받는다(브라우저는 소유자 이메일 인증).
+- 작업실 PC 의 agent app 는 같은 서버를 `http://127.0.0.1:7440/mcp` 로 붙인다. 붙이는 법 전체·에이전트 설정·시스템 프롬프트(`mcp\AGENT_PROMPT.md`)는 `mcp\README.md`. 크레딧을 쓰는 도구는 예상 비용 확인 값이 있어야 돈다.
 
 ## vast.ai GPU(ComfyUI)에서 그리기
-회사 공용 vast.ai(RTX 5090)의 ComfyUI 에 Qwen Image 2.1 을 받아 두고, 같은 `panels.json` 으로 컷을 그린다(`vast\comfy_panel.py`, 크레딧 0, 터보 컷당 약 30~50초). 서버 화면용 세로 워크플로우는 `webtoon_vertical_qwen21`. 공용 장비라 조회·그리기만 하고 기준선 워크플로우는 건드리지 않는다. 쓰는 법·지킬 것은 `vast\README.md`.
+회사 공용 vast.ai(RTX 5090)의 ComfyUI 로 같은 `panels.json` 의 컷을 그린다(`vast\comfy_panel.py`, 크레딧 0, 터보 컷당 약 30~50초). 기본 모델은 Qwen Image 2.1 **Uncensored**(`qwen-image-2.1-UC-fp8`, 저장 워크플로우 `webtoon_vertical_qwen21_uc`·`webtoon_edit_qwen21_uc`), 환경변수 `WEBTOON_MODEL=base` 면 원래 모델. 공용 장비라 조회·그리기만 하고 기준선 워크플로우는 건드리지 않는다. 쓰는 법·지킬 것은 `vast\README.md`.
 
 ## 크레딧(힉스필드 Seedream 5.0 Pro, 2026-10-14)
 | 무엇 | 크레딧 |

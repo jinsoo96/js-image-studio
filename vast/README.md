@@ -3,6 +3,8 @@
 회사 공용 GPU(vast.ai RTX 5090 32GB, ComfyUI 0.37)에서 힉스필드와 **같은 컷 설명(`panels.json`)** 으로 컷을 그린다. 크레딧은 들지 않고 GPU 시간만 쓴다.
 2026-10-15 사용자 "vastai 에서 이 정도 이미지 수준의 웹툰 만들게 워크플로우 세로로"에서 시작.
 
+**모델 판**: 기본은 Qwen Image 2.1 **Uncensored**(`diffusion_models\qwen-image-2.1-UC-fp8.safetensors`, 저장 워크플로우 `webtoon_vertical_qwen21_uc`·`webtoon_edit_qwen21_uc`, 2026-10-18 사용자 "그 모델 써서 해"). 환경변수 `WEBTOON_MODEL=base` 면 원래 판(`webtoon_vertical_qwen21`·`webtoon_edit_qwen21`). 고르는 곳은 `saved_workflow.MODELS`·`comfy_panel.UNET`·`comfy_client` 상태 점검(셋이 같은 환경변수를 본다). 2026-10-19 서버 실행 기록 40건이 전부 UC 였다.
+
 ## 지킬 것
 - **회사 공용 인스턴스다.** 조회·그리기·모델 받기만 한다. 인스턴스 만들기·끄기·지우기, 결제 설정, 남의 워크플로우 수정은 하지 않는다. 기준선 `image_anima_base_v1.json` 은 건드리지 않는다.
 - 접속 정보는 `D:\.claude\CREDENTIALS.local.md` 의 vast.ai 절에 있다. API 키는 계정 전체 권한이라 조회에만 쓴다. 키·토큰은 출력·커밋하지 않는다. 도우미가 알아서 읽는다(환경변수 `VAST_KEY` 가 있으면 그걸 먼저).
