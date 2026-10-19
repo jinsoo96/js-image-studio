@@ -6,6 +6,7 @@
 아무 곳에도 닿지 않으면 JudgeDown 을 던진다(부르는 쪽이 '검사 못 함'으로 처리, 통과로 넘기지 않는다).
 """
 import json
+import re
 import os
 import urllib.request
 
@@ -69,3 +70,45 @@ def chat(content: list, max_tokens: int = 600, temperature: float = 0.0, timeout
             if attempt == 1:
                 raise JudgeDown(f"{url} {type(e).__name__}: {str(e)[:100]}") from e
     raise JudgeDown("unreachable")
+
+
+def parse_json(txt: str, repair: bool = True) -> dict:
+    """판정 모델의 답 글에서 첫 JSON 객체를 꺼낸다(검수·관문이 같이 쓴다). 처음 '{' 부터 끝 '}' 까지 통째로 읽으면 뒤에 붙은 설명이나 두 번째 객체 때문에 깨졌다
+    (2026-10-19 외출 1화 검사: 'Extra data'·'Expecting delimiter' 로 검사불가가 여러 컷)."""
+    dec = json.JSONDecoder()
+    for m in re.finditer(r"\{", txt):
+        try:
+            obj = dec.raw_decode(txt[m.start():])[0]
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    s = txt.find("{")
+    if repair and s >= 0:  # repair=False: 관문처럼 잘린 답으로 통과시키면 안 되는 곳  # 답이 토큰 한도에서 잘렸다: 열린 따옴표·괄호를 닫아 앞부분을 살린다(2026-10-19 D+18 p022 검사불가)
+        for cut in (txt[s:], txt[s:txt.rfind(",")] if txt.rfind(",") > s else None):
+            if cut:
+                try:
+                    obj = json.loads(_close_json(cut))
+                except ValueError:
+                    continue
+                if isinstance(obj, dict):
+                    return obj
+    raise ValueError("JSON 없는 답: " + txt[:80])
+
+
+def _close_json(s: str) -> str:
+    """잘린 JSON 글의 열린 문자열·괄호를 닫는다."""
+    stack, in_str, esc = [], False, False
+    for ch in s:
+        if in_str:
+            esc = (ch == "\\") and not esc
+            if ch == '"' and not esc:
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]" and stack:
+            stack.pop()
+    return s + ('"' if in_str else "") + "".join("}" if b == "{" else "]" for b in reversed(stack))

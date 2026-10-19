@@ -148,27 +148,13 @@ def _vlm(images: list, text: str, max_tokens=300) -> dict:
     return _ask_json(content, max_tokens)
 
 
-def _json_from(txt: str) -> dict:
-    """답 글에서 첫 JSON 객체를 꺼낸다. 처음 '{' 부터 끝 '}' 까지 통째로 읽으면 뒤에 붙은 설명이나 두 번째 객체 때문에 깨졌다
-    (2026-10-19 외출 1화 검사: 'Extra data'·'Expecting delimiter' 로 검사불가가 여러 컷)."""
-    dec = json.JSONDecoder()
-    for m in re.finditer(r"\{", txt):
-        try:
-            obj = dec.raw_decode(txt[m.start():])[0]
-        except ValueError:
-            continue
-        if isinstance(obj, dict):
-            return obj
-    raise ValueError("JSON 없는 답: " + txt[:80])
-
-
 def _ask_json(content: list, max_tokens: int) -> dict:
-    """판정 모델에 묻고 JSON 을 받는다. 답이 잘리거나 깨지면 토큰을 두 배로 한 번 더 묻고, 그래도 못 받으면 JUDGE_FAILS 를 올리고 빈 dict."""
-    from judge_ep import JudgeDown, chat
+    """판정 모델에 묻고 JSON 을 받는다(judge_ep.parse_json). 답이 잘리거나 깨지면 토큰을 세 배로 한 번 더 묻고, 그래도 못 받으면 JUDGE_FAILS 를 올리고 빈 dict."""
+    from judge_ep import JudgeDown, chat, parse_json
     last = None
-    for mt in (max_tokens, max_tokens * 2):
+    for mt in (max_tokens, max_tokens * 3):
         try:
-            return _json_from(chat(content, max_tokens=mt))
+            return parse_json(chat(content, max_tokens=mt))
         except ValueError as e:
             last = e
         except JudgeDown as e:

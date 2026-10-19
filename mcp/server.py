@@ -1115,7 +1115,9 @@ def _job_review(spec: dict, started: str) -> list:
         cmd = [str(x) for x in st.get("cmd", [])]
         if "--only" in cmd:
             ids |= set(cmd[cmd.index("--only") + 1].split(","))
-    return [{"panel": k, **v} for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
+    cats = (_json(ROOT / "skills" / "staging-review" / "checks.json", {}) or {}).get("categories", {})  # 항목 이름의 뜻(기준표 데이터)
+    return [{"panel": k, **v, "meaning": {i: cats[i] for i in v.get("issues", []) if i in cats}}
+            for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
 
 
 @mcp.tool()

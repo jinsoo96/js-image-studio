@@ -68,9 +68,9 @@ def spec_text(series_dir: Path, ep: Path, pid: str) -> str:
             lines.append(f"{names.get(c, c)} 옷: {o}")
         if p.get("camera"):
             lines.append("카메라: " + p["camera"])
-            # 2026-10-18 시험: 어깨 너머 숏 앞의 뒷모습을 '설명에 없는 사람'으로 걸었다(등장인물 칸엔 화면 속 주인공만 있다)
-            if re.search(r"over[- ]the[- ]shoulder|shoulder[- ]over|\bOTS\b|어깨 너머", p["camera"], re.I):  # 어깨 너머 숏일 때만(측면·바스트 지시도 카메라 칸에 쓴다)
-                lines.append(f"기대 사람 수: {len(p.get('chars') or chars)}명 + 카메라 설명의 앞에 걸린 뒷모습(어깨) 1명. 그 뒷모습은 설명에 있는 사람이다")
+            # 어깨 너머 숏 앞의 뒷모습을 '설명에 없는 사람'으로 걸었다(2026-10-18, 등장인물 칸엔 화면 속 주인공만 있다). 카메라 글이 말하는
+            # 사람인지는 검수 모델이 글을 읽고 판단한다: 'over the shoulder' 같은 문구로 가르던 조건은 표현이 다르면 놓쳤다(2026-10-19 사용자 "문구 정규식은 땜질")
+            lines.append(f"기대 사람 수: 등장인물 {len(p.get('chars') or chars)}명 + 카메라 설명이 말하는 사람(앞에 걸린 어깨·뒷모습 등). 그 사람도 설명에 있는 사람이다")
         if p.get("acting"):
             lines.append("연기: " + p["acting"])
         if p.get("extras"):  # 이름 없는 군중은 설명에 있는 사람이다(추몽: 공중전화 줄, 반 아이들)
@@ -110,9 +110,9 @@ def ask_one(series_dir: Path, ep: Path, pid: str, timeout=60) -> dict:
         text = chat(content, max_tokens=700, timeout=max(timeout, 90))
     except Exception as e:  # noqa: BLE001
         return {"id": pid, "error": f"검수 모델 호출 실패: {str(e)[:120]}"}
-    m = re.search(r"\{.*\}", text, re.S)
     try:
-        d = json.loads(m.group(0)) if m else {}
+        from judge_ep import parse_json
+        d = parse_json(text)  # 처음 '{' 부터 끝 '}' 까지 통째로 읽으면 뒤 설명·잘린 답에서 깨졌다(2026-10-19)
     except ValueError:
         d = {}
     return {"id": pid, **d} if d else {"id": pid, "raw": text[:600]}

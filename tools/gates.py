@@ -24,16 +24,15 @@ CHUNK = 18  # 컷 설명은 이만큼씩 나눠 채점(모델 입력이 길면 �
 def _llm(text: str, max_tokens=1500) -> dict:
     """관문 judge 한 번(주소는 vast/judge_ep: VLM_URL, 안 되면 VLM_FALLBACK). 닿지 않으면 예외 = 관문을 통과시키지 않는다."""
     sys.path.insert(0, str(ROOT / "vast"))
-    from judge_ep import chat
+    from judge_ep import chat, parse_json
     # 판정 모델이 가끔 쉼표 빠진 JSON 을 돌려줬다(2026-10-19 콘티 관문에서 멈춤) → 세 번까지 다시 묻는다. 세 번 다 깨지면 예외(통과 아님)
     err = None
     for k in range(3):
         txt = chat([{"type": "text", "text": text if k == 0 else text + "\n\nReturn ONE valid JSON object only, no other text."}],
                    max_tokens=max_tokens, temperature=0.05 + 0.1 * k, timeout=240)
-        m = re.search(r"\{.*\}", txt, re.S)
         try:
-            return json.loads(m.group() if m else txt)
-        except json.JSONDecodeError as e:
+            return parse_json(txt, repair=False)  # 잘린 답은 살리지 않는다(걸린 문제가 빠진 채 통과할 수 있다)
+        except ValueError as e:
             err = e
     raise err
 

@@ -57,7 +57,7 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
             and any(d.get("who") in NAMES for d in b.get("dialogue", []) if d.get("type") in ("speech", "thought"))]
     if not todo:
         return []
-    from judge_ep import JudgeDown, chat
+    from judge_ep import JudgeDown, chat, parse_json
     sides = {}
     for k in range(0, len(todo), 12):
         part = todo[k:k + 12]
@@ -66,8 +66,7 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
                           for b in part)
         try:
             txt = chat([{"type": "text", "text": SIDE_ASK.format(items=items)}], max_tokens=900)
-            m = re.search(r"\{.*\}", txt, re.S)
-            sides.update(json.loads(m.group()) if m else {})
+            sides.update(parse_json(txt))
         except (JudgeDown, ValueError) as e:
             print(f"말풍선 자리: 판정 모델에 묻지 못해 그대로 둔다({type(e).__name__})")
     changed = []
