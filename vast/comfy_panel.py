@@ -59,7 +59,7 @@ def strip_people(text: str) -> str:
 _SAVED_WARNED = False
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
     edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
@@ -77,7 +77,7 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
         if mp and w * h > mp:
             k = (mp / (w * h)) ** 0.5
             w, h = max(512, int(w * k) // 32 * 32), max(512, int(h * k) // 32 * 32)
-        return fill(to_api(ui, turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
+        return fill(to_api(ui, turbo=turbo, refine=bool(refine)), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
             print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
@@ -197,7 +197,9 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     # 인서트(손·소품 접사)엔 장소 그림을 아예 넣지 않는다: 뒤에 '배경 색만'이라 붙여도 방 전체를 그려, 앞 컷에 누워 있던 상수의 침대가 비어
     # 사람이 사라진 꼴이 됐다(2026-10-18 외출 p021·p025 사용자 지적)
     insert = any(w in (p.get("shot") or "") for w in ("insert", "top view", "detail"))
-    loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") and not insert else None
+    # 장소 "none"(합성 재료·회상·풍경처럼 정해진 장소 그림이 없는 컷)은 장소 그림을 찾지 않는다: 없는 none.png 를 찾다 그 컷이 '참고 그림 없음'으로 빠졌다(2026-10-19 외출 p345·p419)
+    loc = (series / "assets" / "locations" / f"{p['location']}.png"
+           if p.get("location") and p["location"] != "none" and not insert else None)
     # view: 같은 장소를 반대편에서 본 그림(<장소>_reverse.png). 장소 그림이 앞(스크린 쪽) 한 장뿐이라 듣는 사람 컷 뒤에도 스크린을 그렸다
     # (2026-10-19 외출 p052·p078 사용자 "회의를 보는 자의 앞모습으로 보여야, 배경이 아니라")
     if loc and p.get("view"):
@@ -315,8 +317,16 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
         # 작은 글 인코더에게 여러 장짜리 세트로 읽혀 클로즈업마다 4분할로 그렸다(2026-10-19 Anima, 두 시드로 확인). 작품의 style 파일은 건드리지 않는다
         try:
             from saved_workflow import models, pick
-            for ph in (models()[pick(series)[0]].get("meta") or {}).get("prompt_drop", []):
+            wmeta = models()[pick(series)[0]].get("meta") or {}
+            for ph in wmeta.get("prompt_drop", []):
                 prompt = prompt.replace(ph, "")
+            # 태그 머리말(판 데이터 extra.webtoon.prompt_template): 품질 접두 + 샷 종류 태그 + 인원 태그. Anima 는 '태그 + 문장 두 개 이상'을 권장하고(모델 카드),
+            # 문장만 주면 클로즈업이 중간 샷으로, 한 명이어야 할 컷에 두 명이 나왔다. 샷 종류는 norm_shot 이 정한 몇 가지 값이라 매핑은 데이터다
+            tpl = wmeta.get("prompt_template") or {}
+            if tpl:
+                head = [tpl.get("prefix", ""), (tpl.get("shot_tags") or {}).get(p.get("shot") or "", ""), (tpl.get("count_tags") or {}).get(str(min(n, 2)), "")]
+                head = ", ".join(x.strip(" ,") for x in head if x.strip(" ,"))
+                prompt = head + "\n\n" + prompt if head else prompt
         except Exception:  # noqa: BLE001
             pass
     return prompt, refs[:MAX_REFS]
@@ -347,6 +357,7 @@ def main():
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
+    ap.add_argument("--refine", action="store_true", help="2차 다듬기(잠재 확대 + 낮은 강도로 한 번 더): 얼굴·선이 또렷해지지만 컷당 시간이 약 1.5배")
     ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
     args = ap.parse_args()
     if args.model:  # saved_workflow.pick 이 환경변수를 먼저 본다(이 작업만)
@@ -396,7 +407,7 @@ def main():
             from make_workflow import build as ui_build, build_anima  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
             ui = (build_anima(pr, size=(w, h), steps=steps, seed=sd, turbo=args.turbo) if text_only else
                   ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel"))
-            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series), ui), timeout=1200)
+            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine), ui), timeout=1800)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")

@@ -911,7 +911,7 @@ def _check_model(name: str):
 def draw_models(series: str = "") -> str:
     """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
     목록이 따라 바뀐다. 판마다: label(설명) · use_for(어디에 맞는지·한계, 판을 고를 때 읽는다) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) ·
-    roles(생성·고치기·에셋·시안 역할마다 쓰는 워크플로우, own_roles 밖은 기본 판의 것) · models(쓰는 모델 파일) · ready(모델 파일이 서버에 다 있나) · default.
+    roles(생성·고치기·에셋·시안 역할마다 쓰는 워크플로우, own_roles 밖은 기본 판의 것) · refine(2차 다듬기를 지원하나) · models(쓰는 모델 파일) · ready(모델 파일이 서버에 다 있나) · default.
     series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
     m = _draw_models(refresh=True)
     cur = None
@@ -920,7 +920,8 @@ def draw_models(series: str = "") -> str:
         import saved_workflow
         cur = saved_workflow.pick(_series(series))[0]
     out = [{"id": k, "label": vv["label"], "use_for": vv["use_for"], "refs": vv["refs"], "workflow": vv["gen"], "roles": vv["roles"], "own_roles": vv.get("own_roles", []),
-            "models": vv["models"], "ready": not vv["missing"], "missing": vv["missing"], "default": vv["default"], **({"current": k == cur} if cur else {})}
+            "models": vv["models"], "ready": not vv["missing"], "missing": vv["missing"], "default": vv["default"],
+            "refine": bool((vv.get("meta") or {}).get("refine")), **({"current": k == cur} if cur else {})}
            for k, vv in sorted(m.items())]
     return json.dumps({"draw_models": out}, ensure_ascii=False)
 
@@ -1130,8 +1131,9 @@ def vast_status() -> str:
 
 @mcp.tool()
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
-              check: bool = True, model: str = "") -> str:
+              check: bool = True, model: str = "", refine: bool = False) -> str:
     """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 작품의 판(set_model), 판 이름(draw_models 목록)을 주면 이 작업만 그 판으로. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+    refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
@@ -1163,8 +1165,9 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--seed", str(seed)] if seed >= 0 else []
     cmd += ["--fix"] if fix else []
     cmd += ["--check"] if check else []
+    cmd += ["--refine"] if refine else []
     job = _start_job("vast_draw", ep, [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}])
-    per = (30 if turbo else 120) + (40 if check else 0)
+    per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0)
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
             f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast')")
 

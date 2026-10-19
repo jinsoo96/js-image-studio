@@ -1,8 +1,8 @@
 {
  "id": "fbae10da-cd39-4577-bacc-5c4b13f950e2",
  "revision": 0,
- "last_node_id": 13,
- "last_link_id": 13,
+ "last_node_id": 18,
+ "last_link_id": 31,
  "nodes": [
   {
    "id": 1,
@@ -130,7 +130,9 @@
      "type": "VAE",
      "links": [
       4,
-      12
+      12,
+      23,
+      29
      ],
      "slot_index": 0
     }
@@ -222,7 +224,8 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      7
+      7,
+      24
      ],
      "slot_index": 0
     }
@@ -366,7 +369,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      8
+      8,
+      25
      ],
      "slot_index": 0
     },
@@ -374,7 +378,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      9
+      9,
+      26
      ],
      "slot_index": 1
     },
@@ -471,7 +476,7 @@
      "name": "LATENT",
      "type": "LATENT",
      "links": [
-      11
+      20
      ],
      "slot_index": 0
     }
@@ -507,7 +512,7 @@
     {
      "name": "samples",
      "type": "LATENT",
-     "link": 11
+     "link": 20
     },
     {
      "name": "vae",
@@ -520,7 +525,7 @@
      "name": "IMAGE",
      "type": "IMAGE",
      "links": [
-      13
+      21
      ],
      "slot_index": 0
     }
@@ -548,7 +553,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 13
+     "link": 30
     }
    ],
    "outputs": [],
@@ -558,6 +563,190 @@
    "widgets_values": [
     "webtoon_vertical/panel"
    ]
+  },
+  {
+   "id": 14,
+   "type": "ImageScaleBy",
+   "pos": [
+    1040,
+    512
+   ],
+   "size": [
+    300,
+    82
+   ],
+   "flags": {},
+   "order": 104,
+   "mode": 4,
+   "title": "2차 다듬기: 픽셀 확대",
+   "inputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 21
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      22
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ImageScaleBy"
+   },
+   "widgets_values": [
+    "lanczos",
+    1.3
+   ]
+  },
+  {
+   "id": 15,
+   "type": "VAEEncode",
+   "pos": [
+    1370,
+    512
+   ],
+   "size": [
+    220,
+    60
+   ],
+   "flags": {},
+   "order": 105,
+   "mode": 4,
+   "title": "2차 다듬기: 다시 인코딩",
+   "inputs": [
+    {
+     "name": "pixels",
+     "type": "IMAGE",
+     "link": 22
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 23
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      27
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEEncode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 16,
+   "type": "KSampler",
+   "pos": [
+    1620,
+    512
+   ],
+   "size": [
+    360,
+    262
+   ],
+   "flags": {},
+   "order": 106,
+   "mode": 4,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 24
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 25
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 26
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 27
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      28
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "randomize",
+    16,
+    1,
+    "euler",
+    "simple",
+    0.25
+   ],
+   "title": "2차 다듬기: 샘플러"
+  },
+  {
+   "id": 17,
+   "type": "VAEDecode",
+   "pos": [
+    1920,
+    512
+   ],
+   "size": [
+    220,
+    60
+   ],
+   "flags": {},
+   "order": 107,
+   "mode": 4,
+   "title": "2차 다듬기: 디코더",
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 28
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 29
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      30
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
   }
  ],
  "links": [
@@ -642,14 +831,6 @@
    "LATENT"
   ],
   [
-   11,
-   11,
-   0,
-   12,
-   0,
-   "LATENT"
-  ],
-  [
    12,
    4,
    0,
@@ -658,8 +839,88 @@
    "VAE"
   ],
   [
-   13,
+   20,
+   11,
+   0,
    12,
+   0,
+   "LATENT"
+  ],
+  [
+   21,
+   12,
+   0,
+   14,
+   0,
+   "IMAGE"
+  ],
+  [
+   22,
+   14,
+   0,
+   15,
+   0,
+   "IMAGE"
+  ],
+  [
+   23,
+   4,
+   0,
+   15,
+   1,
+   "VAE"
+  ],
+  [
+   24,
+   6,
+   0,
+   16,
+   0,
+   "MODEL"
+  ],
+  [
+   25,
+   9,
+   0,
+   16,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   26,
+   9,
+   1,
+   16,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   27,
+   15,
+   0,
+   16,
+   3,
+   "LATENT"
+  ],
+  [
+   28,
+   16,
+   0,
+   17,
+   0,
+   "LATENT"
+  ],
+  [
+   29,
+   4,
+   0,
+   17,
+   1,
+   "VAE"
+  ],
+  [
+   30,
+   17,
    0,
    13,
    0,
@@ -736,7 +997,14 @@
    "edit": "webtoon_edit_qwen21_uc.json",
    "model": "noctq",
    "role": "vertical",
-   "use_for": "UC 와 같은 구조(참고 그림을 받는다)에 부드럽고 뿌연 애니메 질감. 그림체를 바꿔 보고 싶을 때. 소품 같은 세부 지시를 UC 보다 덜 따랐다(2컷 비교)."
+   "use_for": "UC 와 같은 구조(참고 그림을 받는다)에 부드럽고 뿌연 애니메 질감. 그림체를 바꿔 보고 싶을 때. 소품 같은 세부 지시를 UC 보다 덜 따랐다(2컷 비교). refine 지원(UC 와 같은 구조, 이 판으로는 시험 안 함).",
+   "refine": {
+    "method": "pixel",
+    "scale": 1.3,
+    "denoise": 0.25,
+    "steps": 16,
+    "note": "2차 다듬기 노드 넷은 우회 상태. 도구가 refine=True 로 부르면 켠다(꺼져 있으면 저장 노드가 첫 디코더로 이어진다). 값은 노드 위젯."
+   }
   }
  },
  "version": 0.4

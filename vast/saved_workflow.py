@@ -185,22 +185,31 @@ def _widget_names(spec: dict) -> list:
     return names
 
 
-def to_api(ui: dict, turbo=None) -> dict:
+def to_api(ui: dict, turbo=None, refine=None) -> dict:
     """UI 형식 → API 형식. 우회(mode 4) 노드는 같은 타입 입력으로 건너 이어 주고, 끈(mode 2) 노드와 메모처럼 화면에만 있는 노드는 뺀다.
-    turbo 가 True/False 면 이름에 turbo 가 든 LoRA 를 켜거나 우회한다(부르는 쪽 스텝 8·40 에 맞춤)."""
+    turbo 가 True/False 면 이름에 turbo 가 든 LoRA 를 켜거나 우회한다(부르는 쪽 스텝 8·40 에 맞춤).
+    refine 이 True/False 면 제목이 '2차 다듬기'로 시작하는 노드(잠재 확대 + 두 번째 샘플러)를 켜거나 우회한다."""
     nodes = {n["id"]: n for n in ui["nodes"]}
     meta = (ui.get("extra") or {}).get("webtoon") or {}
     if turbo is not None:
         for n in nodes.values():
             if n["type"] == "LoraLoaderModelOnly" and "turbo" in str((n.get("widgets_values") or [""])[0]).lower():
                 n["mode"] = 0 if turbo else 4
+    if refine is not None:
+        for n in nodes.values():
+            if str(n.get("title", "")).startswith("2차 다듬기"):
+                n["mode"] = 0 if refine else 4
     links = {lk[0]: lk for lk in ui["links"]}
+    # 2차 다듬기를 끈 그래프에선 두 번째 디코더가 건너뛰어 저장 노드의 입력이 비므로, 다듬기 사슬의 시작점(픽셀 확대의 image 입력)으로 이어 준다
+    origin = next((n["inputs"][0]["link"] for n in nodes.values() if str(n.get("title", "")).startswith("2차 다듬기") and n["type"] == "ImageScaleBy"), None)
 
     def source(lid):
         _, fid, fslot, _, _, typ = links[lid]
         n = nodes.get(fid)
         while n is not None and n["mode"] == 4:
             up = next((i for i in n.get("inputs", []) if i.get("link") is not None and i["type"] == typ), None)
+            if up is None and origin is not None and str(n.get("title", "")).startswith("2차 다듬기") and typ == "IMAGE":
+                up = {"link": origin}
             if up is None:
                 return None
             _, fid, fslot, _, _, typ = links[up["link"]]
@@ -220,8 +229,10 @@ def to_api(ui: dict, turbo=None) -> dict:
                     inputs[i["name"]] = s
         api[nid] = {"class_type": n["type"], "inputs": inputs}
     api = _renumber(_first_stage(api))
-    if turbo is not None and meta.get("cfg") and "7" in api:  # 판마다 터보·일반 cfg 가 다르면 워크플로우 데이터대로(Anima 1 · 4)
-        api["7"]["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
+    if turbo is not None and meta.get("cfg"):  # 판마다 터보·일반 cfg 가 다르면 워크플로우 데이터대로(Anima 1 · 4), 두 번째 샘플러도 같이
+        for k, v in api.items():
+            if v["class_type"] == "KSampler":
+                v["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
     return api
 
 
@@ -251,6 +262,11 @@ def _renumber(api: dict) -> dict:
     for v in api.values():
         count[v["class_type"]] = count.get(v["class_type"], 0) + 1
     new = {nid: CANON[v["class_type"]] for nid, v in api.items() if v["class_type"] in CANON and count[v["class_type"]] == 1}
+    if count.get("KSampler") == 2:  # 2차 다듬기가 켜진 그래프: 빈 캔버스(또는 인코더 잠재)에서 시작하는 샘플러가 "7", 확대 잠재를 받는 쪽이 "7r"
+        ks = [nid for nid, v in api.items() if v["class_type"] == "KSampler"]
+        first = next((n for n in ks if api[api[n]["inputs"]["latent_image"][0]]["class_type"] not in ("LatentUpscaleBy", "LatentUpscale", "KSampler", "VAEEncode")), ks[0])
+        new[first] = "7"
+        new[next(n for n in ks if n != first)] = "7r"
     enc = next((nid for nid, k in new.items() if k == "5"), None)
     if enc is not None:  # 컷 설명에 꽂힌 참고 그림: <imageK> → 1KK(101, 102 …)
         for k, val in api[enc]["inputs"].items():
@@ -274,6 +290,8 @@ def fill(g: dict, prompt: str, ref_names: list, w: int, h: int, seed: int, steps
         if "6" in g:
             g["6"]["inputs"].update(width=w, height=h, batch_size=1)
         g["7"]["inputs"].update(seed=seed, steps=steps)
+        if "7r" in g:
+            g["7r"]["inputs"].update(seed=seed)
         g["9"]["inputs"]["filename_prefix"] = prefix
         return g
     enc = g["5"]["inputs"]
@@ -288,5 +306,7 @@ def fill(g: dict, prompt: str, ref_names: list, w: int, h: int, seed: int, steps
     if "6" in g:  # 편집 워크플로우엔 빈 캔버스가 없다(고칠 그림 크기)
         g["6"]["inputs"].update(width=w, height=h, batch_size=1)
     g["7"]["inputs"].update(seed=seed, steps=steps)
+    if "7r" in g:  # 켜진 2차 다듬기 샘플러: 같은 시드. 스텝·강도는 워크플로우 값(첫 단이 터보 8스텝이어도 다듬기는 16스텝에서 일부만 다시 그린다)
+        g["7r"]["inputs"].update(seed=seed)
     g["9"]["inputs"]["filename_prefix"] = prefix
     return g

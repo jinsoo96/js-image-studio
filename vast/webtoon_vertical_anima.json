@@ -1,8 +1,8 @@
 {
  "id": "fd33df6e-7cc8-4b88-bff3-7f72065ad388",
  "revision": 0,
- "last_node_id": 11,
- "last_link_id": 10,
+ "last_node_id": 16,
+ "last_link_id": 39,
  "nodes": [
   {
    "id": 1,
@@ -87,7 +87,8 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      2
+      2,
+      32
      ],
      "slot_index": 0
     }
@@ -156,7 +157,9 @@
      "name": "VAE",
      "type": "VAE",
      "links": [
-      9
+      9,
+      31,
+      37
      ],
      "slot_index": 0
     }
@@ -194,7 +197,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      5
+      5,
+      33
      ],
      "slot_index": 0
     }
@@ -233,7 +237,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      6
+      6,
+      34
      ],
      "slot_index": 0
     }
@@ -322,7 +327,7 @@
      "name": "LATENT",
      "type": "LATENT",
      "links": [
-      8
+      17
      ],
      "slot_index": 0
     }
@@ -358,7 +363,7 @@
     {
      "name": "samples",
      "type": "LATENT",
-     "link": 8
+     "link": 17
     },
     {
      "name": "vae",
@@ -371,7 +376,7 @@
      "name": "IMAGE",
      "type": "IMAGE",
      "links": [
-      10
+      29
      ],
      "slot_index": 0
     }
@@ -399,7 +404,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 10
+     "link": 38
     }
    ],
    "outputs": [],
@@ -409,6 +414,190 @@
    "widgets_values": [
     "webtoon_studio/panel"
    ]
+  },
+  {
+   "id": 12,
+   "type": "ImageScaleBy",
+   "pos": [
+    960,
+    502
+   ],
+   "size": [
+    300,
+    82
+   ],
+   "flags": {},
+   "order": 102,
+   "mode": 4,
+   "title": "2차 다듬기: 픽셀 확대",
+   "inputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 29
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      30
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ImageScaleBy"
+   },
+   "widgets_values": [
+    "lanczos",
+    1.3
+   ]
+  },
+  {
+   "id": 13,
+   "type": "VAEEncode",
+   "pos": [
+    1290,
+    502
+   ],
+   "size": [
+    220,
+    60
+   ],
+   "flags": {},
+   "order": 103,
+   "mode": 4,
+   "title": "2차 다듬기: 다시 인코딩",
+   "inputs": [
+    {
+     "name": "pixels",
+     "type": "IMAGE",
+     "link": 30
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 31
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      35
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEEncode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 14,
+   "type": "KSampler",
+   "pos": [
+    1540,
+    502
+   ],
+   "size": [
+    300,
+    262
+   ],
+   "flags": {},
+   "order": 104,
+   "mode": 4,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 32
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 33
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 34
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 35
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      36
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "fixed",
+    16,
+    1.0,
+    "euler",
+    "simple",
+    0.25
+   ],
+   "title": "2차 다듬기: 샘플러"
+  },
+  {
+   "id": 15,
+   "type": "VAEDecode",
+   "pos": [
+    1840,
+    502
+   ],
+   "size": [
+    220,
+    60
+   ],
+   "flags": {},
+   "order": 105,
+   "mode": 4,
+   "title": "2차 다듬기: 디코더",
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 36
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 37
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      38
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
   }
  ],
  "links": [
@@ -469,14 +658,6 @@
    "LATENT"
   ],
   [
-   8,
-   9,
-   0,
-   10,
-   0,
-   "LATENT"
-  ],
-  [
    9,
    5,
    0,
@@ -485,8 +666,88 @@
    "VAE"
   ],
   [
+   17,
+   9,
+   0,
    10,
+   0,
+   "LATENT"
+  ],
+  [
+   29,
    10,
+   0,
+   12,
+   0,
+   "IMAGE"
+  ],
+  [
+   30,
+   12,
+   0,
+   13,
+   0,
+   "IMAGE"
+  ],
+  [
+   31,
+   5,
+   0,
+   13,
+   1,
+   "VAE"
+  ],
+  [
+   32,
+   3,
+   0,
+   14,
+   0,
+   "MODEL"
+  ],
+  [
+   33,
+   6,
+   0,
+   14,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   34,
+   7,
+   0,
+   14,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   35,
+   13,
+   0,
+   14,
+   3,
+   "LATENT"
+  ],
+  [
+   36,
+   14,
+   0,
+   15,
+   0,
+   "LATENT"
+  ],
+  [
+   37,
+   5,
+   0,
+   15,
+   1,
+   "VAE"
+  ],
+  [
+   38,
+   15,
    0,
    11,
    0,
@@ -557,11 +818,34 @@
    "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)",
    "model": "anima",
    "role": "vertical",
-   "use_for": "선이 또렷한 애니메이션 그림체. 글만 받아 얼굴 일관성이 약하다(참고 그림 없이 작품 설정의 생김새 글로 맞춘다): 전경·분위기 컷, 표지·키비주얼처럼 얼굴이 같을 필요가 적은 그림에 맞다. UC 보다 클로즈업 지시, 인원 수, 간판 글자를 덜 따른다(2026-10-19 4컷 시험: 클로즈업이 중간 샷으로, 한 명이어야 할 컷에 두 명, 간판에 글자). 학습 크기가 약 100만 화소라 캔버스를 그에 맞춰 줄인다(max_pixels). '모든 그림에서 똑같이' 같은 여러 장을 뜻하는 말이 프롬프트에 있으면 4분할로 그려서 그런 문구는 prompt_drop 으로 뺀다.",
+   "use_for": "선이 또렷한 애니메이션 그림체(UC 와 얼굴 모양이 많이 다르다). 글만 받아 얼굴 일관성이 약하다(참고 그림 없이 작품 설정의 생김새 글로 맞춘다): 전경·분위기 컷, 표지·키비주얼처럼 얼굴이 같을 필요가 적은 그림에 맞다. 판 데이터 prompt_template 이 품질·샷·인원 태그 머리말을 붙인다: 4컷 시험에서 한 명 컷이 한 명으로, 와이드의 좌우·소품이 글대로 나왔으나 클로즈업 하나는 중간 샷에 없는 노트북이 생겼고 간판에 글자 같은 무늬가 그려진다. refine 효과는 작다. 학습 크기가 약 100만 화소라 캔버스를 줄이고(max_pixels), '모든 그림에서 똑같이' 같은 여러 장을 뜻하는 말은 4분할로 그려서 prompt_drop 으로 뺀다. 라이선스: 모델 카드상 비상업(2026-10-19 조사, 상업 제품에 쓰기 전 확인).",
    "max_pixels": 1100000,
    "prompt_drop": [
     "(identical in every image)"
-   ]
+   ],
+   "refine": {
+    "method": "pixel",
+    "scale": 1.3,
+    "denoise": 0.25,
+    "steps": 16,
+    "note": "2차 다듬기 노드 넷은 우회 상태. 도구가 refine=True 로 부르면 켠다(꺼져 있으면 저장 노드가 첫 디코더로 이어진다). 값은 노드 위젯."
+   },
+   "prompt_template": {
+    "prefix": "masterpiece, best quality, score_7, safe, anime coloring",
+    "shot_tags": {
+     "close-up": "close-up, portrait, face focus",
+     "medium shot": "upper body, cowboy shot",
+     "wide shot": "wide shot, scenery",
+     "full shot": "full body",
+     "insert shot": "close-up, detail, no humans"
+    },
+    "count_tags": {
+     "0": "no humans",
+     "1": "solo",
+     "2": ""
+    },
+    "note": "글만 받는 판의 프롬프트 머리말. 모델 카드: 태그와 문장 혼용, 품질 태그 앞, 카메라 태그는 뒤. 샷 값은 comfy_panel.norm_shot 의 다섯 가지."
+   }
   }
  },
  "version": 0.4
