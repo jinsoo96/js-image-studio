@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import LLM_MODEL, LLM_URL, graph, is_ots, pick_expr, upload, wants_camera  # noqa: E402
+from comfy_panel import LLM_MODEL, LLM_URL, graph, panel_text, pick_expr, upload  # noqa: E402
 
 
 def refine_prompt(series, p, expr=True):
@@ -72,8 +72,8 @@ def find_extras(img_path: Path, series, p) -> list:
     who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" ({looks[c]})" if looks.get(c) else "") + (f" wearing {wear[c]}" if c in wear else "")
                     for c in chars) or "nobody"
     ask = (f"This webtoon panel should show exactly {len(chars)} {'person' if len(chars) == 1 else 'people'}: {who}."
-           + (" An over-the-shoulder figure seen from behind in the foreground is also expected and is NOT extra." if is_ots(p.get("camera")) else "")
-           + (f" These unnamed people are also expected and are NOT extra: {p['extras']}." if p.get("extras") else "")
+           + f"\nPanel text: {panel_text(p)}\nAnyone else the panel text describes (an over-the-shoulder foreground figure, unnamed people) "
+             "is also expected and is NOT extra."
            + "\nLook at the image. If it shows no more people than expected, answer with an empty list: different expected people can wear "
            "the same uniform, so do not call someone a duplicate just because the clothes match; compare faces, hair and build. "
            "Otherwise list every EXTRA person who should not be there: true duplicates of the same person (keep the one whose clothes match), "
@@ -110,7 +110,7 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
     return changed
 
 
-EDITABLE = {"표정연기", "옷", "소품"}  # 편집으로 고칠 수 있는 것(소품 = 설명에 없는 휴대폰 등). 좌우·시선·배경·인원은 구도라 다시 그린다
+EDITABLE = {"표정연기", "옷", "소품"}  # 편집으로 고칠 수 있는 것(소품 = 글과 다른 손의 물건). 좌우·시선·배경·인원은 구도라 다시 그린다
 
 
 LIMB_ASK = ("Look only at the bodies. For each fully visible person (ignore people seen only from behind at the frame edge), count their arms "
@@ -125,18 +125,6 @@ def extra_limbs(img_path: Path) -> list:
     people = [x for x in _vlm([img_path], LIMB_ASK).get("people", []) if isinstance(x, dict)]
     return [f"{x.get('who', '?')}: arms {x.get('arms')}, hands {x.get('hands')}" for x in people
             if x.get("extra_limb") or (x.get("arms") or 0) > 2 or (x.get("hands") or 0) > 2]
-
-
-GAZE_ASK = ("Look only at where each person in this webtoon panel is looking. Is any person's face turned to the front with the eyes looking "
-            "straight out of the picture at the viewer, as if posing for the camera? A person looking at another person, at an object, down, "
-            "to the side or away does not count. Answer JSON only: {\"at_viewer\": [\"short description of each person looking at the viewer\"]} "
-            "(empty list if nobody).")
-
-
-def camera_gaze(img_path: Path) -> list:
-    """독자(카메라)를 정면으로 보는 사람(짧은 질문 하나로 따로 묻는다). 여러 항목 검수에선 놓쳤다
-    (2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐", p016 다락에서 정면 미소가 통과)."""
-    return [str(x) for x in _vlm([img_path], GAZE_ASK, max_tokens=200).get("at_viewer", []) if x]
 
 
 JUDGE_FAILS = {"n": 0, "last": ""}  # 검사 모델 호출 실패 횟수. staging_check 가 앞뒤로 보고 '검사 못 함'을 건다(통과로 넘기지 않는다)
@@ -169,71 +157,6 @@ def _vlm(images: list, text: str, max_tokens=300) -> dict:
         JUDGE_FAILS["last"] = str(e)[:160]
         return {}
 
-
-# 연출 논리(2026-10-18 외출 1화 사용자 지적: 버스에 거꾸로 앉음, 운전석 반대, 대화 상대 대신 독자를 보는 사람, 앉아야 할 사람이 서 있음,
-# 맥주 두 잔이 세 잔·커피잔, 대사하는 사람 뒤통수). 여러 항목을 한꺼번에 묻는 검수(vision_review)는 이걸 다 통과시켰다 → 따로 묻는다.
-# 근거: 영화 연출의 연속성 원칙(180도 법칙·시선 일치·소품 연속성), skills/panel-spec 의 '연출 문법'.
-LOGIC_ASK = """You are a strict script supervisor checking ONE webtoon panel for staging mistakes a careful reader would notice.
-The panel should show: {desc}
-Check only these and answer from what you actually see:
-1. Real-world logic: does anything work the wrong way? For example passengers in a bus or train sitting backwards relative to the direction of travel, a car driven from the wrong side (in Korea the driver sits on the LEFT side of the car behind the steering wheel), a person standing or leaning while the description has them seated, objects floating or in impossible places.
-2. Conversation: if two or more people are talking or interacting, are they turned toward each other? A person whose face and body point at the viewer instead of the person they are talking to is a mistake.
-3. Props: do the number and kind of drinks, cups and key objects match the description (for example exactly two beer mugs, not three; beer mugs, not coffee cups)?
-4. Faces: if a person is speaking or reacting in this moment, is their face visible? Only the back of the head is a mistake unless the description asks for a back view.
-Only report clear mistakes. Do not report small differences in exactly where someone's eyes point, as long as people who talk look toward each other.
-A screen or monitor seen from behind is normal when the camera looks at the person from behind their screen (the screen faces them and lights their face).
-Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
-
-FACING_ASK = """Several people are in this webtoon panel and they are dealing with each other. For EACH person, look at the direction of their FACE and SHOULDERS:
-do they point toward the other person (profile or three-quarter view toward them), or do they point straight toward the viewer like posing for a group photo?
-A person whose shoulders and face are square to the viewer while talking to someone beside them is a mistake, even if their eyes glance sideways.
-Answer JSON only: {"facing_viewer": ["short description of each person facing the viewer instead of the others"]} (empty list if none)."""
-
-
-def facing_check(img_path: Path) -> list:
-    """대화하는 사람이 상대가 아니라 독자 쪽으로 몸·얼굴을 두고 서 있나(외출 p004 박희재: 눈만 옆을 보고 몸은 정면이라 시선 검사를 통과했다)."""
-    return [str(x) for x in _vlm([img_path], FACING_ASK).get("facing_viewer", []) if x]
-
-
-SIDE_ASK = """Look at the main people in this webtoon panel. Is the person on the LEFT half of the picture a man or a woman, and the person on the RIGHT half?
-Answer JSON only: {"left": "man" | "woman" | "unclear", "right": "man" | "woman" | "unclear"}"""
-
-
-def expected_sides(series, p: dict, layout: str = "") -> dict:
-    """컷 설명(action·camera)에 적힌 화면 좌우를 인물 성별로: {"left": "man", "right": "woman"}. 못 읽으면 {}."""
-    from hf_panel import names
-    if len(p.get("chars") or []) != 2:
-        return {}
-    NAMES = names(series)
-    sj = Path(series) / "series.json"
-    cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
-    text = " ".join(str(p.get(k) or "") for k in ("action", "camera")) + " " + layout  # 장면 배치 문장(panels_spec scenes)도 본다
-    side, sex = {}, {}
-    for cid in p["chars"]:
-        short = re.sub(r"\s*\(.*?\)", "", NAMES.get(cid, cid)).split()[-1]
-        m = re.search(rf"{re.escape(short)}[^.;]{{0,45}}?\b(LEFT|RIGHT)\b", text)
-        w = str(cast.get(cid, {}).get("who", "")).lower()
-        g = "woman" if re.search(r"\bwoman\b|\bgirl\b", w) else "man" if re.search(r"\bman\b|\bboy\b", w) else ""
-        if m and g:
-            side[cid], sex[cid] = m.group(1).lower(), g
-    if len(side) != 2 or len(set(side.values())) != 2 or len(set(sex.values())) != 2:
-        return {}
-    return {s: sex[c] for c, s in side.items()}
-
-
-def side_check(series, img_path: Path, p: dict, layout: str = "") -> list:
-    """180도 법칙: 장면 배치의 좌우와 그림의 좌우가 같은가(외출 p010·p012 를 다시 그릴 때마다 상수·은영이 바뀌었다)."""
-    want = expected_sides(series, p, layout)
-    if not want:
-        return []
-    got = _vlm([img_path], SIDE_ASK)
-    if got.get("left") == want.get("right") and got.get("right") == want.get("left"):
-        return [f"좌우가 바뀌었다: 왼쪽이 {want['left']}, 오른쪽이 {want['right']} 여야 한다"]
-    return []
-
-
-FRAME_ASK = """Is this picture a CLOSE detail (an object or hands filling most of the frame, background blurred) or a WIDE view that shows a whole room or place with its furniture?
-Answer JSON only: {"view": "close" | "wide"}"""
 
 PRESENCE_ASK = """In this webtoon scene these people are present at this moment, even if this panel does not show them: {who}.
 Where they are, from the neighbouring panels: {where}
@@ -280,60 +203,75 @@ def scene_present(ep_dir: Path, pid: str) -> list:
     return sorted(present - set(spec[pid].get("chars") or []))
 
 
-VIEW_ASK = """Describe this picture relative to the CAMERA (the viewer), only what you can see:
-1. For each main person: do we see the FRONT of them (their face and chest, even if the head is turned a little), their BACK (back of the head and back), or only their SIDE in profile? Are they sitting or standing? If sitting, which way do their KNEES and lap point: toward the camera (we see the knees from the front), away from the camera, left, right, or hidden?
-2. Seats that nobody in the picture sits on (rows of bus, train, cinema or car seats): which way do their seat cushions and fronts face: toward the camera (we see the cushions), away from the camera (we see the seat backs), left or right? "none" if no such seats are visible.
-3. If a steering wheel is visible, is it on the left or the right half of the picture? "none" if not visible.
-Answer JSON only: {"people": [{"who": "short description", "see": "front" | "back" | "side", "pose": "sitting" | "standing" | "other", "knees": "toward" | "away" | "left" | "right" | "hidden"}], "other_seats": "toward" | "away" | "left" | "right" | "mixed" | "none", "steering_wheel": "left" | "right" | "none"}"""
+CHECKS = ROOT / "skills" / "staging-review" / "checks.json"
 
 
-def viewpoint_check(img_path: Path, p: dict) -> list:
-    """카메라 기준의 보이는 사실(사람 몸 방향·빈 좌석 방향·운전대 자리)을 그림 모델에게 묻고, 맞는지는 코드가 따진다.
-    "승객이 거꾸로 앉았나"를 통째로 물으면 진행 방향을 몰라 못 잡았다(외출 p008 버스, 세 번). 사용자 "카메라 시점을 생각하면 하네스가 잡아낼 텐데".
-    규칙: ① 탈것에서 앉은 사람의 몸 방향이 다른 좌석의 방향과 반대면 거꾸로 앉은 것 ② 컷 설명의 카메라가 사람 뒤(from behind)면 몸이 away,
-    정면(front view·facing them·through the windshield)이면 toward ③ 설명이 운전대 자리를 말하면(on the RIGHT/LEFT of the picture) 그 쪽."""
-    text = " ".join(str(p.get(k) or "") for k in ("action", "camera"))
-    vehicle = re.search(r"bus(?!_stop)|car|taxi|train|subway", str(p.get("location") or "") + " " + text, re.I)
-    want_away = re.search(r"from behind|seen from the seat behind|backs? (of|to)|from the back seat", text, re.I)
-    want_toward = re.search(r"front view|through the windshield|facing (them|the camera)|toward the camera", text, re.I)
-    wheel = re.search(r"(steering wheel|driver)[^.]{0,80}\b(RIGHT|LEFT)\b of the picture", text, re.I) or \
-        re.search(r"\b(RIGHT|LEFT)\b of the picture[^.]{0,40}(steering wheel|driver)", text, re.I)
-    if not (vehicle or want_away or want_toward):
-        return []
-    v = _vlm([img_path], VIEW_ASK, max_tokens=400)
-    people = [x for x in v.get("people", []) if isinstance(x, dict)]
+def _looks(series, p) -> str:
+    """검사에 넘길 인물 생김새(이름 · 작품 설정의 생김새 첫 문장 · 이 컷의 옷). 그림 속 누가 누구인지 판정 모델이 알아보게."""
+    from hf_panel import names
+    series = Path(series)
+    nm = names(series)
+    sj = series / "series.json"
+    cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
     out = []
-    seats = v.get("other_seats")
-    if vehicle and seats in ("toward", "away"):
-        # 빈 좌석의 등받이가 보이면(away) 좌석은 카메라 반대쪽을 본다 → 앉은 사람도 등이 보여야 한다. 앞모습이 보이면 거꾸로 앉은 것
-        clash = {"away": "front", "toward": "back"}[seats]
-        knee_clash = {"away": "toward", "toward": "away"}[seats]  # 고개를 돌려도 무릎은 앉은 방향을 따른다(외출 p008 UC 판: 둘 다 옆을 봤다)
-        for x in people:
-            if x.get("pose") == "sitting" and (x.get("see") == clash or x.get("knees") == knee_clash):
-                out.append(f"{x.get('who', '?')} 이(가) 다른 좌석과 반대 방향으로 앉아 있다(빈 좌석은 "
-                           f"{'등받이가 보이는데 이 사람은 앞모습' if seats == 'away' else '앞면이 보이는데 이 사람은 뒷모습'})")
-    if want_away and not want_toward and people and all(x.get("see") == "front" for x in people):
-        out.append("카메라가 사람 뒤에 있다고 했는데 모두 앞모습이다")
-    if want_toward and not want_away and people and all(x.get("see") == "back" for x in people):
-        out.append("정면 구도라고 했는데 모두 뒷모습이다")
-    # 운전대 자리는 대체 검사 모델(8B)이 맞게 그린 차를 반대로 읽어(외출 p037) 판정에 쓰지 않는다. 차는 컷 설명 규칙(앞 유리 밖 시점)으로 막는다
-    if False and wheel and v.get("steering_wheel") in ("left", "right"):
-        side = (wheel.group(2) if wheel.re.pattern.startswith("(steering") else wheel.group(1)).lower()
-        if v["steering_wheel"] != side:
-            out.append(f"운전대가 화면 {v['steering_wheel']} 쪽에 있다(설명은 {side})")
+    for c in p.get("chars") or []:
+        who = re.split(r"(?<=\.)\s", str(cast.get(c, {}).get("who", "")))[0][:140]
+        wear = (p.get("outfit") or {}).get(c)
+        out.append(f"{re.sub(r'\s*\(.*?\)', '', nm.get(c, c))}" + (f" ({who})" if who else "") + (f" wearing {wear}" if wear else ""))
+    return "; ".join(out)
+
+
+def _text_json(text: str, max_tokens=200) -> dict:
+    """그림 없이 글만 판정 모델에 묻고 JSON 을 받는다(못 받으면 빈 dict, JUDGE_FAILS 를 올린다)."""
+    from judge_ep import JudgeDown, chat
+    try:
+        m = re.search(r"\{.*\}", chat([{"type": "text", "text": text}], max_tokens=max_tokens), re.S)
+        return json.loads(m.group()) if m else {}
+    except (JudgeDown, ValueError) as e:
+        JUDGE_FAILS["n"] += 1
+        JUDGE_FAILS["last"] = str(e)[:160]
+        return {}
+
+
+def _compare(check: dict, fill: dict, img_path: Path) -> list:
+    """비교형 항목: expect(글만 보고 기대값 {이름: 값}) · observe(그림을 보고 관찰값 {이름: 값})를 따로 묻고, 둘 다 값이 있는데 다른 이름만 걸린 점으로."""
+    want = _text_json(check["expect"].format(**fill))
+    got = _vlm([img_path], check["observe"].format(**fill), max_tokens=check.get("max_tokens", 200))
+    skip = set(check.get("unknown", ["unknown", "unclear", "none", ""]))
+    return [check["problem"].format(name=k, want=v, got=got[k]) for k, v in want.items()
+            if isinstance(v, str) and v.lower() not in skip and isinstance(got.get(k), str) and got[k].lower() not in skip
+            and got[k].lower() != v.lower()]
+
+
+def run_checks(series, img_path: Path, p: dict, layout: str = "") -> dict:
+    """기준표(skills/staging-review/checks.json)의 항목을 돌려 {항목 이름(category): [걸린 점]}. 항목마다 이 컷의 글을 주고 글대로인지만 묻는다.
+    어느 항목을 돌릴지는 인물 수로만 정한다(글 속 문구로 켜고 끄지 않는다)."""
+    spec = json.loads(CHECKS.read_text(encoding="utf-8"))
+    sj = Path(series) / "series.json"
+    era = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else "") or ""
+    n = len(p.get("chars") or [])
+    fill = {"text": panel_text(p), "layout": layout or "(none)", "looks": _looks(series, p) or "(none)",
+            "era": f" Objects must fit this period: {era}" if era else "", "common": spec.get("common", "")}
+    from hf_panel import names
+    nm = names(Path(series))
+    fill["names"] = ", ".join(re.sub(r"\s*\(.*?\)", "", nm.get(c, c)) for c in p.get("chars") or [])
+    out = {}
+    for c in spec["checks"]:
+        when = c.get("when", "always")
+        if (when == "people" and not (n or p.get("extras"))) or (when == "two_or_more" and n < 2):
+            continue
+        if "expect" in c:  # 비교형: 글에서 기대값, 그림에서 관찰값을 따로 받아 코드가 비교한다(판정 모델 혼자 비교하면 좌우를 놓쳤다, 외출 p016)
+            found = _compare(c, fill, img_path)
+        else:
+            found = [str(x) for x in _vlm([img_path], c["ask"].format(**fill), max_tokens=c.get("max_tokens", 300)).get("problems", []) if x]
+        if found and spec.get("verify"):  # 걸린 점만 두 번째 판정이 다시 거른다(트집·좌우 착각을 덜어 낸다)
+            listing = "\n".join(f"{k}. {x}" for k, x in enumerate(found))
+            keep = _vlm([img_path], spec["verify"].format(text=fill["text"], problems=listing), max_tokens=120).get("keep")
+            if isinstance(keep, list):
+                found = [found[k] for k in keep if isinstance(k, int) and 0 <= k < len(found)]
+        if found:
+            out.setdefault(c["category"], []).extend(found)
     return out
-
-
-def logic_check(img_path: Path, p: dict, era: str = "") -> list:
-    desc = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
-    desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
-    ask = LOGIC_ASK.format(desc=desc)
-    if wants_camera(p):  # 시점 컷(맞은편 사람의 눈으로 봄): 독자를 보는 게 맞다. 안 알리면 '상대 대신 독자를 본다'고 걸었다(D+18 2화 p022)
-        ask = ask.replace("Only report clear mistakes.", "In this panel the camera IS the person across from them (a point-of-view shot), so looking "
-                          "at the viewer is correct, not a mistake.\nOnly report clear mistakes.")
-    if era:  # 시대 소품(외출 1화: 2008년에 스마트폰·태블릿)
-        ask = ask.replace("Only report clear mistakes.", f"5. Period: {era} Any object from a later time is a mistake.\nOnly report clear mistakes.")
-    return [str(x) for x in _vlm([img_path], ask).get("problems", []) if x]
 
 
 CONT_ASK = """Image 1 is the previous panel and image 2 is the next panel of the SAME scene in a webtoon (continuous time).
@@ -359,8 +297,10 @@ def continuity_pair(prev_img: Path, img: Path, p: dict, prev: dict | None = None
 
 
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
-    """그림 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경·기타, 두 번 보고 둘 다 걸린 것만) + 팔·손 개수(따로 묻기)로 본다. (결과, 걸린 항목)
-    팔·손이 남으면 '몸' 으로 걸고, 구도처럼 다시 그린다(편집으로 팔 하나만 지우기는 잘 안 된다)."""
+    """그린 컷을 그 컷의 글과 맞대어 본다. (결과, 걸린 항목)
+    ① 여러 항목 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경, 두 번 보고 둘 다 걸린 것만) ② 팔·손 개수(글과 무관한 몸 구조)
+    ③ 장면에 있는데 이 컷에서 사라진 사람(앞뒤 컷) ④ 기준표 항목(skills/staging-review/checks.json: 시선·몸 방향·좌우·구도·논리·소품).
+    ④는 항목마다 이 컷의 글을 통째로 주고 글대로인지만 묻는다. 검사 쪽에 고정 규칙이나 글 속 문구로 켜고 끄는 조건을 두지 않는다."""
     sys.path.insert(0, str(ROOT / "mcp"))
     import vision_review as V
     fails0 = JUDGE_FAILS["n"]
@@ -370,101 +310,78 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     if r.get("error") or r.get("raw"):  # 검수 모델이 답을 못 줬다: 통과로 넘기지 않는다
         JUDGE_FAILS["n"] += 1
         JUDGE_FAILS["last"] = str(r.get("error") or "형식 밖 답")[:160]
+    notes = [str(r.get("고칠점") or "")]
     limbs = extra_limbs(img_path)
     if limbs:
         probs.add("몸")
-        r["고칠점"] = (str(r.get("고칠점") or "") + " 팔·손이 남는다: " + "; ".join(limbs)).strip()
+        notes.append("팔·손이 남는다: " + "; ".join(limbs))
     p = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
-    if p.get("chars") and not wants_camera(p) and not is_ots(p.get("camera")):  # 어깨 너머 숏은 앞사람(카메라 쪽)을 보는 게 맞다(p047)
-        seen = camera_gaze(img_path)
-        # 한 사람 컷에 볼 방향(looks toward screen left/right)이 적혀 있으면 눈이 어느 쪽인지 따로 묻는다. "독자를 보나"만 물으니
-        # 정면을 똑바로 보는 클로즈업을 놓쳤다(2026-10-19 외출 p052). 눈 방향 한 단어 질문은 맞았다
-        want = re.search(r"looks? toward screen (left|right)", " ".join(str(p.get(k) or "") for k in ("camera", "action")), re.I)
-        if not seen and want and len(p["chars"]) == 1:
-            eyes = (_vlm([img_path], 'Where do the eyes of the main person look? Answer JSON only: {"eyes": "viewer" | "left" | "right" | "down"}',
-                         max_tokens=40) or {}).get("eyes")
-            if eyes == "viewer" or (eyes in ("left", "right") and eyes != want.group(1).lower()):
-                seen = [f"눈이 {eyes} 쪽(설명은 화면 {want.group(1).lower()})"]
-        if seen:
-            probs.add("시선")
-            r["고칠점"] = (str(r.get("고칠점") or "") + " 독자를 쳐다본다: " + "; ".join(seen)).strip()
-    if len(p.get("chars") or []) >= 2 and not is_ots(p.get("camera")) and not re.search(r"from behind|back view|backs", str(p.get("camera") or "") + str(p.get("action") or ""), re.I):
-        facing = facing_check(img_path)
-        if facing:
-            probs.add("시선")
-            r["고칠점"] = (str(r.get("고칠점") or "") + " 상대 대신 독자 쪽을 향함: " + "; ".join(facing)).strip()
     sc = ep_dir / "panels_spec.json"
     layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("location") or "", "") if sc.exists() else "")
-    shot = str(p.get("shot") or "")
-    if any(w in shot for w in ("insert", "detail", "top view")) and _vlm([img_path], FRAME_ASK).get("view") == "wide":
-        probs.add("구도")
-        r["고칠점"] = (str(r.get("고칠점") or "") + " 인서트인데 방 전체가 나왔다: 물건만 화면을 채우는 접사로").strip()
     absent = scene_present(ep_dir, pid)
     if absent:
         from hf_panel import names
         nm = names(series)
-        this = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)[:300]
-        # 듣는 사람 뒷모습(extras)도 그 사람들이다: 안 알려 주면 뒷모습만 보이는 이동원을 '사라짐'으로 걸었다(2026-10-19 외출 p077)
-        if p.get("extras"):
-            this += f" Also visible (possibly from behind, out of focus): {str(p['extras'])[:300]}"
         vanished = _vlm([img_path], PRESENCE_ASK.format(who=", ".join(nm.get(c, c) for c in absent),
-                                                       where=where_now(series, ep_dir, pid, absent) or layout[:300], this=this)).get("vanished", [])
+                                                       where=where_now(series, ep_dir, pid, absent) or layout[:300], this=panel_text(p))).get("vanished", [])
         if vanished:
-            # '빈자리'(사람이 모자람)는 '인원'(사람이 남음)과 다르게 둔다: 같은 이름이라 사다리 끝의 사람 수 맞추기(fix_count)가
-            # 모자란 컷에서 사람을 더 지웠다(외출 p077: 듣는 사람 뒷모습 둘을 지우고 '1명 맞춤 → 통과')
+            # '빈자리'(사람이 모자람)는 '인원'(사람이 남음)과 다르게 둔다: 같은 이름이라 사람 수 맞추기가 모자란 컷에서 사람을 더 지웠다(외출 p077)
             probs.add("빈자리")
-            r["고칠점"] = (str(r.get("고칠점") or "") + " 장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
-                        + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부(어깨)를 화면 끝에").strip()
-    swapped = side_check(series, img_path, p, layout)
-    if swapped:
-        probs.add("좌우")
-        r["고칠점"] = (str(r.get("고칠점") or "") + " " + swapped[0]).strip()
-    if p.get("chars") and not re.search(r"\bphone", " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera", "extras")), re.I):
-        held = _vlm([img_path], 'Is any person in this picture holding a mobile phone in their hand? Answer JSON only: {"phone_in_hand": true|false}', max_tokens=40)
-        if held.get("phone_in_hand") is True:  # 설명에 없는 휴대폰(외출 1화 열세 컷: 건배하는 손, 발표하는 손에 폴더폰)
-            probs.add("소품")
-            r["고칠점"] = (str(r.get("고칠점") or "") + " 설명에 없는 휴대폰을 손에 들고 있다: 손을 비우거나 설명의 물건으로").strip()
-    view = viewpoint_check(img_path, p)  # 카메라 기준으로 쪼갠 사실(앞모습·뒷모습·무릎·빈 좌석 방향)을 코드가 비교
-    if view:
-        probs.add("구도")
-        r["고칠점"] = (str(r.get("고칠점") or "") + " 카메라 기준 방향: " + "; ".join(view)).strip()
-    if p.get("chars") or p.get("extras"):
-        sj = Path(series) / "series.json"
-        era = (json.loads(sj.read_text(encoding="utf-8")).get("era_rule") if sj.exists() else "") or ""
-        bad = logic_check(img_path, p, era)
-        if bad:
-            probs.add("논리")
-            r["고칠점"] = (str(r.get("고칠점") or "") + " 연출 논리: " + "; ".join(bad)).strip()
+            notes.append("장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
+                         + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부를 화면 끝에")
+    for cat, found in run_checks(series, img_path, p, layout).items():
+        probs.add(cat)
+        notes.append(f"{cat}: " + "; ".join(found))
     if JUDGE_FAILS["n"] > fails0:
         probs.add("검사불가")
-        r["고칠점"] = (str(r.get("고칠점") or "") + f" 검사 모델이 답하지 못한 항목이 {JUDGE_FAILS['n'] - fails0}개({JUDGE_FAILS['last'][:80]})").strip()
+        notes.append(f"검사 모델이 답하지 못한 항목이 {JUDGE_FAILS['n'] - fails0}개({JUDGE_FAILS['last'][:80]})")
+    r["고칠점"] = " ".join(x for x in notes if x).strip()
     return r, probs
 
 
 def staging_edit_prompt(series, p, r, probs) -> str:
+    """편집으로 고칠 수 있는 항목(EDITABLE)을 그 컷의 글에 맞추는 편집 지시. 고칠 내용은 검수가 적은 걸린 점과 컷의 글에서 온다."""
     from hf_panel import names
     NAMES = names(series)
     parts = []
     if "표정연기" in probs:
-        parts.append(f"Change only the facial expressions and body language to match this acting: {p.get('acting') or p['action']} "
-                     "Make the emotion strong and instantly readable like a Korean webtoon.")
+        parts.append(f"Change only the facial expressions and body language to match this acting: {p.get('acting') or p['action']}")
     if "소품" in probs:
-        parts.append("Remove the mobile phone from the person's hand; their hand rests empty or holds what the description says: "
-                     + re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)[:300])
+        parts.append(f"Fix only the objects people hold or use so they match the panel text: {panel_text(p)[:400]}")
     if "옷" in probs:
-        wear ="; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
+        wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
         if wear:
             parts.append(f"Change the clothes to match: {wear}.")
     if r.get("고칠점"):
-        parts.append(f"Note: {r['고칠점']}")
+        parts.append(f"Problems found: {r['고칠점']}")
     parts.append("Keep everything else in <image1> exactly the same: who is in the panel, their positions and facing directions, faces, hair, "
                  "the room, lighting, camera angle and framing.")
     return " ".join(parts)
 
 
+def record_review(ep_dir: Path, pid: str, issues=None, note: str = ""):
+    """사람 확인이 남은 컷을 <회차>/review/staging.json 에 남긴다(issues 가 없으면 그 컷을 지운다). 작업 결과(mcp job_status)가 로그 문장을
+    긁지 않고 이 파일을 읽는다."""
+    f = Path(ep_dir) / "review" / "staging.json"
+    cur = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    if issues:
+        cur[pid] = {"issues": sorted(issues), "note": note[:600], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    else:
+        cur.pop(pid, None)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, retries=1, log=print):
     """3단 연출 확인(2026-10-16 사용자 "시점·표정·공간 자각·카메라 각도를 잘 고려해야").
-    표정·옷만 틀리면 편집으로 고치고, 좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시 그린다. 더 나빠지면 나은 판으로 되돌린다."""
+    표정·옷만 틀리면 편집으로 고치고, 좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시 그린다. 더 나빠지면 나은 판으로 되돌린다.
+    끝나면 사람 확인이 남은 컷을 review/staging.json 에 남긴다(record_review)."""
+    left, note = _staging_pass(c, cache, dst, series, ep_dir, p, seed, render, retries, log)
+    record_review(ep_dir, p["id"], left, note)
+
+
+def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, retries=1, log=print):
+    """staging_pass 의 몸통. (남은 항목, 메모)를 돌려준다(통과면 빈 집합)."""
     pid = p["id"]
     best = None
     attempt = 0
@@ -474,16 +391,16 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
             best = (len(probs), dst.read_bytes(), probs)
         if not probs:
             log(f"  {pid}: 연출 확인 통과" + (f" (애매, 사람 눈으로: {r.get('기타', '')[:120]})" if r.get("판정") == "애매" else ""))
-            return
+            return set(), ""
         log(f"  {pid}: 연출 확인 걸림 {sorted(probs)} {str(r.get('고칠점', ''))[:120]}")
         if probs == {"검사불가"}:  # 검사를 못 했다: 다시 그려도 소용없다. 통과로도 넘기지 않는다
             log(f"  {pid}: 연출 확인 남음 ['검사불가'] → 사람 눈으로 확인(검사 모델에 닿지 않음)")
-            return
+            return probs, str(r.get("고칠점") or "")
         # 좌우만 바뀌었으면(그림에 글자가 없을 때) 다시 그리지 않고 뒤집는다. 다시 그리면 또 바뀌었다(외출 p012)
-        if "좌우" in probs and not p.get("text_in_image") and not getattr(staging_pass, "_flipped", {}).get(pid):
+        if "좌우" in probs and not p.get("text_in_image") and not getattr(_staging_pass, "_flipped", {}).get(pid):
             from PIL import Image, ImageOps
             ImageOps.mirror(Image.open(dst).convert("RGB")).save(dst)
-            staging_pass._flipped = {**getattr(staging_pass, "_flipped", {}), pid: True}
+            _staging_pass._flipped = {**getattr(_staging_pass, "_flipped", {}), pid: True}
             log(f"  {pid}: 좌우를 뒤집음(장면 배치와 반대로 그려졌다)")
             continue
         if probs <= EDITABLE:
@@ -499,9 +416,9 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
             if len(p2) > len(probs):
                 dst.write_bytes(before)
                 log(f"  {pid}: 편집 뒤 더 나빠져 되돌림 {sorted(p2)}")
-            else:
-                log(f"  {pid}: 편집으로 손봄 → {'통과' if not p2 else '남음 ' + str(sorted(p2))}")
-            return
+                return probs, str(r.get("고칠점") or "")
+            log(f"  {pid}: 편집으로 손봄 → {'통과' if not p2 else '남음 ' + str(sorted(p2))}")
+            return p2, str(r2.get("고칠점") or "")
         if attempt >= retries:
             break
         attempt += 1
@@ -517,81 +434,61 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
         log(f"  {pid}: 가장 나은 판으로 되돌림")
     # 고치기 사다리의 마지막 칸: 다시 그려도 안 고쳐진 시선·방향은 편집으로 돌린다(외출 p004 박 과장: 다시 그리면 또 정면, 편집은 한 번에 됐다)
     if best[2] and best[2] <= {"시선", "좌우시선"} and fix_facing(c, cache, dst, series, ep_dir, p, seed, log):
-        return
+        return set(), ""
     # 인원이 남으면(같은 사람 둘 등) 콕 집은 지우기 편집 + 사람 수만 따로 세서 확인(외출 p008: 다시 그리기·남는 사람 지우기로 안 되던 것이 한 번에 됐다)
     if "인원" in best[2] and fix_count(c, cache, dst, p, seed, log):
-        return
+        return set(), ""
     log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
-
-
-COUNT_ASK = 'How many people are visible in this picture (count every visible person, including partly visible ones)? Answer JSON only: {"people": N}'
-WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
-WHO_EXTRA = ("This picture should show exactly {n} people: {who}. It shows more. Which ONE visible person is the extra one (a duplicate or a stranger)? "
-             'Describe them by position and clothes, e.g. "the woman on the far left by the window". Answer JSON only: {{"extra": "..."}}')
+    return best[2], str(r.get("고칠점") or "")
 
 
 def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
-    """사람이 많으면 남는 한 사람을 위치·옷으로 짚어 지우고, 사람 수만 다시 센다(맞으면 True, 아니면 원본으로 되돌리고 False). 최대 3번."""
-    from hf_panel import names
-    # 이름 없는 사람(extras)도 센다. 수를 글에서 못 읽으면(other team members 처럼) 세지 않고 손대지 않는다:
-    # 인물 수만 세서 듣는 사람 뒷모습 둘을 지웠다(2026-10-19 외출 p077)
-    extras = str(p.get("extras") or "")
-    nums = [WORD_NUM[w.lower()] for w in re.findall(r"\b(one|two|three|four|five)\b", extras, re.I)]
-    if extras and not nums:
-        log(f"  {p['id']}: 이름 없는 사람 수를 몰라 사람 수 맞추기를 건너뜀")
-        return False
-    want = len(p.get("chars") or []) + sum(nums)
-    if not want:
-        return False
+    """글에 없는 사람(중복·낯선 사람)이 남으면 한 명씩 위치·옷으로 짚어 지우고, 글에 없는 사람이 없어질 때까지 최대 3번(맞으면 True,
+    아니면 원본으로 되돌리고 False). '글에 적힌 사람보다 많은가'는 find_extras 가 컷의 글을 읽고 판단한다(사람 수를 글의 숫자 낱말로 세지 않는다)."""
+    series = Path(dst).parents[3]
     before = dst.read_bytes()
     for k in range(3):
-        n = _vlm([dst], COUNT_ASK, max_tokens=40).get("people")
-        if n == want:
-            log(f"  {p['id']}: 사람 수 맞춤({want}명) → 통과")
-            return True
-        if not isinstance(n, int) or n < want:
-            break
-        nm = names(Path(dst).parents[3]) if len(Path(dst).parents) > 3 else {}
-        who = ", ".join(nm.get(c_, c_) for c_ in p.get("chars") or [])
-        extra = _vlm([dst], WHO_EXTRA.format(n=want, who=who), max_tokens=80).get("extra")
+        extra = find_extras(dst, series, p)
         if not extra:
-            break
-        prompt = (f"In <image1>, remove {extra} entirely; fill the space with the background around them. Keep everyone else, the place, the light and "
-                  "the framing exactly the same.")
+            log(f"  {p['id']}: 글에 없는 사람 없음 → 통과")
+            return True
+        prompt = (f"In <image1>, remove {extra[0]} entirely; fill the space with the background around them. Keep everyone else, the place, the light "
+                  "and the framing exactly the same.")
         g = graph(prompt, [upload(c, dst, cache)], 0, 0, seed % 100000 + 41 + k, 8, 1024, turbo=True, edit=True)
         g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/count_fix"
         hist = c.wait(c.queue(g), 600)
         c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
-        log(f"  {p['id']}: 남는 사람 콕 집어 지움({k + 1}회): {extra}")
-    if _vlm([dst], COUNT_ASK, max_tokens=40).get("people") == want:
-        log(f"  {p['id']}: 사람 수 맞춤({want}명) → 통과")
+        log(f"  {p['id']}: 남는 사람 콕 집어 지움({k + 1}회): {extra[0]}")
+    if not find_extras(dst, series, p):
+        log(f"  {p['id']}: 글에 없는 사람 없음 → 통과")
         return True
     dst.write_bytes(before)
-    log(f"  {p['id']}: 사람 수를 못 맞춤 → 되돌림")
+    log(f"  {p['id']}: 남는 사람을 못 지움 → 되돌림")
     return False
 
 
-TURN = ("In <image1>, turn only these people so that their face and shoulders point toward the person or thing they are dealing with, in profile or "
-        "three-quarter view, instead of facing the viewer: {who}. Keep everything else in <image1> exactly the same: who is in the panel, faces, "
-        "clothes, hands and what they hold, positions, the place, the light, the camera angle and the framing.")
+TURN = ("In <image1>, change only where these people look and which way their face and shoulders turn, so the picture matches the panel text. "
+        "Problems: {problems}. Panel text: {text}. Keep everything else in <image1> exactly the same: who is in the panel, faces, clothes, hands and "
+        "what they hold, positions, the place, the light, the camera angle and the framing.")
 
 
 def fix_facing(c, cache, dst: Path, series, ep_dir: Path, p, seed, log=print) -> bool:
-    """독자 쪽을 향한 사람만 편집으로 돌린다. 다시 확인해 시선 문제가 없어지면 True(아니면 원본으로 되돌리고 False)."""
-    who = facing_check(dst) + camera_gaze(dst)
-    if not who:
+    """시선·몸 방향이 글과 다른 사람만 편집으로 돌린다. 다시 확인해 시선 문제가 없어지면 True(아니면 원본으로 되돌리고 False)."""
+    gaze = run_checks(series, dst, p).get("시선", [])
+    if not gaze:
         return False
     before = dst.read_bytes()
-    g = graph(TURN.format(who="; ".join(dict.fromkeys(who))), [upload(c, dst, cache)], 0, 0, seed % 100000 + 29, 8, 1024, turbo=True, edit=True)
+    g = graph(TURN.format(problems="; ".join(dict.fromkeys(gaze)), text=panel_text(p)[:500]), [upload(c, dst, cache)], 0, 0, seed % 100000 + 29, 8, 1024,
+              turbo=True, edit=True)
     g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/turned"
     hist = c.wait(c.queue(g), 600)
     c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
-    left = facing_check(dst) + camera_gaze(dst)
+    left = run_checks(series, dst, p).get("시선", [])
     if left:
         dst.write_bytes(before)
         log(f"  {p['id']}: 방향 편집도 안 됨({'; '.join(left)[:80]}) → 되돌림")
         return False
-    log(f"  {p['id']}: 독자 쪽을 향한 사람을 편집으로 돌림 → 통과")
+    log(f"  {p['id']}: 시선·방향을 편집으로 글에 맞춤 → 통과")
     return True
 
 

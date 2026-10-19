@@ -34,13 +34,6 @@ TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turb
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
          "4:3": (1664, 1248), "3:2": (1760, 1184), "16:9": (1920, 1088)}
 MAX_REFS = 10
-OTS_WORDS = re.compile(r"over[- ]the[- ]shoulder|shoulder[- ]over|\bOTS\b|어깨 너머", re.I)
-
-
-def is_ots(camera) -> bool:
-    """카메라 칸이 어깨 너머 숏인가. D+18 은 카메라 칸을 어깨 너머에만 써서 '카메라가 있으면 앞사람 하나 더'로 셌는데,
-    추몽은 측면·바스트 같은 다른 지시에도 써서 그 '앞사람'이 같은 인물로 하나 더 그려졌다(2026-10-18 p075 재석 둘)."""
-    return bool(camera) and bool(OTS_WORDS.search(camera))
 
 
 PEOPLE_WORDS = re.compile(r"\b(eyes?|hair|faces?|blush|chest|adults?|lash(es)?|chibi|proportions?|skin|body|bodies|lips|nose)\b", re.I)
@@ -155,21 +148,15 @@ def pick_expr(series, cid, name, text):
     return (files[k - 1], labels[k - 1]) if 1 <= k <= len(labels) else None
 
 
-CAMERA_WANT = re.compile(r"\b(look\w*|star\w*|fac\w*|gaz\w*)\b[^.;]{0,40}?\b(the\s+)?(camera|viewer|reader)\b(?!\s+side)|\b(pov|point[- ]of[- ]view)\b", re.I)
-CAMERA_NOT = re.compile(r"\b(not|never|no|nobody|no one|none|away from|unaware of|instead of|without)\b[^.;]{0,25}$", re.I)
-
-
-def wants_camera(p) -> bool:
-    """컷 설명이 인물에게 카메라(독자)를 보라고 했나(맞은편 사람의 눈으로 보는 시점 컷 포함). 그때만 정면 시선을 둔다.
-    "faces the viewer, who sits across the table"·"looks across the table at the viewer" 처럼 전치사가 없거나 사이에 말이 끼면 못 알아봐,
-    시점 컷을 매번 '독자를 쳐다봄'으로 걸고 agent app 에이전트가 같은 컷을 열 번 다시 그렸다(2026-10-19 D+18 2화 p022). 부정(not·away from)은 뺀다."""
-    # 장면 배치 글(action 끝의 SPACE …)의 가구("the sofa faces the viewer")는 사람이 아니다 → action 에서만 떼어 낸다
+def panel_text(p) -> str:
+    """검사가 그림과 맞대는 이 컷의 글(샷·일어나는 일·연기·카메라·이름 없는 사람들). 장면 배치(SPACE)는 장면 전체 얘기라 뺀다.
+    검사는 이 글대로인지를 판정 모델이 읽고 본다. 검사 쪽에 '독자를 보면 안 됨' 같은 고정 규칙이나 문구 판별을 두지 않는다:
+    시점 컷·뒷모습·어깨 너머·옷·표정 같은 지시는 표현이 끝없이 다양해서, 문구로 가르면 조금만 달라도 틀렸다
+    (2026-10-19 D+18 p022 시점 컷을 '독자를 쳐다봄'으로 열 번 걸었다. 사용자 "특정 문구를 정규식으로 찾는 건 땜질")."""
     action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)
-    t = " ".join([action] + [str(p.get(k) or "") for k in ("acting", "camera", "shot")])
-    for m in CAMERA_WANT.finditer(t):
-        if not CAMERA_NOT.search(t[max(0, m.start() - 30):m.start()]):
-            return True
-    return False
+    parts = [f"Shot: {p.get('shot')}." if p.get("shot") else "", action, f"Acting: {p['acting']}." if p.get("acting") else "",
+             f"Camera: {p['camera']}." if p.get("camera") else "", f"Also in the panel: {p['extras']}." if p.get("extras") else ""]
+    return " ".join(x for x in parts if x)
 
 
 def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
@@ -237,10 +224,10 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     if n:
         lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
     # 참고 얼굴이 모두 정면이라 거의 모든 컷이 독자를 쳐다봤다(2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐").
-    # 연출이 카메라를 보라고 할 때만 정면, 아니면 영화 스틸처럼 인물은 행동의 상대(사람·물건)를 본다. 부정어 대신 보이는 상태로 쓴다
-    gaze = ("GAZE: a candid film still. Every person's eyes, head and body are turned toward the person or the thing they are dealing with "
-            "in this moment (three-quarter view, profile or from behind as the staging needs), unaware of the camera."
-            if n and not wants_camera(p) else "")
+    # 시선은 컷 글이 정한 대로, 글에 없을 때만 행동의 상대를 본다. 시점 컷인지는 그리기 모델이 글을 읽고 판단한다: 문구를 찾아 가르던 판별은
+    # 표현이 조금만 달라도 틀렸다(2026-10-19 D+18 p022 "faces the viewer, who sits across the table" 을 놓침, 사용자 "문구 정규식은 땜질")
+    gaze = ("GAZE: every person looks where the panel text says. Where the text does not say, their eyes, head and body turn toward the "
+            "person or thing they are dealing with in this moment, like a candid film still, not toward the camera." if n else "")
     action = p["action"]
     # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔고(p079),
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
@@ -259,10 +246,11 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
         style = strip_people(style)
     extra = series / "prompts" / "rules_extra.txt"
     if n:
+        # 어깨 너머 앞사람처럼 CAMERA 글이 따로 말하는 사람은 그 글대로(문구로 가르지 않는다)
         count = (f"Exactly {n} {'person' if n == 1 else 'people'}" + (" from the references" if extras else " in the panel")
-                 + (" plus the over-the-shoulder foreground figure described in CAMERA" if is_ots(p.get("camera")) else "") + ", each appearing only once."
+                 + (" plus anyone else the CAMERA text describes" if p.get("camera") else "") + ", each appearing only once."
                  + (f" Besides them only these unnamed people: {extras}." if extras else
-                    " No other people anywhere in the frame, not even small in the background." if n == 1 and not is_ots(p.get("camera")) else ""))
+                    " No other people anywhere in the frame, not even small in the background." if n == 1 and not p.get("camera") else ""))
     else:
         count = f"No main characters. Only these unnamed people: {extras}." if extras else "No people in the panel."
     sj = series / "series.json"  # 작품마다 사람 규칙(기본은 성인 작품용 문장, 학생이 나오는 작품은 series.json 의 people_rule)

@@ -160,27 +160,38 @@ def _running_job(ep: Path):
     return None
 
 
-def _recent_draws(ep: Path, ids: list, hours: float = 3, limit: int = 2) -> dict:
-    """이 회차에서 최근 hours 시간 안에 이미 limit 번 이상 그린 컷 → {컷: 횟수}. 같은 컷 무한 다시 그리기를 막는다(D+18 2화 p022 열 번)."""
-    since, count = time.time() - hours * 3600, {}
-    for f in JOBS.glob("*.json"):
-        if f.name.endswith(".status.json") or f.stat().st_mtime < since:
-            continue
-        spec = _json(f, {})
-        if spec.get("episode_dir") != str(ep) or spec.get("kind") not in ("vast_draw", "redraw", "draw"):
-            continue
-        for st in spec.get("steps", []):
-            cmd = [str(x) for x in st.get("cmd", [])]
-            if "--only" in cmd:
-                for i in cmd[cmd.index("--only") + 1].split(","):
-                    count[i] = count.get(i, 0) + 1
-    return {i: count[i] for i in ids if count.get(i, 0) >= limit}
+class RepeatedJob(Exception):
+    """같은 입력으로 같은 작업을 짧은 간격에 다시 부름. 메시지는 JSON(이전 작업 번호·상태) — MCP 가 도구 오류로 돌려준다."""
+
+
+REPEAT_MIN = float(os.environ.get("WEBTOON_REPEAT_MIN", "30"))
+
+
+def _fingerprint(kind: str, ep: Path, steps: list) -> str:
+    """작업의 지문 = 종류 + 명령 + 그 작업이 읽는 입력 파일(콘티·컷 설명) 내용. 입력이 바뀌면(컷 설명 수정·시드 변경) 다른 작업이다."""
+    import hashlib
+    h = hashlib.sha1(json.dumps([kind, [s.get("cmd") for s in steps]], ensure_ascii=False, default=str).encode())
+    for name in ("storyboard.json", "panels.json", "panels_spec.json"):
+        if (ep / name).exists():
+            h.update((ep / name).read_bytes())
+    return h.hexdigest()[:16]
 
 
 def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
+    """작업을 띄운다(모든 작업 도구가 여기를 거친다). 같은 지문의 작업을 REPEAT_MIN 분 안에 다시 부르면 띄우지 않고 RepeatedJob:
+    에이전트가 '사람 눈으로 확인'을 실패로 읽고 같은 컷만 열 번 다시 그렸다(2026-10-19 agent app, D+18 2화 p022). 도구마다 막지 않고 여기 한 곳에서."""
     JOBS.mkdir(parents=True, exist_ok=True)
+    fp = _fingerprint(kind, ep, steps)
+    since = time.time() - REPEAT_MIN * 60
+    for f in sorted(JOBS.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        if f.name.endswith(".status.json") or f.stat().st_mtime < since:
+            continue
+        old = _json(f, {})
+        if old.get("fingerprint") == fp:
+            raise RepeatedJob(json.dumps({"error": "repeated_job", "previous_job": old.get("id"),
+                                          "previous": json.loads(job_status(old.get("id"), tail_lines=5))}, ensure_ascii=False))
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
-    spec = {"id": job_id, "kind": kind, "episode_dir": str(ep), "note": note, "steps": steps}
+    spec = {"id": job_id, "kind": kind, "episode_dir": str(ep), "note": note, "steps": steps, "fingerprint": fp}
     f = JOBS / f"{job_id}.json"
     f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -824,15 +835,13 @@ def vast_status() -> str:
 
 
 @mcp.tool()
-def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
-              check: bool = True, again: bool = False) -> str:
+def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True, check: bool = True) -> str:
     """컷을 vast GPU 의 Qwen Image 2.1 로 그린다(크레딧 0). 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
-    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt.
-    같은 컷을 최근 3시간에 2번 넘게 그렸으면 그리지 않는다: 사용자에게 보여 주고, 사용자가 다시 그리라고 했을 때만 again=True."""
+    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
     ep = _episode(series, episode)
     sd = _series(series)
     pj = [p["id"] for p in _panels_json(ep)]
@@ -850,13 +859,6 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
         return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
     if _running_job(ep):
         return "이 회차에 도는 작업이 있다. job_status 로 끝난 뒤 부른다"
-    again_ids = _recent_draws(ep, want)
-    if again_ids and not again:
-        # 하네스가 '사람 눈으로 확인'을 남긴 컷을 에이전트가 실패로 읽고 같은 컷만 열 번 다시 그렸다(2026-10-19 agent app, D+18 2화 p022).
-        # 규칙은 프롬프트가 아니라 도구가 막는다
-        return ("다시 그리지 않음: " + ", ".join(f"{i}({n}번)" for i, n in again_ids.items()) + " 는 최근 3시간에 이미 여러 번 그렸다. "
-                "'사람 눈으로 확인' 은 실패가 아니라 사용자 확인 대기다. 다음: contact_sheet(series, episode, folder='vast') 로 사용자에게 "
-                "그림을 보여 주고 무엇이 문제인지 묻는다. 사용자가 다시 그리라고 하면(컷 설명을 고친 뒤) again=True 로 부른다. 답을 여기서 끝낸다.")
     cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
     cmd += ["--turbo"] if turbo else []
     cmd += ["--expr"] if expr else []
@@ -928,7 +930,7 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
     콘티(make_storyboard.py·build_panels.py)는 먼저 써 둔다(new_episode 로 틀을 열고 이야기대로 고침).
     이 화에 처음 나오는 장소·인물이 있으면 vast 로 시안을 만들어 assets/_candidates/ 에 두고 멈춘다(job 이 '실패'로 끝나고 로그에 '확인 필요').
     그때 사용자에게 시안 경로를 보여 주고, 고르면 accept_new=True 로 다시 부른다. 본편 그림(panels_hf)이 이미 있는 컷은 건드리지 않는다.
-    until: assets · draw · compose · export. 끝나면 job_status 로그의 '사람 눈으로 확인할 컷'을 사용자에게 알린다."""
+    until: assets · draw · compose · export. 끝나면 job_status 의 review(사람 확인이 남은 컷)를 사용자에게 알린다."""
     ep = _episode(series, episode)
     if until not in ("assets", "draw", "compose", "export"):
         return "until 은 assets · draw · compose · export"
@@ -1025,44 +1027,49 @@ def export(series: str, episode: str) -> str:
     return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "")
 
 
+def _job_review(spec: dict, started: str) -> list:
+    """이 작업이 그린 컷 중 사람 확인이 남은 컷. 검수(vast/refine.py record_review)가 <회차>/review/staging.json 에 남긴 것을 읽는다."""
+    cur = _json(Path(spec.get("episode_dir", "")) / "review" / "staging.json", {}) or {}
+    ids = set()
+    for st in spec.get("steps", []):
+        cmd = [str(x) for x in st.get("cmd", [])]
+        if "--only" in cmd:
+            ids |= set(cmd[cmd.index("--only") + 1].split(","))
+    return [{"panel": k, **v} for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
+
+
 @mcp.tool()
 def job_status(job_id: str, tail_lines: int = 40) -> str:
-    """작업(job) 상태와 로그 끝부분. state 가 running 이면 잠시 뒤 다시 본다(작화는 한 컷에 약 1분)."""
+    """작업(job)의 상태(JSON). state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나
+    candidates 의 시안을 사용자에게 보여 준다). review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), links = 내보낸 파일 링크."""
     if not re.fullmatch(r"[\w-]+", job_id):
-        return "job_id 꼴이 아니다"
-    st = _json(JOBS / f"{job_id}.status.json", None)
+        return json.dumps({"error": "bad_job_id"})
+    st = _json(JOBS / f"{job_id}.status.json", None) or {}
     spec = _json(JOBS / f"{job_id}.json", None)
     if spec is None:
-        return f"작업이 없다: {job_id}"
+        return json.dumps({"error": "no_such_job", "job": job_id})
     log = JOBS / f"{job_id}.log"
     lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
-    tail = "\n".join(lines[-tail_lines:]) if lines else "(로그 없음)"
-    done = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
-    head = f"{job_id} {spec.get('kind')} | {(st or {}).get('state', 'starting')}"
-    if st and st.get("started"):
-        try:
-            fmt = "%Y-%m-%d %H:%M:%S"
-            end = time.mktime(time.strptime(st["finished"], fmt)) if st.get("finished") else time.time()
-            el = end - time.mktime(time.strptime(st["started"], fmt))
-            head += f" | {'걸린 시간' if st.get('finished') else '경과'} {int(el // 60)}분 {int(el % 60)}초"
-        except ValueError:
-            pass
-    if done:
-        head += f" | 끝난 컷 {done}"
-    look = [ln.strip() for ln in lines if "사람 눈으로 확인" in ln]
-    if look:
-        head += "\n사람 눈으로 확인할 컷: " + " / ".join(look)
-        if (st or {}).get("state") != "running":
-            head += ("\n다음: 이건 실패가 아니라 사용자 확인 대기다. 같은 컷을 다시 그리지 말고 contact_sheet(series, episode, folder='vast')로 "
-                     "사용자에게 그림을 보여 주고 무엇을 바꿀지 물은 뒤 답을 끝낸다.")
-    links = [_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m]
-    if any(links):  # 내보낸 파일(다른 PC 에서 볼 링크)
-        head += "\n볼 링크: " + " / ".join(x for x in links if x)
-    if (st or {}).get("state") == "needs_review":  # 실패가 아니다: 새 인물 시트·장소 시안을 사용자가 보고 골라야 이어진다
-        cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
-        head += ("\n확인 필요(실패 아님): 시안을 사용자에게 보여 주고, 좋으면 make_episode(작품, 회차, accept_new=True), "
-                 "다시 뽑을 건 redo_candidate. 시안: " + " / ".join(cands))
-    return f"{head}\n{json.dumps(st or {'state': 'starting'}, ensure_ascii=False)}\n--- 로그 끝 ---\n{tail}"
+    state = st.get("state", "starting")
+    out = {"job": job_id, "kind": spec.get("kind"), "state": state}
+    if st.get("started"):
+        fmt = "%Y-%m-%d %H:%M:%S"
+        end = time.mktime(time.strptime(st["finished"], fmt)) if st.get("finished") else time.time()
+        out["elapsed_s"] = int(end - time.mktime(time.strptime(st["started"], fmt)))
+    out["panels_done"] = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
+    review = _job_review(spec, st.get("started", ""))
+    if review:
+        out["review"] = review
+        if state == "done":
+            out["state"] = "needs_review"
+    cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
+    if cands:
+        out["candidates"] = cands
+    links = [x for x in (_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m) if x]
+    if links:
+        out["links"] = links
+    out["log_tail"] = "\n".join(lines[-tail_lines:])
+    return json.dumps(out, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1072,7 +1079,7 @@ def job_wait(job_id: str, seconds: int = 25, tail_lines: int = 30) -> str:
     (사용자가 '다 됐어?' 하면 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다. sleep 같은 다른 도구로 기다리지 않는다.
     (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
     if not re.fullmatch(r"[\w-]+", job_id):
-        return "job_id 꼴이 아니다"
+        return json.dumps({"error": "bad_job_id"})
     end = time.time() + max(1, min(int(seconds), 25))
     while time.time() < end:
         if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "running"):
@@ -1098,4 +1105,7 @@ if __name__ == "__main__":
             origins.append(PUBLIC)
         mcp.settings.host, mcp.settings.port = "127.0.0.1", a.port
         mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+        # 세션 없는 HTTP: 서버가 클라이언트 세션을 들고 있지 않아 재시작·오래 쉼·프록시를 거쳐도 끊기지 않는다(작업 상태는 디스크에 있다).
+        # 세션을 들고 있던 때는 서버를 다시 띄우자 다른 PC 의 agent app 연결이 끊겼다(2026-10-19)
+        mcp.settings.stateless_http = True
         mcp.run(transport="streamable-http")

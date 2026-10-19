@@ -34,131 +34,65 @@ def norm_shot(s: str) -> str:
     return s
 
 
-def recurring_extras(panels, need=3):
-    """여러 컷에 같은 '이름 없는 인물'(extras)이 되풀이되는 컷 묶음. 그림 시트가 없으니 컷마다 머리·옷이 달라진다
-    (2026-10-18 추몽 1화: 동네 형이 p030·p032 는 곧은 머리, p033·p035 는 곱슬 파마 → 편집으로 맞췄다). 낱말이 대부분 겹치면 같은 인물로 본다.
-    한 사람을 말하는 첫 구절만 본다: 얼굴 없는 손·다리 인서트(이름 있는 인물의 몸)와 군중(교실·줄 선 사람들)은 생김새를 맞출 일이 없다."""
-    skip = {"left", "right", "center", "side", "background", "foreground", "frame", "edge", "only", "their", "with", "about", "year",
-            "visible", "clearly", "standing", "behind", "front", "toward", "face"}
-    crowd = re.compile(r"\b(people|persons|students|classmates|crowd|boys|girls|men|women|kids|children|passersby|customers|classroom)\b")
-    words = {}
-    for p in panels:
-        t = (p.get("extras") or "").lower()
-        first = re.split(r"[,;]", t)[0]
-        if not t or "no face" in t or crowd.search(first):
-            continue
-        words[p["id"]] = {w for w in (x.rstrip("s") for x in re.findall(r"[a-z]+", first)) if len(w) > 3} - skip
-    ids, seen, out = [k for k, v in words.items() if len(v) >= 4], set(), []
-    for a in ids:  # 한 컷을 기준으로 닮은 컷을 모은다(사슬로 잇지 않는다: 이어 붙이면 무관한 컷까지 끌려온다)
-        if a in seen:
-            continue
-        g = [a] + [b for b in ids if b != a and b not in seen and len(words[a] & words[b]) / min(len(words[a]), len(words[b])) >= 0.75]
-        if len(g) >= need:
-            out.append(g)
-            seen.update(g)
-    return out
-
-
-SEATED = re.compile(r"\b(seated|sits?|sitting|on (a|the|her|his) (stool|chair|seat|sofa|bench))\b", re.I)
-# "from behind the seated listeners"(듣는 사람 뒤에서 발표자를 봄)는 그 인물의 뒷모습이 아니다(2026-10-19 외출 p077 오경고)
-BACK = re.compile(r"\b(from behind(?! (?:the|a|an|his|her|their)\b)|back view|backs? to (us|the camera)|seen from the back)\b", re.I)
+SIDE_ASK = """Below are webtoon panels. For each panel, on which side of the picture (as the viewer sees it) is each listed person, according to the
+panel text and the scene layout? Answer "unknown" for a person when the text and layout do not say.
+{items}
+Answer JSON only: {{"<panel id>": {{"<person name>": "left" | "right" | "unknown"}}}}"""
 
 
 def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
-    """콘티 대사에 who(말하는 인물 id)가 있으면, 컷 설명·장면 배치에 적힌 그 인물의 화면 좌우로 말풍선 자리(top-left·top-right)를 정해
-    storyboard.json 에 쓴다. 사람이 TL·TR 을 고르다 반대로 붙였다(2026-10-18 외출 p037: 운전하는 여자 친구가 화면 오른쪽인데 대사가 왼쪽).
-    바꾼 대사 목록을 돌려준다."""
+    """두 사람 이상 나오는 컷의 대사에 who(말하는 인물 id)가 있으면, 그 인물이 화면 어느 쪽인지를 판정 모델이 컷 글·장면 배치를 읽고 답하게 해
+    말풍선 자리(top-left·top-right)를 정하고 storyboard.json 에 쓴다. 사람이 TL·TR 을 고르다 반대로 붙였다(2026-10-18 외출 p037).
+    글 속 'LEFT/RIGHT' 를 정규식으로 찾던 방식은 표현이 조금만 달라도 못 찾았다(2026-10-19 사용자 "문구 정규식은 땜질"). 바꾼 대사 목록을 돌려준다."""
     sys.path.insert(0, str(ROOT_DIR / "tools"))
+    sys.path.insert(0, str(ROOT_DIR / "vast"))
     from hf_panel import names
     sb = ep / "storyboard.json"
     board = json.loads(sb.read_text(encoding="utf-8"))
     NAMES = names(ep.parents[1])
+    short = {c: re.sub(r"\s*\(.*?\)", "", n).split()[-1] for c, n in NAMES.items()}
     spec = {p["id"]: p for p in panels}
+    todo = [b for b in board["panels"] if b["id"] in spec and len(spec[b["id"]].get("chars") or []) >= 2
+            and any(d.get("who") in NAMES for d in b.get("dialogue", []) if d.get("type") in ("speech", "thought"))]
+    if not todo:
+        return []
+    from judge_ep import JudgeDown, chat
+    sides = {}
+    for k in range(0, len(todo), 12):
+        part = todo[k:k + 12]
+        items = "\n".join(f"[{b['id']}] people: {', '.join(short[c] for c in spec[b['id']]['chars'] if c in short)}; panel text: "
+                          f"{spec[b['id']].get('action', '')} {spec[b['id']].get('camera', '')}; scene layout: {scenes.get(spec[b['id']].get('location') or '', '')}"
+                          for b in part)
+        try:
+            txt = chat([{"type": "text", "text": SIDE_ASK.format(items=items)}], max_tokens=900)
+            m = re.search(r"\{.*\}", txt, re.S)
+            sides.update(json.loads(m.group()) if m else {})
+        except (JudgeDown, ValueError) as e:
+            print(f"말풍선 자리: 판정 모델에 묻지 못해 그대로 둔다({type(e).__name__})")
     changed = []
-    for b in board["panels"]:
-        p = spec.get(b["id"])
-        if not p or not b.get("dialogue"):
-            continue
-        text = " ".join(str(p.get(k) or "") for k in ("action", "camera")) + " " + scenes.get(p.get("location") or "", "")
+    for b in todo:
+        got = {str(n).lower(): str(v).lower() for n, v in (sides.get(b["id"]) or {}).items()}
         for d in b["dialogue"]:
-            who = d.get("who")
-            if not who or who not in NAMES or d.get("type") not in ("speech", "thought"):
+            side = got.get(short.get(d.get("who"), "").lower())
+            if d.get("type") not in ("speech", "thought") or side not in ("left", "right"):
                 continue
-            short = re.sub(r"\s*\(.*?\)", "", NAMES[who]).split()[-1]
-            m = re.search(rf"{re.escape(short)}[^.;]{{0,45}}?\b(LEFT|RIGHT)\b", text)
-            if len(p.get("chars") or []) == 1 and not m:  # 혼자 나오는 컷: 얼굴이 향한 쪽의 반대편 위(말하는 사람 머리 위)
-                continue
-            if m:
-                pos = "top-left" if m.group(1) == "LEFT" else "top-right"
-                if d.get("pos") != pos:
-                    changed.append(f"{b['id']} {who}: {d.get('pos')} → {pos}")
-                    d["pos"] = pos
+            pos = "top-left" if side == "left" else "top-right"
+            if d.get("pos") != pos:
+                changed.append(f"{b['id']} {d['who']}: {d.get('pos')} → {pos}")
+                d["pos"] = pos
     if changed:
         sb.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")
     return changed
 
 
-SAD = re.compile(r"\b(lonely|wistful|sad|hurt|bitter|resigned|disappoint\w*|melanchol\w*|guilty)\b", re.I)
-
-
-FOCAL = re.compile(r"\b(projector screen|stage|podium|lectern|blackboard|pulpit)\b|meeting|classroom|lecture|seminar|auditorium", re.I)
-PRESENTS = re.compile(r"\bpresent(s|ing)\b|\blectur(es|ing)\b|\bstand\w*\b[^.]{0,70}\b(screen|board|podium|lectern|slide)\b"
-                      r"|\bat the (projector )?(screen|board|podium|lectern)\b|\bpoint\w* at the (slide|screen|board)", re.I)
-LISTENER_BACKS = re.compile(r"\bbacks? of\b|\bfrom behind the (seated|listeners|audience|team|students)|over the shoulders? of", re.I)
-
-
-def staging_lint(panels, board) -> list:
-    """컷 설명의 연출 문법 경고(skills/panel-spec '연출 문법'). 2026-10-18 외출 1화에서 컷 설명 탓에 생긴 실수를 글 단계에서 막는다."""
-    out, prev = [], None
-    # 장면 배치(SPACE)는 카메라 칸이 없는 컷의 action 뒤에 붙어 온다 → 장소마다 하나 모아 '마주 보는 공간'(스크린·교단)인지 본다
-    space = {}
+def structure_lint(panels, board) -> list:
+    """컷 설명의 구조 검사(글 속 문구가 아니라 칸이 있는지만 본다). 연출 내용(자세·탈것·소품·부정어·연기·공간)은 컷 설명 관문의
+    기준표(skills/panel-spec/judge.json)가 컷 글을 읽고 채점한다."""
+    out = []
     for p in panels:
-        m = re.search(r"SPACE \(identical in every panel of this scene\):(.*)$", str(p.get("action") or ""), re.S)
-        if m:
-            space.setdefault(p.get("location"), m.group(1))
-
-    def own_action(p):
-        return re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)
-    # 발표자가 있는 장소만(회의실이라도 둘이 앉아 얘기하는 장면은 마주 보는 공간이 아니다)
-    staged = {p.get("location") for p in panels if p["chars"] and PRESENTS.search(own_action(p))}
-    for p in panels:
-        t = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
-        loc = str(p.get("location") or "")
-        shot = str(p.get("shot") or "")
-        if p["chars"] and loc in staged and FOCAL.search(loc + " " + space.get(loc, "")) and not re.search(r"close|insert|wide", shot):
-            # 발표·회의처럼 마주 보는 공간: 장소 그림이 앞(스크린 쪽) 한 장이라, 발표자 컷은 의자가 텅 비고 듣는 사람 컷 뒤엔 스크린이 그려졌다
-            # (2026-10-19 외출 p077·p052·p053 사용자 "공간의 통일성", "회의를 보는 자의 앞모습으로")
-            # 발표자인지는 그 컷의 action 만 본다(카메라 칸 "from the presenter's position at the screen" 은 듣는 쪽 컷의 카메라 자리)
-            # 다 같이 있는 장면: 중간 컷인데 다른 사람이 하나도 안 적히면 의자가 비었다(2026-10-19 외출 회의 "사람들이 있다 없다")
-            if len(p["chars"]) < 2 and not p.get("extras"):
-                out.append(f"{p['id']} 다 같이 있는 장면의 중간 컷인데 다른 사람이 안 적혀 있다: 그 각도에서 보일 사람을 chars·extras 로(자리표는 scenes), 아니면 클로즈업으로")
-            if PRESENTS.search(own_action(p)):
-                if not LISTENER_BACKS.search(t + " " + str(p.get("extras") or "")):
-                    out.append(f"{p['id']} 발표·말하는 사람 컷인데 듣는 사람이 없다: extras 에 듣는 사람 뒷모습(머리·어깨·의자 등받이)을 생김새까지 쓴다")
-            elif not p.get("view"):
-                out.append(f"{p['id']} 듣는 쪽 컷인데 \"view\": \"reverse\" 가 없다(등 뒤에 스크린·발표자 쪽 벽이 그려진다). 없으면 new_assets.py 로 <장소>_reverse 를 만든다")
-        if p["chars"] and re.search(r"bus(?!_stop)|train|subway", loc) and re.search(r"from the front of the (bus|train)|looking toward the back|toward the camera|facing the camera|seats? facing the", t, re.I):
-            # 그림 모델은 버스 실내를 늘 뒤에서 앞을 보는 구도로 그린다. 앞에서 뒤를 보라고 쓰면 승객만 거꾸로 앉힌다(외출 p008, 세 번)
-            out.append(f"{p['id']} 버스·지하철을 앞에서 뒤로 보는 구도는 모델이 못 그린다(승객이 거꾸로 앉는다): 승객 뒤에서 앞을 보거나, 통로 건너편에서 옆모습으로")
-        if p["chars"] and re.search(r"bus(?!_stop)|car_|_car|taxi|train|subway", loc) and not re.search(r"windshield|front of the bus|toward the back|looking back|back seat|direction of travel|driver'?s seat", t, re.I):
-            out.append(f"{p['id']} 탈것인데 좌석·운전석 방향이 없다(버스는 앞에서 뒤를 보면 좌석이 카메라를 향함, 한국 차는 운전석 왼쪽)")
-        if re.search(r"\blean(s|ing)?\b", t, re.I) and not SEATED.search(t) and prev and prev["location"] == p["location"] and SEATED.search(prev["t"]):
-            out.append(f"{p['id']} 앞 컷에서 앉아 있었는데 이 컷은 'lean'만 있다(seated 를 다시 쓴다, 안 쓰면 일어선 사람을 그렸다)")
-        if re.search(r"\bmugs?\b|\bcups?\b|\bglass(es)? of\b", t, re.I) and not re.search(r"\b(beer|coffee|soju|wine|tea|water|cider|juice|milk|ssanghwa)\b", t, re.I):
-            out.append(f"{p['id']} 잔의 종류가 없다(beer mug·coffee cup 처럼, 개수까지)")
-        neg = re.findall(r"\b(?:no|without)\s+(hands?|people|person|faces?|phones?|text|tears?|smile|one)\b", t, re.I)
-        if neg:  # 부정어로 쓰면 그 낱말을 그린다(no tears → 눈물, no hands → 손: 외출 p021 두 번)
-            out.append(f"{p['id']} 부정어 'no/without {', '.join(sorted(set(neg)))}' 가 있다(그 낱말을 그린다): 보이는 것만 쓴다")
-        act = str(p.get("acting") or "")
-        if SAD.search(act) and re.search(r"\bsmil\w*", act, re.I) and not re.search(r"without a smile|no smile|not smiling", act, re.I):
-            out.append(f"{p['id']} 서운함·외로움 연기에 smile 이 들어 있다(밝게 웃는 얼굴로 그려진다, 보이는 상태로만: lips closed, eyes lowered)")
         lines = [d for d in (board.get(p["id"], {}).get("dialogue") or []) if d.get("type") in ("speech", "thought")]
         if len(p["chars"]) >= 2 and lines and not all(d.get("who") for d in lines):
-            out.append(f"{p['id']} 두 사람 컷의 대사에 who(말하는 인물)가 없다(말풍선 자리를 코드가 못 정한다)")
-        has_line = bool(lines)
-        if p["chars"] and has_line and BACK.search(t):
-            out.append(f"{p['id']} 대사가 있는 컷인데 뒷모습이다(말하는 얼굴이 보이게)")
-        prev = {"location": p["location"], "t": t}
+            out.append(f"{p['id']} 두 사람 컷의 대사에 who(말하는 인물)가 없다(말풍선 자리를 정할 수 없다)")
     return out
 
 
@@ -206,17 +140,15 @@ def main():
     missing = [p["id"] for p in board["panels"] if p["id"] not in P and p["id"] not in reuse and not p.get("composite")]
     no_act = [p["id"] for p in panels if p["chars"] and "acting" not in p]
     crowded = [p["id"] for p in panels if "close-up" in p["shot"] and len(p["chars"]) > 1 and not p.get("camera")]  # 클로즈업은 한 사람(panel-spec 규칙)
-    again = recurring_extras(panels)
-    lint = staging_lint(panels, {p["id"]: p for p in board["panels"]})
+    lint = structure_lint(panels, {p["id"]: p for p in board["panels"]})
     (ep / "panels.json").write_text(json.dumps(panels, ensure_ascii=False, indent=1), encoding="utf-8")
     for line in resolve_balloon_sides(ep, panels, scenes):
         print("말풍선 자리:", line)
     for line in lint:
-        print("연출 문법:", line)
+        print("구조:", line)
     print(f"새로 그릴 컷 {len(panels)}, 가져다 쓴 컷 {len(reuse)}(이번에 복사 {copied}), 빠진 컷 {missing}, 연기 없는 인물 컷 {no_act}"
           + (f", 콘티에 없는 번호 {unknown}" if unknown else "") + (f", 없는 재사용 그림 {bad_reuse}" if bad_reuse else "")
-          + (f", 인물 둘 이상인 클로즈업 {crowded}(한 사람만 남기거나 medium·어깨 너머 숏 camera 로)" if crowded else "")
-          + (f", 여러 컷에 되풀이되는 이름 없는 인물 {again}(작품 인물로 올려 그림 시트를 만들면 컷마다 생김새가 같다: add_to_series)" if again else ""))
+          + (f", 인물 둘 이상인 클로즈업 {crowded}(한 사람만 남기거나 medium·어깨 너머 숏 camera 로)" if crowded else ""))
 
 
 if __name__ == "__main__":

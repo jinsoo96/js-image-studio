@@ -1,0 +1,45 @@
+{
+ "_why": "그린 컷 검수 항목(vast/refine.py run_checks 가 돌린다). 항목마다 그 컷의 글(panel_text)을 통째로 주고 '글대로인가'만 묻는다. 검사가 따로 고정 규칙('독자를 보면 안 됨')이나 글 속 문구를 찾아 켜고 끄는 조건을 두지 않는다: 시점 컷·뒷모습·옷·표정·소품 같은 지시는 표현이 끝없이 다양해서 문구로 가르면 조금만 달라도 틀렸다(2026-10-19 D+18 p022 시점 컷을 열 번 '독자를 쳐다봄'으로 걸었다, 사용자 \"특정 문구를 정규식으로 찾는 건 땜질\"). 한 질문에 여러 항목을 몰아 물으면 놓쳐서(2026-10-18 외출) 항목을 나눠 묻는다. when 은 글이 아니라 인물 수로만: always · people(인물이나 이름 없는 사람이 있음) · two_or_more(인물 둘 이상). category 는 고치기 사다리가 읽는 이름(시선·좌우·구도·논리·소품). common 은 모든 항목 끝에 붙는 공통 규칙(좌우는 보는 사람 기준, 독자가 알아챌 큰 차이만), verify 는 걸린 점을 두 번째 판정이 다시 거르는 질문(관문의 두 번째 judge 와 같은 방식).",
+ "checks": [
+  {
+   "name": "gaze",
+   "category": "시선",
+   "when": "people",
+   "ask": "Panel text: {text}\nLook at each person in this webtoon panel: where do their eyes and face point (at the viewer, toward the left or right side of the picture, down, at an object, or at another person)? Compare that with the panel text. Each person should look where the text says; where the text says nothing about it, they look at the person or thing they are dealing with, not at the viewer. List only clear mismatches, naming each person by clothes or position.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+  },
+  {
+   "name": "facing",
+   "category": "시선",
+   "when": "two_or_more",
+   "ask": "Panel text: {text}\nFor each person, look at the direction of their FACE and SHOULDERS, not only the eyes. Compare with the panel text: people who deal with each other turn toward each other (profile or three-quarter view) unless the text asks for something else. A person whose shoulders and face are square to the viewer when the text does not ask for it is a mismatch, even if the eyes glance sideways. List only clear mismatches, naming each person by clothes or position.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+  },
+  {
+   "name": "sides",
+   "category": "좌우",
+   "when": "two_or_more",
+   "expect": "Panel text: {text}\nScene layout: {layout}\nFrom the text and the layout only, on which side of the picture (as the viewer sees it) should each of these people be: {names}? Answer \"unknown\" when the text and layout do not say.\nAnswer JSON only: {{\"<name>\": \"left\" | \"right\" | \"unknown\"}}",
+   "observe": "People in this webtoon panel: {looks}\nFor each of them ({names}), is the person on the left or the right side of the picture, as you look at it? Answer \"unclear\" if you cannot tell who is who.\nAnswer JSON only: {{\"<name>\": \"left\" | \"right\" | \"unclear\"}}",
+   "problem": "{name} is on the {got} side of the picture but should be on the {want}"
+  },
+  {
+   "name": "view",
+   "category": "구도",
+   "when": "always",
+   "ask": "Panel text: {text}\nCompare the camera with the panel text and report only big mismatches: a close-up drawn as a wide shot or the reverse, a person seen from the back when the text needs their face or the reverse, seats or vehicles facing the opposite way from the text.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+  },
+  {
+   "name": "logic",
+   "category": "논리",
+   "when": "people",
+   "ask": "You are a strict script supervisor. Panel text: {text}\nCheck only what a careful reader would notice: something that works the wrong way in the real world, a person standing while the text has them seated or the reverse, the number or kind of key objects not matching the text, a speaking person whose face cannot be seen when the text does not ask for that.{era}\nDo not report where people look or which side they are on (other checks cover that). List only clear mistakes.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+  },
+  {
+   "name": "props",
+   "category": "소품",
+   "when": "people",
+   "ask": "Panel text: {text}\nLook at what each person holds or uses with their hands. Is anyone holding or using an object the panel text does not mention, or missing an object the text says they hold? List only clear mismatches.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+  }
+ ],
+ "common": "Left and right always mean the viewer's left and right side of the picture ('screen left' is the left side of the image as you look at it). Report only clear mismatches a careful reader would notice at a glance; small differences in camera angle or position, framing, hair shade, or the exact moment of an action in progress are fine.",
+ "verify": "Panel text: {text}\nAnother reviewer looked at this webtoon panel and listed these problems:\n{problems}\nLook at the picture yourself. Keep only the problems that are clearly true in the picture AND that a careful reader would notice. Left and right always mean the viewer's left and right side of the picture. Drop guesses, nitpicks and anything the panel text does not ask for.\nAnswer JSON only: {{\"keep\": [numbers of the problems to keep, starting at 0]}}"
+}

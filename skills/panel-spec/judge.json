@@ -1,5 +1,5 @@
 {
- "_why": "컷 설명 관문(tools/gates.py)의 평가 기준. agent platform 하네스 s08 judge_criteria 와 같은 꼴. 코드 검사(panels_from_spec.staging_lint)와 함께 쓴다. 근거: skills/panel-spec '연출 문법'(영화 연속성 원칙). 앉음 이어짐과 말풍선 자리는 코드가 확인한다(panels_from_spec: staging_lint·resolve_balloon_sides). judge 는 'sits in her chair' 를 seated 가 없다고 걸고 전화 너머 목소리를 화면 속 인물 대사로 오판했다(2026-10-18).",
+ "_why": "컷 설명 관문(tools/gates.py)의 평가 기준. agent platform 하네스 s08 judge_criteria 와 같은 꼴. 연출 규칙은 여기(데이터)에 두고 judge 가 컷 글을 읽고 채점한다: 글 속 문구를 정규식으로 찾던 경고(자세·탈것·잔·부정어·서운한데 웃음·발표 장면)는 표현이 조금만 달라도 놓치거나 잘못 걸어 여기로 옮겼다(2026-10-19 사용자 \"특정 문구를 정규식으로 찾는 건 땜질\"). 코드는 칸이 있는지 같은 구조만 본다(panels_from_spec.structure_lint). judge 의 오탐은 두 번째 judge 가 거른다(gates._verify).",
  "threshold": 0.8,
  "criteria": [
   {
@@ -12,7 +12,7 @@
    "name": "props",
    "weight": 1.0,
    "hard": true,
-   "description": "장면의 소품(잔·휴대폰 등)은 컷마다 같은 말로 종류와 개수까지 쓴다(exactly two 500cc beer mugs)."
+   "description": "한 장면에서 같은 물건(같은 사람의 잔·휴대폰·가방)은 컷마다 같은 말로 종류와 개수까지 쓴다(exactly two 500cc beer mugs). 잔은 무엇을 담은 잔인지(맥주·커피·소주). 다른 사람의 물건이 서로 다르게 적힌 것은 위반이 아니다."
   },
   {
    "name": "speaking_face",
@@ -43,6 +43,30 @@
    "weight": 0.5,
    "hard": false,
    "description": "같은 장면의 연속 컷은 샷 크기·각도가 다르다. 줌인·줌아웃·높이를 섞는다."
+  },
+  {
+   "name": "posture",
+   "weight": 1.0,
+   "hard": false,
+   "description": "자세가 이어진다: 앞 컷에서 앉아 있던 사람은 이 컷에서도 앉아 있다고 적혀 있다(몸을 기울이는 것만 적으면 일어선 사람을 그렸다). 앉아 있으면 무엇에 앉았는지까지."
+  },
+  {
+   "name": "vehicle",
+   "weight": 1.0,
+   "hard": true,
+   "description": "탈것(버스·지하철·택시·차) 안의 사람은 좌석·운전석 방향이 글에서 드러난다. 버스·지하철을 앞에서 뒤로 보는 구도는 승객이 거꾸로 앉게 그려지니 통로 건너편 옆모습이나 승객 뒤에서. 한국 차는 운전석이 왼쪽(앞 유리 밖에서 보면 운전자가 화면 오른쪽)."
+  },
+  {
+   "name": "visible_states",
+   "weight": 0.5,
+   "hard": false,
+   "description": "보이는 상태만 쓴다. '무엇이 없다'는 부정어(no hands, without tears 류)는 그 낱말을 그리게 해서 쓰지 않는다."
+  },
+  {
+   "name": "recurring_extras",
+   "weight": 0.5,
+   "hard": false,
+   "description": "같은 이름 없는 사람이 여러 컷에 되풀이되면 작품 인물로 올려(add_to_series) 시트로 생김새를 고정한다. 아니면 컷마다 얼굴·머리가 달라진다. 군중·손 인서트는 상관없다."
   }
  ]
 }

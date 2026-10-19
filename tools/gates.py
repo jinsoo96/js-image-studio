@@ -46,6 +46,10 @@ def _hash(*files) -> str:
     return h.hexdigest()[:16]
 
 
+def _json_file(f: Path) -> dict:
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+
 def _criteria(skill: str) -> dict:
     return json.loads((ROOT / "skills" / skill / "judge.json").read_text(encoding="utf-8"))
 
@@ -212,11 +216,12 @@ def _talk(panel: dict) -> str:
 
 def judge_panels(ep: Path) -> dict:
     sys.path.insert(0, str(ROOT / "tools"))
-    from panels_from_spec import staging_lint
+    from panels_from_spec import structure_lint
     crit = _criteria("panel-spec")
     panels = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
     board = {p["id"]: p for p in json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))["panels"]}
-    lint = staging_lint(panels, board)
+    lint = structure_lint(panels, board)
+    scenes = (_json_file(ep / "panels_spec.json").get("scenes") or {})
     results = []
     for k in range(0, len(panels), CHUNK):
         part = panels[k:k + CHUNK]
@@ -224,7 +229,12 @@ def judge_panels(ep: Path) -> dict:
             f"{p['id']} 대사:{_talk(board.get(p['id'], {}))}\n"
             f"  {json.dumps({x: p.get(x) for x in ('chars', 'location', 'view', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
             for p in part)
-        setting, mat = _setting(ep.parents[1]), re.sub(r" SPACE \(identical.*?\"", '"', mat)
+        mat = re.sub(r" SPACE \(identical.*?\"", '"', mat)
+        # 장면 배치(자리표)는 장소마다 한 번: 공간 기준(누가 어디 앉아 있고 어느 각도에서 누가 보여야 하나)을 채점하려면 필요하다
+        locs = {p.get("location") for p in part}
+        if any(scenes.get(l) for l in locs):
+            mat = "장면 배치:\n" + "\n".join(f"  {l}: {scenes[l]}" for l in sorted(x for x in locs if x and scenes.get(x))) + "\n\n" + mat
+        setting = _setting(ep.parents[1])
         r = _llm(ASK.format(what="컷 설명", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=mat))
         r["problems"] = _verify(crit, setting, mat, [p for p in r.get("problems", []) if isinstance(p, dict)])
         results.append(r)
