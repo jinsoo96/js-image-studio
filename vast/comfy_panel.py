@@ -179,6 +179,11 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     # 사람이 사라진 꼴이 됐다(2026-10-18 외출 p021·p025 사용자 지적)
     insert = any(w in (p.get("shot") or "") for w in ("insert", "top view", "detail"))
     loc = series / "assets" / "locations" / f"{p['location']}.png" if p.get("location") and not insert else None
+    # view: 같은 장소를 반대편에서 본 그림(<장소>_reverse.png). 장소 그림이 앞(스크린 쪽) 한 장뿐이라 듣는 사람 컷 뒤에도 스크린을 그렸다
+    # (2026-10-19 외출 p052·p078 사용자 "회의를 보는 자의 앞모습으로 보여야, 배경이 아니라")
+    if loc and p.get("view"):
+        alt = loc.with_name(f"{p['location']}_{p['view']}.png")
+        loc = alt if alt.exists() else loc
     if loc and not close:
         refs.append(loc)
         lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")

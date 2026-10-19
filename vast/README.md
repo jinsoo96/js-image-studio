@@ -110,7 +110,7 @@ DiT bf16 + 글 인코더 int8 이면 둘 다 32GB VRAM 에 같이 올라간다. 
 agent platform 캔버스에는 ComfyUI 노드가 있고, 관리자 이미지 생성 카탈로그에 [ComfyUI 주소 + 워크플로우 + 열어 둘 입력]을 등록하면 그 노드가 에이전트 도구가 된다. 이 PC·agent app 없이 agent platform 서버가 vast ComfyUI 를 바로 부른다.
 - `xgen_catalog.py assets`: 참고 그림 라이브러리를 ComfyUI input 에 올림(`studio_<작품>_<인물>.png` 22개, `studio_<작품>_loc_<장소>.png` 39개). 이름이 같으면 덮어씀
 - `xgen_catalog.py validate · test <key> '<json>' · apply · list`: 카탈로그 항목 3개(`studio_webtoon_panel_1` 인물 1명, `studio_webtoon_panel_2` 인물 2명, `studio_image_free` 자유 생성). 입력 = 프롬프트 · 장소 · 인물(허용값 목록) · 크기 · 시드
-- `xgen_studio_agent.py apply`: agent platform 워크플로우 「이미지 스튜디오 (Qwen)」(`wf_image_studio_qwen`) = Agent Geny + ComfyUI 노드 3개, 시스템 프롬프트에 웹툰 템플릿 스킬(이어 그리기 규칙)과 인물·장소 이름 목록
+- `xgen_studio_agent.py apply`: agent platform 워크플로우 「이미지 스튜디오 (Qwen)」(`wf_image_studio_qwen`) = Agent Geny + ComfyUI 노드 3개, 시스템 프롬프트에 웹툰 템플릿 스킬(이어 그리기 규칙)과 인물·장소 이름 목록. **2026-10-19 사용자 요청으로 agent-server 에서 지웠다**(「웹툰 이어 그리기」와 겹치고, 서버 ComfyUI 노드로 그려 검수·UC 모델을 안 거쳤다). 백업 `state/agent_backups/wf_image_studio_qwen_*.json`. `apply` 를 돌리면 다시 생기니 쓰지 않는다
 - 시험: agent app 에서 "우빈 밤거리 두 컷 이어서" → 두 컷 모두 같은 얼굴·같은 밤거리, 2분 49초, 결과는 agent platform 파일 저장소 '결과물'
 - 권한: 처음에 `role_allowlist []` + 이 계정 번호로 묶었더니 실행 사용자가 노드에 안 넘어오는 경로(agent app)에서 "권한 없음"으로 막혔다 → agent-server 사용자 전체(None), 기존 test_anima 항목과 같은 설정
 - 장소 이름을 에이전트가 짐작해 틀렸다("nightstreet") → 시스템 프롬프트에 정확한 이름 목록을 넣으니 맞게 골랐다

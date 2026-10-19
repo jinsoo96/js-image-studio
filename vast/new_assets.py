@@ -43,9 +43,23 @@ def style_ref(series: Path, name: str):
     return None
 
 
+REVERSE_HEAD = ("<image1> is a location. Draw the SAME room seen from the opposite end: the camera now stands at the far wall of <image1> "
+                "and looks back toward the wall that was behind the camera in <image1>. Keep the same furniture, materials, colors and light, "
+                "but mirror the sides (what was on the right in <image1> is now on the left). The far wall of <image1> and anything on it "
+                "is behind the camera now and does not appear.\n\n")
+
+
 def candidate_prompt(series: Path, kind: str, name: str):
     """시안 프롬프트와 참고 그림(로컬 경로) 목록. vast/make_workflow.py 의 저장 워크플로우(시안)도 이걸 쓴다."""
     prompt_f = paths(series, kind, name)[0]
+    base = name[: -len("_reverse")] if kind == "location" and name.endswith("_reverse") else None
+    if base and paths(series, kind, base)[2].exists():
+        # <장소>_reverse: 그 장소를 반대편에서 본 그림. 마주 보는 장면의 듣는 쪽 컷(컷 설명 "view": "reverse")이 쓴다(2026-10-19 외출 회의실).
+        # 장소 글은 loc_<장소>_reverse.txt 가 있으면 그것(앞 벽의 스크린처럼 반대편에선 안 보이는 것을 뺀 글), 없으면 원래 장소 글
+        src = prompt_f if prompt_f.exists() else paths(series, kind, base)[0]
+        prompt = REVERSE_HEAD + strip_people(src.read_text(encoding="utf-8").strip())
+        return prompt + ("\n\nThe foreground and middle ground are free of people. Only the objects named in the location text are there; "
+                         "add no extra furniture."), [paths(series, kind, base)[2]]
     if not prompt_f.exists():
         raise SystemExit(f"프롬프트가 없다: {prompt_f}({'make_location_prompts.py 의 LOC' if kind == 'location' else 'make_sheet_prompts.py'} 에 한 줄 넣고 돌린다)")
     prompt = prompt_f.read_text(encoding="utf-8").strip()

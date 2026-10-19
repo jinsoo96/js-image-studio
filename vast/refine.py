@@ -393,10 +393,15 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         from hf_panel import names
         nm = names(series)
         this = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)[:300]
+        # 듣는 사람 뒷모습(extras)도 그 사람들이다: 안 알려 주면 뒷모습만 보이는 이동원을 '사라짐'으로 걸었다(2026-10-19 외출 p077)
+        if p.get("extras"):
+            this += f" Also visible (possibly from behind, out of focus): {str(p['extras'])[:300]}"
         vanished = _vlm([img_path], PRESENCE_ASK.format(who=", ".join(nm.get(c, c) for c in absent),
                                                        where=where_now(series, ep_dir, pid, absent) or layout[:300], this=this)).get("vanished", [])
         if vanished:
-            probs.add("인원")
+            # '빈자리'(사람이 모자람)는 '인원'(사람이 남음)과 다르게 둔다: 같은 이름이라 사다리 끝의 사람 수 맞추기(fix_count)가
+            # 모자란 컷에서 사람을 더 지웠다(외출 p077: 듣는 사람 뒷모습 둘을 지우고 '1명 맞춤 → 통과')
+            probs.add("빈자리")
             r["고칠점"] = (str(r.get("고칠점") or "") + " 장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
                         + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부(어깨)를 화면 끝에").strip()
     swapped = side_check(series, img_path, p, layout)
@@ -509,6 +514,7 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
 
 
 COUNT_ASK = 'How many people are visible in this picture (count every visible person, including partly visible ones)? Answer JSON only: {"people": N}'
+WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
 WHO_EXTRA = ("This picture should show exactly {n} people: {who}. It shows more. Which ONE visible person is the extra one (a duplicate or a stranger)? "
              'Describe them by position and clothes, e.g. "the woman on the far left by the window". Answer JSON only: {{"extra": "..."}}')
 
@@ -516,7 +522,14 @@ WHO_EXTRA = ("This picture should show exactly {n} people: {who}. It shows more.
 def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
     """사람이 많으면 남는 한 사람을 위치·옷으로 짚어 지우고, 사람 수만 다시 센다(맞으면 True, 아니면 원본으로 되돌리고 False). 최대 3번."""
     from hf_panel import names
-    want = len(p.get("chars") or []) + (1 if re.search(r"\bone\b", str(p.get("extras") or ""), re.I) else 0)
+    # 이름 없는 사람(extras)도 센다. 수를 글에서 못 읽으면(other team members 처럼) 세지 않고 손대지 않는다:
+    # 인물 수만 세서 듣는 사람 뒷모습 둘을 지웠다(2026-10-19 외출 p077)
+    extras = str(p.get("extras") or "")
+    nums = [WORD_NUM[w.lower()] for w in re.findall(r"\b(one|two|three|four|five)\b", extras, re.I)]
+    if extras and not nums:
+        log(f"  {p['id']}: 이름 없는 사람 수를 몰라 사람 수 맞추기를 건너뜀")
+        return False
+    want = len(p.get("chars") or []) + sum(nums)
     if not want:
         return False
     before = dst.read_bytes()

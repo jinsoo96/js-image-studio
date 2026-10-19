@@ -25,8 +25,17 @@ def _llm(text: str, max_tokens=1500) -> dict:
     """관문 judge 한 번(주소는 vast/judge_ep: VLM_URL, 안 되면 VLM_FALLBACK). 닿지 않으면 예외 = 관문을 통과시키지 않는다."""
     sys.path.insert(0, str(ROOT / "vast"))
     from judge_ep import chat
-    txt = chat([{"type": "text", "text": text}], max_tokens=max_tokens, temperature=0.05, timeout=240)
-    return json.loads(re.search(r"\{.*\}", txt, re.S).group())
+    # 판정 모델이 가끔 쉼표 빠진 JSON 을 돌려줬다(2026-10-19 콘티 관문에서 멈춤) → 세 번까지 다시 묻는다. 세 번 다 깨지면 예외(통과 아님)
+    err = None
+    for k in range(3):
+        txt = chat([{"type": "text", "text": text if k == 0 else text + "\n\nReturn ONE valid JSON object only, no other text."}],
+                   max_tokens=max_tokens, temperature=0.05 + 0.1 * k, timeout=240)
+        m = re.search(r"\{.*\}", txt, re.S)
+        try:
+            return json.loads(m.group() if m else txt)
+        except json.JSONDecodeError as e:
+            err = e
+    raise err
 
 
 def _hash(*files) -> str:
@@ -116,7 +125,8 @@ def judge_storyboard(ep: Path) -> dict:
             c = p["composite"]
             lines.append(f"{p['id']} [화면:{c.get('kind')}] " + json.dumps({k: v for k, v in c.items() if k in ('title', 'text', 'notices', 'messages', 'query', 'subtitle')}, ensure_ascii=False)[:200])
             continue
-        talk = " / ".join(f"{d.get('type')}:{d.get('text')}" for d in p.get("dialogue", []))
+        # 말하는 사람(who)을 같이 준다: 없으면 두 사람 컷의 대사 순서를 judge 가 짐작해 호칭이 틀렸다고 오판했다(2026-10-19 외출 p017)
+        talk = " / ".join(f"{d.get('type')}" + (f"({d['who']})" if d.get("who") else "") + f":{d.get('text')}" for d in p.get("dialogue", []))
         lines.append(f"{p['id']} [{p.get('shot')}·{p.get('scene')}·{','.join(p.get('characters', []))}] {talk}")
     setting, material = _setting(ep.parents[1]), "\n".join(lines)
     r = _llm(ASK.format(what="콘티", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=material))
@@ -144,7 +154,7 @@ def judge_panels(ep: Path) -> dict:
         part = panels[k:k + CHUNK]
         mat = "\n".join(
             f"{p['id']} 대사:{_talk(board.get(p['id'], {}))}\n"
-            f"  {json.dumps({x: p.get(x) for x in ('chars', 'location', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
+            f"  {json.dumps({x: p.get(x) for x in ('chars', 'location', 'view', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
             for p in part)
         setting, mat = _setting(ep.parents[1]), re.sub(r" SPACE \(identical.*?\"", '"', mat)
         r = _llm(ASK.format(what="컷 설명", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=mat))

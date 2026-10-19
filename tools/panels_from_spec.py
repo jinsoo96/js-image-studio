@@ -60,7 +60,8 @@ def recurring_extras(panels, need=3):
 
 
 SEATED = re.compile(r"\b(seated|sits?|sitting|on (a|the|her|his) (stool|chair|seat|sofa|bench))\b", re.I)
-BACK = re.compile(r"\b(from behind|back view|backs? to (us|the camera)|seen from the back)\b", re.I)
+# "from behind the seated listeners"(듣는 사람 뒤에서 발표자를 봄)는 그 인물의 뒷모습이 아니다(2026-10-19 외출 p077 오경고)
+BACK = re.compile(r"\b(from behind(?! (?:the|a|an|his|her|their)\b)|back view|backs? to (us|the camera)|seen from the back)\b", re.I)
 
 
 def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
@@ -100,12 +101,39 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
 SAD = re.compile(r"\b(lonely|wistful|sad|hurt|bitter|resigned|disappoint\w*|melanchol\w*|guilty)\b", re.I)
 
 
+FOCAL = re.compile(r"\b(projector screen|stage|podium|lectern|blackboard|pulpit)\b|meeting|classroom|lecture|seminar|auditorium", re.I)
+PRESENTS = re.compile(r"\bpresent(s|ing)\b|\blectur(es|ing)\b|\bstand\w*\b[^.]{0,70}\b(screen|board|podium|lectern|slide)\b"
+                      r"|\bat the (projector )?(screen|board|podium|lectern)\b|\bpoint\w* at the (slide|screen|board)", re.I)
+LISTENER_BACKS = re.compile(r"\bbacks? of\b|\bfrom behind the (seated|listeners|audience|team|students)|over the shoulders? of", re.I)
+
+
 def staging_lint(panels, board) -> list:
     """컷 설명의 연출 문법 경고(skills/panel-spec '연출 문법'). 2026-10-18 외출 1화에서 컷 설명 탓에 생긴 실수를 글 단계에서 막는다."""
     out, prev = [], None
+    # 장면 배치(SPACE)는 카메라 칸이 없는 컷의 action 뒤에 붙어 온다 → 장소마다 하나 모아 '마주 보는 공간'(스크린·교단)인지 본다
+    space = {}
+    for p in panels:
+        m = re.search(r"SPACE \(identical in every panel of this scene\):(.*)$", str(p.get("action") or ""), re.S)
+        if m:
+            space.setdefault(p.get("location"), m.group(1))
+
+    def own_action(p):
+        return re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)
+    # 발표자가 있는 장소만(회의실이라도 둘이 앉아 얘기하는 장면은 마주 보는 공간이 아니다)
+    staged = {p.get("location") for p in panels if p["chars"] and PRESENTS.search(own_action(p))}
     for p in panels:
         t = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
         loc = str(p.get("location") or "")
+        shot = str(p.get("shot") or "")
+        if p["chars"] and loc in staged and FOCAL.search(loc + " " + space.get(loc, "")) and not re.search(r"close|insert|wide", shot):
+            # 발표·회의처럼 마주 보는 공간: 장소 그림이 앞(스크린 쪽) 한 장이라, 발표자 컷은 의자가 텅 비고 듣는 사람 컷 뒤엔 스크린이 그려졌다
+            # (2026-10-19 외출 p077·p052·p053 사용자 "공간의 통일성", "회의를 보는 자의 앞모습으로")
+            # 발표자인지는 그 컷의 action 만 본다(카메라 칸 "from the presenter's position at the screen" 은 듣는 쪽 컷의 카메라 자리)
+            if PRESENTS.search(own_action(p)):
+                if not LISTENER_BACKS.search(t + " " + str(p.get("extras") or "")):
+                    out.append(f"{p['id']} 발표·말하는 사람 컷인데 듣는 사람이 없다: extras 에 듣는 사람 뒷모습(머리·어깨·의자 등받이)을 생김새까지 쓴다")
+            elif not p.get("view"):
+                out.append(f"{p['id']} 듣는 쪽 컷인데 \"view\": \"reverse\" 가 없다(등 뒤에 스크린·발표자 쪽 벽이 그려진다). 없으면 new_assets.py 로 <장소>_reverse 를 만든다")
         if p["chars"] and re.search(r"bus(?!_stop)|train|subway", loc) and re.search(r"from the front of the (bus|train)|looking toward the back|toward the camera|facing the camera|seats? facing the", t, re.I):
             # 그림 모델은 버스 실내를 늘 뒤에서 앞을 보는 구도로 그린다. 앞에서 뒤를 보라고 쓰면 승객만 거꾸로 앉힌다(외출 p008, 세 번)
             out.append(f"{p['id']} 버스·지하철을 앞에서 뒤로 보는 구도는 모델이 못 그린다(승객이 거꾸로 앉는다): 승객 뒤에서 앞을 보거나, 통로 건너편에서 옆모습으로")
@@ -168,7 +196,7 @@ def main():
             action = f"{action} SPACE (identical in every panel of this scene): {scenes[loc]}"
         e = {"id": pid, "chars": chars, "outfit": sp.get("outfit", {}), "location": loc, "shot": norm_shot(sp.get("shot", "medium shot")),
              "aspect": sp.get("aspect") or ASPECT.get(by_id[pid].get("aspect", "landscape"), "3:2"), "action": action}
-        for k in ("acting", "camera", "refs_extra", "outfit_sheets", "extras", "text_in_image", "look"):
+        for k in ("acting", "camera", "refs_extra", "outfit_sheets", "extras", "text_in_image", "look", "view"):
             if sp.get(k):
                 e[k] = sp[k]
         panels.append(e)
