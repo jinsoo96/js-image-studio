@@ -129,6 +129,9 @@ def staging_lint(panels, board) -> list:
             # 발표·회의처럼 마주 보는 공간: 장소 그림이 앞(스크린 쪽) 한 장이라, 발표자 컷은 의자가 텅 비고 듣는 사람 컷 뒤엔 스크린이 그려졌다
             # (2026-10-19 외출 p077·p052·p053 사용자 "공간의 통일성", "회의를 보는 자의 앞모습으로")
             # 발표자인지는 그 컷의 action 만 본다(카메라 칸 "from the presenter's position at the screen" 은 듣는 쪽 컷의 카메라 자리)
+            # 다 같이 있는 장면: 중간 컷인데 다른 사람이 하나도 안 적히면 의자가 비었다(2026-10-19 외출 회의 "사람들이 있다 없다")
+            if len(p["chars"]) < 2 and not p.get("extras"):
+                out.append(f"{p['id']} 다 같이 있는 장면의 중간 컷인데 다른 사람이 안 적혀 있다: 그 각도에서 보일 사람을 chars·extras 로(자리표는 scenes), 아니면 클로즈업으로")
             if PRESENTS.search(own_action(p)):
                 if not LISTENER_BACKS.search(t + " " + str(p.get("extras") or "")):
                     out.append(f"{p['id']} 발표·말하는 사람 컷인데 듣는 사람이 없다: extras 에 듣는 사람 뒷모습(머리·어깨·의자 등받이)을 생김새까지 쓴다")

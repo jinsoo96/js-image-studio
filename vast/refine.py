@@ -374,6 +374,14 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     p = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
     if p.get("chars") and not wants_camera(p) and not is_ots(p.get("camera")):  # 어깨 너머 숏은 앞사람(카메라 쪽)을 보는 게 맞다(p047)
         seen = camera_gaze(img_path)
+        # 한 사람 컷에 볼 방향(looks toward screen left/right)이 적혀 있으면 눈이 어느 쪽인지 따로 묻는다. "독자를 보나"만 물으니
+        # 정면을 똑바로 보는 클로즈업을 놓쳤다(2026-10-19 외출 p052). 눈 방향 한 단어 질문은 맞았다
+        want = re.search(r"looks? toward screen (left|right)", " ".join(str(p.get(k) or "") for k in ("camera", "action")), re.I)
+        if not seen and want and len(p["chars"]) == 1:
+            eyes = (_vlm([img_path], 'Where do the eyes of the main person look? Answer JSON only: {"eyes": "viewer" | "left" | "right" | "down"}',
+                         max_tokens=40) or {}).get("eyes")
+            if eyes == "viewer" or (eyes in ("left", "right") and eyes != want.group(1).lower()):
+                seen = [f"눈이 {eyes} 쪽(설명은 화면 {want.group(1).lower()})"]
         if seen:
             probs.add("시선")
             r["고칠점"] = (str(r.get("고칠점") or "") + " 독자를 쳐다본다: " + "; ".join(seen)).strip()
