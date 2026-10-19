@@ -10,7 +10,7 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
 - 크레딧을 쓰는 도구(draw_panels·redraw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
-- vast_* 도구는 회사 공용 vast.ai GPU(Qwen Image 2.1)로 크레딧 없이 그린다. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
+- vast_* 도구는 회사 공용 vast.ai GPU 로 크레딧 없이 그린다. 그리는 판은 작품마다(set_model: uc = Qwen Image 2.1 Uncensored · anima), vast_draw 는 model 로 한 번만 바꿀 수도 있다. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
@@ -928,7 +928,7 @@ def redraw_panels(series: str, episode: str, ids: str, reason: str, confirm_cred
 
 
 # ── vast.ai 공용 GPU(크레딧 0) ───────────────────────────────
-# 회사 공용 vast.ai 의 ComfyUI(Qwen Image 2.1)로 그린다. 크레딧은 안 들지만 공용 장비라 한 번에 VAST_MAX 컷까지.
+# 회사 공용 vast.ai 의 ComfyUI 로 그린다(판은 saved_workflow.MODELS). 크레딧은 안 들지만 공용 장비라 한 번에 VAST_MAX 컷까지.
 # 인스턴스 만들기·끄기·지우기 도구는 두지 않는다(vast/README.md).
 VAST = ROOT / "vast"
 VAST_MAX = 80
@@ -936,13 +936,14 @@ VAST_MAX = 80
 
 @mcp.tool()
 def vast_status() -> str:
-    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·Qwen Image 2.1 모델이 받아져 있는지. 크레딧 안 씀."""
+    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·판마다(uc · anima) 모델이 받아져 있는지. 크레딧 안 씀."""
     return _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)
 
 
 @mcp.tool()
-def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True, check: bool = True) -> str:
-    """컷을 vast GPU 의 Qwen Image 2.1 로 그린다(크레딧 0). 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
+              check: bool = True, model: str = "") -> str:
+    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 작품의 판(set_model, 기본 uc), "uc" · "anima" 를 주면 이 작업만 그 판으로. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
@@ -963,8 +964,15 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
         return "aspect 는 9:16·2:3·3:4·1:1·4:3·3:2·16:9 중 하나"
     if not (sd / "assets" / "vast_refs").is_dir():
         return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
+    m = (model or "").strip().lower()
+    if m:
+        sys.path.insert(0, str(VAST))
+        from saved_workflow import MODELS
+        if m not in MODELS:
+            return json.dumps({"error": "unknown_model", "models": sorted(MODELS)}, ensure_ascii=False)
     _ensure_idle(ep)
     cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
+    cmd += ["--model", m] if m else []
     cmd += ["--turbo"] if turbo else []
     cmd += ["--expr"] if expr else []
     cmd += ["--aspect", aspect] if aspect else []

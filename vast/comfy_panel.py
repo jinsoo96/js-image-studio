@@ -333,7 +333,10 @@ def main():
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
+    ap.add_argument("--model", help="이번만 이 판으로 그린다(saved_workflow.MODELS: uc · anima). 없으면 작품 설정 series.json model")
     args = ap.parse_args()
+    if args.model:  # saved_workflow.pick 이 환경변수를 먼저 본다(이 작업만)
+        os.environ["WEBTOON_MODEL"] = args.model.strip().lower()
     series = Path(args.series_dir)
     panels = json.loads(Path(args.panels_json).read_text(encoding="utf-8"))
     only = set(args.only.split(",")) if args.only else None
