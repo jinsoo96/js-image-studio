@@ -257,10 +257,11 @@ def _role_wf(m: dict, name: str, role: str) -> str:
 
 
 def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 12, res: int = 1024, log=print, register: bool = True,
-          reuse_data: bool = False) -> dict:
+          reuse_data: bool = False, overrides: dict | None = None, force: bool = False) -> dict:
     """데이터 만들기 → 올리기 → ① 학습 데이터 워크플로우(역할 lora_dataset) → 모델 내리기 → ② 학습 워크플로우(역할 train_lora) → lora/loras.json 등록.
     워크플로우는 작품의 판에서(없으면 기본 판의 것), ② 의 판(extra.webtoon.model)이 이 LoRA 를 붙일 수 있는 판이다.
     reuse_data: 서버에 이미 만든 학습 데이터(datasets/webtoon/<trigger>)로 ② 만 다시(스텝·rank 만 바꿔 볼 때).
+    overrides: 이번만 TrainLoraNode 칸을 바꾼다(예: {"training_dtype": "bf16"}). force: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험).
     """
     from saved_workflow import load_ui, models, pick, to_api
     c = Comfy()
@@ -269,7 +270,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     wf_data, wf_train = _role_wf(m, name, "lora_dataset"), _role_wf(m, name, "train_lora")
     ui_train = load_ui(wf_train)
     tmeta = (ui_train.get("extra") or {}).get("webtoon") or {}
-    if tmeta.get("disabled"):  # 학습 워크플로우에 막아 둔 이유가 적혀 있으면 돌리지 않는다(공용 서버를 넘어뜨린 설정, make_workflow.TRAIN_DISABLED)
+    if tmeta.get("disabled") and not force:  # 학습 워크플로우에 막아 둔 이유가 적혀 있으면 돌리지 않는다(공용 서버를 넘어뜨린 설정, make_workflow.TRAIN_DISABLED)
         raise SystemExit(f"학습을 막아 둠: {tmeta['disabled']}")
     lmodel = tmeta.get("model") or name
     tg = trigger(series, who)
@@ -289,14 +290,14 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     _free(c)
     api = to_api(ui_train)
     _set(api, "LoadTrainingDataset", folder_name=dataset)
-    t = _set(api, "TrainLoraNode", steps=steps, rank=rank, learning_rate=lr)
+    t = _set(api, "TrainLoraNode", steps=steps, rank=rank, learning_rate=lr, **(overrides or {}))
     _set(api, "SaveLoRA", prefix=f"loras/webtoon/{tg}", steps=t["steps"])
     for v in api.values():
         if v["class_type"] == "LossGraphNode":
             v["inputs"]["filename_prefix"] = f"webtoon_studio/lora_loss_{tg}"
     before = set(c.req("/models/loras") or [])
     t1 = time.time()
-    log(f"② 학습 시작 {wf_train}: {t['steps']}스텝 rank {t['rank']} lr {t['learning_rate']}")
+    log(f"② 학습 시작 {wf_train}: {t['steps']}스텝 rank {t['rank']} lr {t['learning_rate']}" + (f" 바꾼 칸 {overrides}" if overrides else ""))
     # 메모리 부족 때 offloading 을 켜고 저절로 다시 돌리던 것은 뺐다: 그 재시도 직후 공용 서버 ComfyUI 가 재시작됐다(2026-10-19 20:44)
     try:
         hist = _run(c, api, ui_train, 6 * 3600)
@@ -408,6 +409,8 @@ def main():
     ap.add_argument("--strength", type=float)
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--reuse-data", action="store_true", help="train: 서버에 만든 학습 데이터로 학습만 다시")
+    ap.add_argument("--set", action="append", default=[], metavar="칸=값", help="train: 이번만 TrainLoraNode 칸을 바꾼다(예 training_dtype=bf16)")
+    ap.add_argument("--force", action="store_true", help="train: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험)")
     ap.add_argument("--no-register", action="store_true", help="train: 학습만 하고 작품에 등록하지 않는다(시간·메모리 시험)")
     a = ap.parse_args()
     if a.cmd == "slots":
@@ -424,7 +427,11 @@ def main():
         for it in info["items"][:3] + info["items"][-2:]:
             print(" ", it["file"], it["size"], it["caption"][:160])
     elif a.cmd == "train":
-        train(series, a.who, a.steps, a.rank, a.lr, a.panels, a.res, register=not a.no_register, reuse_data=a.reuse_data)
+        ov = {}
+        for kv in a.set:
+            k, v = kv.split("=", 1)
+            ov[k] = {"true": True, "false": False}.get(v.lower(), int(v) if v.isdigit() else v)
+        train(series, a.who, a.steps, a.rank, a.lr, a.panels, a.res, register=not a.no_register, reuse_data=a.reuse_data, overrides=ov, force=a.force)
     elif a.cmd == "set":
         print(set_entry(series, a.who, {"file": a.file, "strength": a.strength, "on": False if a.off else True}))
 
