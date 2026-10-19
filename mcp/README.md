@@ -19,7 +19,27 @@
 
 원칙: 한 번 호출은 30초 안(agent platform 브리지 제한), 오래 걸리는 일은 작업으로 띄우고 job_status. 지우는 도구는 없다. 자식 프로세스는 stdin 을 막는다(MCP 전송로를 물려받으면 멈춘다).
 
-## agent app 에 붙이기
+## 어느 PC 에서든 쓰기(주소 방식, 2026-10-19~ 기본)
+agent app 의 MCP 목록은 PC 마다 따로고(서버 동기화 없음), 서버는 도구 호출을 **대화를 시작한 기기**로 고정한다. 그래서 다른 PC·웹에서 시작한 대화는
+이 PC 의 stdio 서버를 못 쓴다. 이 PC(24시간)를 유일한 작업실로 두고 MCP 를 주소로 연다.
+
+```
+다른 PC 의 agent app ──https + 열쇠 헤더──▶ Cloudflare Access ──터널──▶ 이 PC 127.0.0.1:7440/mcp (server.py --http) ──▶ D:\webtoon-studio · vast
+```
+- 서버: 예약작업 `WEBTOON-MCP-http`(부팅 때 자동, S4U, 죽으면 1분 뒤 다시) → `mcp\serve_http.cmd` → `server.py --http --port 7440`. 로그 `state\mcp_http.log`.
+- **server.py 를 고친 뒤엔 예약작업을 다시 띄운다**(agent app 를 껐다 켜는 것으로는 안 바뀐다):
+  `Stop-ScheduledTask WEBTOON-MCP-http; Get-CimInstance Win32_Process | ? CommandLine -match 'server.py --http' | % { Stop-Process $_.ProcessId -Force }; Start-ScheduledTask WEBTOON-MCP-http`
+  그다음 agent app 설정 > MCP 에서 webtoon-studio 를 껐다 켜면 새 도구 목록이 서버에 올라간다.
+- 주소 `https://webtoon.js-96.com/mcp`. Cloudflare Access 앱 `Webtoon MCP`: 정책 ① 서비스 토큰 `webtoon-mcp-dex`(agent app 헤더용, 1년) ② 소유자 이메일 OTP(브라우저로 결과 링크 볼 때).
+  열쇠 값은 `D:\.claude\CREDENTIALS.local.md` Cloudflare 절 "웹툰 MCP 원격 주소" 줄에만 있다. 열쇠 없는 요청은 Cloudflare 로그인으로 돌려보낸다(302).
+- 다른 PC 에서 처음 한 번: agent app 설치·김진수 로그인 → 설정 > MCP > 서버 추가: 종류 `http`, 주소 위, 헤더 `CF-Access-Client-Id`·`CF-Access-Client-Secret`.
+  JSON 가져오기로 넣어도 된다: `{"mcpServers": {"webtoon-studio": {"type": "http", "url": "https://webtoon.js-96.com/mcp", "headers": {"CF-Access-Client-Id": "…", "CF-Access-Client-Secret": "…"}}}}`
+- 이 PC 의 agent app 는 같은 서버를 `http://127.0.0.1:7440/mcp`(열쇠 없음)로 붙인다. stdio 로 되돌리기: 아래 2번 설정(백업 `%APPDATA%\agent-connector\connector.backup-20261019-before-http.json`).
+- 결과 파일 링크: `WEBTOON_PUBLIC_URL` 이 있으면 export·job_status 가 `https://webtoon.js-96.com/files/exports/…` 링크를 준다(`exports\`·`series\` 의 pdf·epub·그림·영상만, 브라우저는 이메일 OTP).
+- 오래 걸리는 호출: 응답이 SSE 라 15초마다 핑이 가서 Cloudflare 100초 제한에 안 걸린다(라이브러리 기본). 그래도 원칙은 30초 안, 긴 일은 작업(job)으로.
+- 시험(2026-10-19): 열쇠 없이 /mcp·/files·/ 전부 302, 열쇠로 initialize·도구 34개·status 1.3초, 8컷 review_panels 28초, PDF 링크 200(7.4MB). 파이썬 기본 UA(`Python-urllib`)는 Cloudflare 봇 규칙에 403(브라우저·agent app 는 상관없음).
+
+## agent app 에 붙이기(이 PC, stdio 방식: 주소 방식 전 기본, 되돌릴 때)
 1. 파이썬 준비: 작업실 `.venv` 에 `requirements.txt`(정확한 버전) 설치. `uv pip install --python .venv\Scripts\python.exe -r requirements.txt`
 2. agent app 를 끄고 `%APPDATA%\agent-connector\connector.json` 에 다음을 넣는다(agent app 설정 > MCP 화면에서 넣어도 같다).
    ```json

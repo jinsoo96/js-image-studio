@@ -1,6 +1,11 @@
-"""이미지 스튜디오 작업실 MCP 서버(stdio, id 는 webtoon-studio 그대로). agent app(agent platform 데스크톱)의 로컬 MCP 로 붙여 agent platform 에이전트(Qwen 등)가 작업실을 다루게 한다.
+"""이미지 스튜디오 작업실 MCP 서버(id 는 webtoon-studio 그대로). agent app(agent platform 데스크톱)의 MCP 로 붙여 agent platform 에이전트(Qwen 등)가 작업실을 다루게 한다.
 
-    D:\\webtoon-studio\\.venv\\Scripts\\python.exe D:\\webtoon-studio\\mcp\\server.py
+    D:\\webtoon-studio\\.venv\\Scripts\\python.exe D:\\webtoon-studio\\mcp\\server.py                    stdio(이 PC 의 agent app 가 직접 띄움)
+    D:\\webtoon-studio\\.venv\\Scripts\\python.exe D:\\webtoon-studio\\mcp\\server.py --http [--port 7440]  주소(http://127.0.0.1:7440/mcp)
+
+주소 방식(2026-10-19 사용자 "어느 PC 에서든 김진수 agent app 계정으로"): agent app 의 MCP 목록은 PC 마다 따로라 다른 PC 의 agent app 는 이 PC 의 stdio 서버를 못 띄운다.
+이 PC(24시간)가 유일한 작업실로 남고, 예약작업 WEBTOON-MCP-http(mcp/serve_http.cmd)가 --http 로 띄운 것을 Cloudflare 터널
+https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBTOON_PUBLIC_URL 이 있으면 결과 파일을 /files/ 링크로 준다.
 
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
@@ -17,11 +22,14 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont  # 맨 위에서 미리 읽는다(툴 안 첫 import 는 Windows 에서 멈출 수 있다)
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.responses import FileResponse, PlainTextResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp"))
@@ -41,6 +49,10 @@ SERIES_ALIAS = {"d-plus-18": "d-plus-18-hf", "d+18": "d-plus-18-hf", "dplus18": 
 DOCS = {"CLAUDE": "CLAUDE.md", "README": "README.md", "LESSONS": "LESSONS.md", "OPEN_ISSUES": "worklogs/OPEN-ISSUES.md",
         "ACTING_GUIDE": "worklogs/acting/GUIDE.md"}
 SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md", "ASSETS": "ASSETS.md"}
+# 원격 주소(예: https://webtoon.js-96.com). 있으면 결과 파일을 링크로 준다: 다른 PC 의 agent app 에선 D:\ 경로를 못 연다
+PUBLIC = os.environ.get("WEBTOON_PUBLIC_URL", "").rstrip("/")
+FILE_DIRS = ("exports", "series")  # /files/ 로 내주는 곳(그 밖은 404)
+FILE_TYPES = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4"}
 
 mcp = FastMCP("webtoon-studio", instructions=(
     "웹툰 하네스(이미지 스튜디오의 웹툰 템플릿). 붙이면 끝: 별도 시스템 프롬프트 없이 이 MCP 만으로 새 작품·다음 화를 만든다. "
@@ -50,6 +62,26 @@ mcp = FastMCP("webtoon-studio", instructions=(
 
 
 # ── 내부 도우미 ───────────────────────────────────────────────
+def _link(path) -> str:
+    """결과 파일의 원격 링크(WEBTOON_PUBLIC_URL 이 있고 FILE_DIRS 안의 파일일 때만, 아니면 빈 문자열)."""
+    if not PUBLIC:
+        return ""
+    try:
+        rel = Path(path).resolve().relative_to(ROOT)
+    except ValueError:
+        return ""
+    return f"{PUBLIC}/files/" + urllib.parse.quote(rel.as_posix()) if rel.parts and rel.parts[0] in FILE_DIRS else ""
+
+
+@mcp.custom_route("/files/{path:path}", methods=["GET"])
+async def files(request):
+    """결과 파일 내려주기(주소 방식에서만 쓰인다). 터널 쪽은 Cloudflare Access 가 막고, 여기선 경로·종류만 거른다."""
+    f = (ROOT / request.path_params.get("path", "")).resolve()
+    if f.is_file() and f.suffix.lower() in FILE_TYPES and any(f.is_relative_to(ROOT / d) for d in FILE_DIRS):
+        return FileResponse(f)
+    return PlainTextResponse("없음", status_code=404)
+
+
 def _series(name: str) -> Path:
     key = SERIES_ALIAS.get(name.strip().lower(), name.strip())
     if not (ROOT / "series" / key).is_dir() and (ROOT / "series" / f"{key}-hf").is_dir():  # new_series 의 slug 로도 부른다
@@ -961,7 +993,8 @@ def export(series: str, episode: str) -> str:
              {"label": "epub", "cmd": [PY, str(TOOLS / "to_epub.py"), str(ep)]},
              {"label": "내보내기 복사", "cmd": [PY, "-c", copy, str(ep), str(ROOT / "exports" / day), name]}]
     job = _start_job("export", ep, steps)
-    return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')"
+    pdf = _link(ROOT / "exports" / day / f"{name}.pdf")
+    return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "")
 
 
 @mcp.tool()
@@ -991,6 +1024,9 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
     look = [ln.strip() for ln in lines if "사람 눈으로 확인" in ln]
     if look:
         head += "\n사람 눈으로 확인할 컷: " + " / ".join(look)
+    links = [_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m]
+    if any(links):  # 내보낸 파일(다른 PC 에서 볼 링크)
+        head += "\n볼 링크: " + " / ".join(x for x in links if x)
     if (st or {}).get("state") == "needs_review":  # 실패가 아니다: 새 인물 시트·장소 시안을 사용자가 보고 골라야 이어진다
         cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
         head += ("\n확인 필요(실패 아님): 시안을 사용자에게 보여 주고, 좋으면 make_episode(작품, 회차, accept_new=True), "
@@ -1015,4 +1051,20 @@ def job_wait(job_id: str, seconds: int = 25, tail_lines: int = 30) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--http", action="store_true", help="stdio 대신 주소(Streamable HTTP, /mcp)로 띄운다")
+    ap.add_argument("--port", type=int, default=7440)
+    a = ap.parse_args()
+    if not a.http:
+        mcp.run()
+    else:
+        # 127.0.0.1 에만 묶는다(밖에서는 터널로만). 라이브러리의 DNS 리바인딩 방어가 localhost Host 만 받아 터널 주소(Host: webtoon.js-96.com)를
+        # 421 로 막으니 WEBTOON_PUBLIC_URL 의 호스트를 더한다
+        hosts, origins = ["127.0.0.1:*", "localhost:*", "[::1]:*"], ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+        if PUBLIC:
+            hosts.append(urllib.parse.urlparse(PUBLIC).netloc)
+            origins.append(PUBLIC)
+        mcp.settings.host, mcp.settings.port = "127.0.0.1", a.port
+        mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+        mcp.run(transport="streamable-http")
