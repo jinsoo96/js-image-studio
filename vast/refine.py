@@ -328,6 +328,9 @@ def logic_check(img_path: Path, p: dict, era: str = "") -> list:
     desc = " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera"))
     desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
     ask = LOGIC_ASK.format(desc=desc)
+    if wants_camera(p):  # 시점 컷(맞은편 사람의 눈으로 봄): 독자를 보는 게 맞다. 안 알리면 '상대 대신 독자를 본다'고 걸었다(D+18 2화 p022)
+        ask = ask.replace("Only report clear mistakes.", "In this panel the camera IS the person across from them (a point-of-view shot), so looking "
+                          "at the viewer is correct, not a mistake.\nOnly report clear mistakes.")
     if era:  # 시대 소품(외출 1화: 2008년에 스마트폰·태블릿)
         ask = ask.replace("Only report clear mistakes.", f"5. Period: {era} Any object from a later time is a mistake.\nOnly report clear mistakes.")
     return [str(x) for x in _vlm([img_path], ask).get("problems", []) if x]

@@ -32,6 +32,20 @@ def runs(mask, min_gap=10, min_len=40):
     return [(a, b) for a, b in out if b - a >= min_len]
 
 
+def one_person(img: Image.Image) -> Image.Image:
+    """전신 덩어리에 사람이 둘(정면·3/4 이 팔끝으로 붙음) 들어 있으면 첫 사람만. 머리 높이(위 20%)에서 잉크 덩어리가 둘이면 그 틈에서 자른다.
+    폭 기준(시트의 22%)으로는 못 가른 시트가 있었다: 상민 머리가 참고 그림에 둘 들어가 한 컷에 둘 그려질 뻔했다(2026-10-19 외출)."""
+    a = np.asarray(img.convert("RGB")).astype(np.int16)
+    h, w, _ = a.shape
+    bg = np.median(np.concatenate([a[:6].reshape(-1, 3), a[:, :6].reshape(-1, 3)]), axis=0)
+    ink = np.abs(a - bg).sum(axis=2) > 90
+    heads = runs(ink[: int(h * 0.2)].mean(axis=0) > 0.02, min_gap=8, min_len=int(w * 0.12))
+    if len(heads) < 2:
+        return img
+    cut = (heads[0][1] + heads[1][0]) // 2
+    return img.crop((0, 0, cut, h))
+
+
 def crop_refs(sheet: Path):
     im = Image.open(sheet).convert("RGB")
     a = np.asarray(im).astype(np.int16)
@@ -56,7 +70,7 @@ def crop_refs(sheet: Path):
         prof = ink[:, fx0:fx1].mean(axis=0)
         lo, hi = int((fx1 - fx0) * 0.3), int((fx1 - fx0) * 0.7)
         fx1 = fx0 + lo + int(np.argmin(prof[lo:hi]))
-    front = im.crop(box(fx0, fx1))
+    front = one_person(im.crop(box(fx0, fx1)))
     # 머리(정면 전신의 위 19%): 표정이 늘 무표정이라 얼굴 참고로 쓴다. 얼굴 칸 첫 장은 인물마다 웃음·화남이라 그 표정을 따라 그렸다(p045 우는 컷이 웃음).
     # 30% 상반신은 시트의 기본 옷(우빈 파란 셔츠)이 보여 그 옷을 입은 사람이 한 명 더 생겼다(p003)
     bust = front.crop((0, 0, front.width, int(front.height * 0.19)))
@@ -65,7 +79,10 @@ def crop_refs(sheet: Path):
         return runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=6, min_len=int(0.12 * h))
     grid = [cx for cx in cols[1:] if len(bands(*cx)) >= 2]
     if not grid:
-        raise ValueError(f"{sheet.name}: 얼굴 칸 열을 못 찾음")
+        # 얼굴 칸이 엇갈려 놓였거나 뒷모습 전신과 붙은 시트(2026-10-19 외출 오동기·상민): 얼굴 칸 대신 정면 전신의 머리를 얼굴로 쓴다.
+        # 그리기의 기본 참고는 어차피 이 머리(bust)라 멈출 까닭이 없다
+        print(f"{sheet.name}: 얼굴 칸 열을 못 찾아 정면 머리를 얼굴 참고로 씀")
+        return front, bust.copy(), bust
     gx0, gx1 = grid[0]
     ry0, ry1 = bands(gx0, gx1)[0]
     # 옆 칸과 붙어 있으면 그 줄 안에서 다시 가르고, 그래도 넓으면 정사각에 가깝게 왼쪽만
@@ -102,7 +119,7 @@ def turn_head(sheet: Path):
     x0, x1 = bodies[1]
     rr = runs(ink[:, x0:x1].mean(axis=1) > 0.004, min_gap=6)
     ya, yb = rr[0] if rr else (0, h)
-    body = im.crop((max(0, x0 - 24), max(0, ya - 24), min(w, x1 + 24), min(h, yb + 24)))
+    body = one_person(im.crop((max(0, x0 - 24), max(0, ya - 24), min(w, x1 + 24), min(h, yb + 24))))
     return body.crop((0, 0, body.width, int(body.height * 0.19)))
 
 

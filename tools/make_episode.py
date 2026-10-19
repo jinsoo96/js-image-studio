@@ -48,7 +48,9 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
     cast = json.loads((series / "cast.json").read_text(encoding="utf-8"))
     pj = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
     chars = sorted({c for p in pj for c in p.get("chars", [])})
-    locs = sorted({p["location"] for p in pj if p.get("location")})
+    # 인서트(장소 그림을 안 씀)와 장소 "none" 은 장소 시안이 필요 없다(2026-10-19 외출 p122: "none" 을 새 장소로 보고 멈췄다)
+    locs = sorted({p["location"] for p in pj if p.get("location") and p["location"] != "none"
+                   and not any(w in str(p.get("shot") or "") for w in ("insert", "top view", "detail"))})
     todo = []
     for c in chars:
         if c not in cast:

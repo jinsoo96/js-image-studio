@@ -138,7 +138,9 @@ def pick_expr(series, cid, name, text):
            + f"\n\nAnswer with the number only. Answer 0 if {name} is not the one acting or nothing fits. "
              "Choose a tearful or crying expression only if the acting text says the character is crying or has tears "
              "(phrases like 'no tears' or 'dry eyes' mean NOT crying); for quiet, calm or "
-             "restrained acting answer 0.")  # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069)
+             "restrained acting choose a matching quiet expression if the list has one, never a strong or exaggerated one; otherwise answer 0.")
+    # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069). 2026-10-19 외출: 센 표정만 있어 "calm and confident" 에
+    # 우쭐한 미소(smug smirk)가 골라졌다 → 잔잔한 표정 묶음(make_assets.py subtle)이 있으면 그걸 고르게 했다
     body = {"model": LLM_MODEL, "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": ask}]}
     req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
@@ -153,10 +155,21 @@ def pick_expr(series, cid, name, text):
     return (files[k - 1], labels[k - 1]) if 1 <= k <= len(labels) else None
 
 
+CAMERA_WANT = re.compile(r"\b(look\w*|star\w*|fac\w*|gaz\w*)\b[^.;]{0,40}?\b(the\s+)?(camera|viewer|reader)\b(?!\s+side)|\b(pov|point[- ]of[- ]view)\b", re.I)
+CAMERA_NOT = re.compile(r"\b(not|never|no|nobody|no one|none|away from|unaware of|instead of|without)\b[^.;]{0,25}$", re.I)
+
+
 def wants_camera(p) -> bool:
-    """컷 설명이 인물에게 카메라(독자)를 보라고 했나. 그때만 정면 시선을 둔다."""
-    return bool(re.search(r"(look\w*|star\w*|fac\w*|gaz\w*) (straight |directly )?(at|into|toward) (the )?(camera|viewer|reader)",
-                          " ".join(str(p.get(k) or "") for k in ("action", "acting", "camera")), re.I))
+    """컷 설명이 인물에게 카메라(독자)를 보라고 했나(맞은편 사람의 눈으로 보는 시점 컷 포함). 그때만 정면 시선을 둔다.
+    "faces the viewer, who sits across the table"·"looks across the table at the viewer" 처럼 전치사가 없거나 사이에 말이 끼면 못 알아봐,
+    시점 컷을 매번 '독자를 쳐다봄'으로 걸고 agent app 에이전트가 같은 컷을 열 번 다시 그렸다(2026-10-19 D+18 2화 p022). 부정(not·away from)은 뺀다."""
+    # 장면 배치 글(action 끝의 SPACE …)의 가구("the sofa faces the viewer")는 사람이 아니다 → action 에서만 떼어 낸다
+    action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", str(p.get("action") or ""), flags=re.S)
+    t = " ".join([action] + [str(p.get(k) or "") for k in ("acting", "camera", "shot")])
+    for m in CAMERA_WANT.finditer(t):
+        if not CAMERA_NOT.search(t[max(0, m.start() - 30):m.start()]):
+            return True
+    return False
 
 
 def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):

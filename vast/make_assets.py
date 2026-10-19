@@ -4,6 +4,7 @@
 
     .venv/Scripts/python vast/make_assets.py <series_hf_dir> <인물> base           회색 기본복 정면 전신 → vast_refs/<id>_base.png
     .venv/Scripts/python vast/make_assets.py <series_hf_dir> <인물> expr [--only 1,2]  센 표정 12가지 → vast_refs/<id>_xp_01..12.png
+    .venv/Scripts/python vast/make_assets.py <series_hf_dir> <인물|all> subtle      잔잔한 표정 20가지(series.json expressions) → <id>_xs_NN.png
 결과 표정은 <id>_expr.json 의 extra 에 이름과 같이 적혀 comfy_panel.py --expr 가 표정 시트 12칸과 함께 고른다.
 """
 import argparse
@@ -34,6 +35,45 @@ STRONG = [
     "guilty and ashamed: eyes cast down and away, lips pressed tight, shoulders drawn in",
 ]
 NEUTRAL = ("neutral", "serious", "composed", "deadpan", "cool")
+# 잔잔한 표정 묶음(subtle). 센 표정만 있으면 차분한 연기에 우쭐한 미소·오열이 골라졌다(2026-10-19 외출 "calm and confident" → smug smirk).
+# 작품 설정(series.json)의 "expressions" 목록이 있으면 그걸 쓴다. 이름: 설명 꼴, 파일은 <id>_xs_NN.png
+SUBTLE = [
+    "warm soft smile: relaxed eyes, gentle closed-mouth smile",
+    "polite social smile: small courteous smile, the eyes not fully smiling",
+    "bright cheerful laugh: eyes crinkled, open-mouthed happy laugh",
+    "quietly listening: calm attentive eyes, relaxed closed mouth",
+    "curious bright eyes: eyebrows slightly raised, eyes wide and interested, a small smile",
+    "thoughtful: eyes looking slightly down to the side, lips pressed, considering",
+    "tired: heavy eyelids, a slight frown, faint dark circles",
+    "wistful: soft sad eyes, a faint closed smile",
+    "awkward smile: stiff small smile, eyebrows slightly up, uneasy",
+    "dazed: blank unfocused eyes, slightly parted lips",
+    "uneasy: eyebrows slightly knit, eyes avoiding, tense lips",
+    "sulky: lips pushed out a little, eyes looking down, quietly disappointed",
+    "calm explaining: composed face, level eyebrows, mouth mid-speech",
+    "doubtful questioning: one eyebrow slightly raised, level gaze, relaxed mouth",
+    "approving smile: small satisfied smile, a slight nod",
+    "flushed tipsy smile: cheeks lightly pink, relaxed happy half-lidded eyes",
+    "embarrassed with red ears: ears turning red, eyes looking away, a suppressed smile",
+    "faint amused smirk: one corner of the mouth up, quietly amused",
+    "sigh: eyes half-closed, exhaling, shoulders dropping",
+    "radiant smile: a glowing happy face, bright sparkling eyes",
+]
+
+
+def subtle_list(series: Path) -> list:
+    sj = series / "series.json"
+    if sj.exists():
+        lst = json.loads(sj.read_text(encoding="utf-8")).get("expressions")
+        if lst:
+            return lst
+    return SUBTLE
+
+
+def subtle_prompt(ex):
+    return (f"Change only the facial expression of the person in <image1> to: {ex}. Subtle, natural, film-like acting for a quiet drama: "
+            "small but clearly readable changes in the eyebrows, eyelids, eyes and mouth, no exaggerated webtoon marks. Keep exactly the same "
+            "person, face shape, age, hairstyle, hair color, outfit, framing, plain background and art style.")
 
 
 def source_face(vr: Path, cid: str) -> Path:
@@ -64,6 +104,17 @@ def expr_prompt(ex):
 def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
     """(출발 그림, 프롬프트, 결과 경로, 시드, 크기, 표정 이름) 목록. 이미 있는 결과는 건너뛴다(끊겼다 다시 돌려도 이어짐)."""
     out = []
+    if what == "subtle":
+        src = source_face(vr, cid)
+        if not src.exists():
+            print(f"{cid}: 출발 얼굴이 없어 표정 건너뜀")
+            return out
+        for k, ex in enumerate(subtle_list(vr.parents[1]), 1):
+            f = vr / f"{cid}_xs_{k:02d}.png"
+            if (only and k not in only) or f.exists():
+                continue
+            out.append((src, subtle_prompt(ex), f, seed + 100 + k, res, ex.split(":")[0]))
+        return out
     if what in ("base", "both"):
         src = vr / f"{cid}_front.png"
         if not src.exists():
@@ -87,7 +138,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("series_dir")
     ap.add_argument("cid", help="인물 id, 또는 all(시트가 있는 인물 전부)")
-    ap.add_argument("what", choices=["base", "expr", "both"])
+    ap.add_argument("what", choices=["base", "expr", "both", "subtle"], help="subtle = 잔잔한 표정 묶음(<id>_xs_NN, series.json expressions)")
     ap.add_argument("--only", help="표정 번호(1부터) 일부만")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--res", type=int, default=1024, help="표정 그림 크기(면적 기준). 768 이면 장당 더 빠르다")

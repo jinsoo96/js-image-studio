@@ -96,6 +96,8 @@ class Comfy:
         """workflow(화면용 워크플로우)를 주면 결과 PNG·서버 기록에 같이 남아 ComfyUI 화면에서 그 작업을 캔버스로 연다.
         (2026-10-15 사용자 "comfyui 보니까 워크플로우를 사용한 느낌이 안 난다": API 그래프만 보내면 화면에서 열리지 않았다)"""
         body = {"prompt": prompt, "client_id": "webtoon-studio"}
+        if os.environ.get("WEBTOON_QUEUE_FRONT") == "1":  # 사람이 기다리는 작업(agent app 에서 시킨 것)은 큐 앞으로(mcp/server.py ENV)
+            body["front"] = True
         if workflow:
             body["extra_data"] = {"extra_pnginfo": {"workflow": workflow}}
         return self.req("/prompt", body)["prompt_id"]

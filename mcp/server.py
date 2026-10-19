@@ -41,7 +41,9 @@ PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Script
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
 SHEETS = ROOT / "state" / "mcp_sheets"
-ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+# WEBTOON_QUEUE_FRONT: agent app 에서 시킨 작업은 공용 ComfyUI 큐의 앞에 넣는다(comfy_client.queue). 작업실의 큰 배치(장소 시안·한 화 그리기) 뒤에 서서
+# 한 컷이 10분 걸렸고, 에이전트가 기다리다 멈췄다(2026-10-19 agent app)
+ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "WEBTOON_QUEUE_FRONT": "1"}
 COST_PER_PANEL = 1.25  # Seedream 5.0 Pro 1.5k
 MAX_PANELS = 40
 SERIES_ALIAS = {"d-plus-18": "d-plus-18-hf", "d+18": "d-plus-18-hf", "dplus18": "d-plus-18-hf",
@@ -156,6 +158,23 @@ def _running_job(ep: Path):
         if s.get("state") == "running" and spec.get("episode_dir") == str(ep) and _alive(s.get("pid")):
             return st.name.replace(".status.json", "")
     return None
+
+
+def _recent_draws(ep: Path, ids: list, hours: float = 3, limit: int = 2) -> dict:
+    """이 회차에서 최근 hours 시간 안에 이미 limit 번 이상 그린 컷 → {컷: 횟수}. 같은 컷 무한 다시 그리기를 막는다(D+18 2화 p022 열 번)."""
+    since, count = time.time() - hours * 3600, {}
+    for f in JOBS.glob("*.json"):
+        if f.name.endswith(".status.json") or f.stat().st_mtime < since:
+            continue
+        spec = _json(f, {})
+        if spec.get("episode_dir") != str(ep) or spec.get("kind") not in ("vast_draw", "redraw", "draw"):
+            continue
+        for st in spec.get("steps", []):
+            cmd = [str(x) for x in st.get("cmd", [])]
+            if "--only" in cmd:
+                for i in cmd[cmd.index("--only") + 1].split(","):
+                    count[i] = count.get(i, 0) + 1
+    return {i: count[i] for i in ids if count.get(i, 0) >= limit}
 
 
 def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
@@ -805,13 +824,15 @@ def vast_status() -> str:
 
 
 @mcp.tool()
-def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True, check: bool = True) -> str:
+def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
+              check: bool = True, again: bool = False) -> str:
     """컷을 vast GPU 의 Qwen Image 2.1 로 그린다(크레딧 0). 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
-    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
+    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt.
+    같은 컷을 최근 3시간에 2번 넘게 그렸으면 그리지 않는다: 사용자에게 보여 주고, 사용자가 다시 그리라고 했을 때만 again=True."""
     ep = _episode(series, episode)
     sd = _series(series)
     pj = [p["id"] for p in _panels_json(ep)]
@@ -829,6 +850,13 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
         return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
     if _running_job(ep):
         return "이 회차에 도는 작업이 있다. job_status 로 끝난 뒤 부른다"
+    again_ids = _recent_draws(ep, want)
+    if again_ids and not again:
+        # 하네스가 '사람 눈으로 확인'을 남긴 컷을 에이전트가 실패로 읽고 같은 컷만 열 번 다시 그렸다(2026-10-19 agent app, D+18 2화 p022).
+        # 규칙은 프롬프트가 아니라 도구가 막는다
+        return ("다시 그리지 않음: " + ", ".join(f"{i}({n}번)" for i, n in again_ids.items()) + " 는 최근 3시간에 이미 여러 번 그렸다. "
+                "'사람 눈으로 확인' 은 실패가 아니라 사용자 확인 대기다. 다음: contact_sheet(series, episode, folder='vast') 로 사용자에게 "
+                "그림을 보여 주고 무엇이 문제인지 묻는다. 사용자가 다시 그리라고 하면(컷 설명을 고친 뒤) again=True 로 부른다. 답을 여기서 끝낸다.")
     cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
     cmd += ["--turbo"] if turbo else []
     cmd += ["--expr"] if expr else []
@@ -1024,6 +1052,9 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
     look = [ln.strip() for ln in lines if "사람 눈으로 확인" in ln]
     if look:
         head += "\n사람 눈으로 확인할 컷: " + " / ".join(look)
+        if (st or {}).get("state") != "running":
+            head += ("\n다음: 이건 실패가 아니라 사용자 확인 대기다. 같은 컷을 다시 그리지 말고 contact_sheet(series, episode, folder='vast')로 "
+                     "사용자에게 그림을 보여 주고 무엇을 바꿀지 물은 뒤 답을 끝낸다.")
     links = [_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m]
     if any(links):  # 내보낸 파일(다른 PC 에서 볼 링크)
         head += "\n볼 링크: " + " / ".join(x for x in links if x)

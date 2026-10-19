@@ -116,24 +116,92 @@ def _score(crit: dict, results: list) -> tuple:
     return low, total, hard, probs
 
 
+def _panel_line(p: dict) -> str:
+    """콘티 한 컷을 judge 가 읽는 한 줄로. 원작 문장 내레이션(authored)은 (원작)으로 표시한다(지어낸 결론 내레이션과 구분)."""
+    if p.get("composite"):
+        c = p["composite"]
+        return f"{p['id']} [화면:{c.get('kind')}] " + json.dumps({k: v for k, v in c.items() if k in ('title', 'text', 'notices', 'messages', 'query', 'subtitle', 'body', 'subject', 'calls')}, ensure_ascii=False)[:300]
+    # 말하는 사람(who)을 같이 준다: 없으면 두 사람 컷의 대사 순서를 judge 가 짐작해 호칭이 틀렸다고 오판했다(2026-10-19 외출 p017)
+    talk = " / ".join(f"{d.get('type')}" + (f"({d['who']})" if d.get("who") else "") + ("(원작)" if d.get("authored") else "") + f":{d.get('text')}"
+                      for d in p.get("dialogue", []))
+    note = f" 그림:{p['note']}" if p.get("note") else ""
+    return f"{p['id']} [{p.get('shot')}·{p.get('scene')}·{','.join(p.get('characters', []))}] {talk}{note}"
+
+
+def beats_of(series: Path) -> dict:
+    """원작 장면 목록(source/beats.json). 원작이 없는 작품은 빈 dict."""
+    f = series / "source" / "beats.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+
+def coverage(ep: Path, board: dict | None = None) -> dict:
+    """이 화에 배정된 원작 장면을 컷의 beats 태그가 다 덮는지(코드 검사). 빠진 장면·없는 번호·태그 없는 그림 컷."""
+    bj = beats_of(ep.parents[1])
+    if not bj:
+        return {}
+    board = board or json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))
+    known = {b["id"] for b in bj["beats"]}
+    mine = [b["id"] for b in bj["beats"] if b.get("ep") == ep.name.split("_")[0]]
+    tagged = {x for p in board["panels"] for x in p.get("beats", [])}
+    untagged = [p["id"] for p in board["panels"] if not p.get("beats") and p.get("characters") and not p.get("composite")]
+    return {"assigned": len(mine), "missing": [b for b in mine if b not in tagged], "unknown": sorted(tagged - known), "untagged": untagged}
+
+
+BEAT_ASK = """너는 원작 각색 검수자(격리 judge)다. 아래는 원작 장면과, 콘티에서 그 장면을 담았다고 표시한 컷들이다.
+각 장면의 핵심(누가 무엇을 말하고 묻고 답했는지, 내레이션이 전하는 감정, 일어난 일)이 그 컷들의 대사·그림 설명에 실제로 들어 있는지 본다.
+대사를 줄이거나 말을 바꾼 것, 같은 뜻을 다르게 쓴 것은 괜찮다. 대화 한쪽이 통째로 빠졌거나, 장면의 핵심 사실·감정이 없으면 빠진 것이다.
+나이를 10살 올린 각색이라 숫자(경력 연수·나이)가 다른 것은 빠진 것이 아니다.
+
+{material}
+
+JSON 하나로만 답한다: {{"missing": [{{"beat": "b014", "why": "빠진 것 한 줄"}}]}} (다 들어 있으면 빈 목록)"""
+
+
+def verify_beats(ep: Path, board: dict, chunk: int = 10) -> list:
+    """태그가 있는 장면을 judge 가 실제 내용과 대조한다(태그만 달고 내용을 뺀 컷을 잡는다). 두 번째 judge 가 오탐을 거른다."""
+    bj = beats_of(ep.parents[1])
+    by_id = {p["id"]: p for p in board["panels"]}
+    tag = {}
+    for p in board["panels"]:
+        for b in p.get("beats", []):
+            tag.setdefault(b, []).append(p["id"])
+    mine = [b for b in bj.get("beats", []) if b.get("ep") == ep.name.split("_")[0] and b["id"] in tag]
+    probs = []
+    for k in range(0, len(mine), chunk):
+        part = mine[k:k + chunk]
+        material = "\n\n".join(f"[{b['id']}] 원작: {b['what']}\n" + "\n".join("  " + _panel_line(by_id[i]) for i in tag[b["id"]]) for b in part)
+        try:
+            r = _llm(BEAT_ASK.format(material=material), max_tokens=900)
+        except Exception as e:  # noqa: BLE001  확인을 못 하면 통과로 넘기지 않는다
+            probs.append({"criterion": "coverage", "panel": part[0]["id"], "fix": f"원작 대조 검사를 못 했다({type(e).__name__})"})
+            continue
+        found = [{"criterion": "coverage", "panel": m.get("beat", ""), "fix": f"원작 장면 {m.get('beat')}: {m.get('why', '')}"}
+                 for m in r.get("missing", []) if isinstance(m, dict) and m.get("beat") in tag]
+        crit = {"criteria": [{"name": "coverage", "description": "원작 장면의 대화·핵심 사실·감정이 그 컷들에 들어 있다. 대사를 줄이거나 바꾼 것은 위반이 아니다."}]}
+        probs += _verify(crit, "원작 각색(나이 +10)", material, found)
+    return probs
+
+
 def judge_storyboard(ep: Path) -> dict:
     crit = _criteria("storyboard")
     board = json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))
-    lines = []
-    for p in board["panels"]:
-        if p.get("composite"):
-            c = p["composite"]
-            lines.append(f"{p['id']} [화면:{c.get('kind')}] " + json.dumps({k: v for k, v in c.items() if k in ('title', 'text', 'notices', 'messages', 'query', 'subtitle')}, ensure_ascii=False)[:200])
-            continue
-        # 말하는 사람(who)을 같이 준다: 없으면 두 사람 컷의 대사 순서를 judge 가 짐작해 호칭이 틀렸다고 오판했다(2026-10-19 외출 p017)
-        talk = " / ".join(f"{d.get('type')}" + (f"({d['who']})" if d.get("who") else "") + f":{d.get('text')}" for d in p.get("dialogue", []))
-        lines.append(f"{p['id']} [{p.get('shot')}·{p.get('scene')}·{','.join(p.get('characters', []))}] {talk}")
+    lines = [_panel_line(p) for p in board["panels"]]
     setting, material = _setting(ep.parents[1]), "\n".join(lines)
     r = _llm(ASK.format(what="콘티", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=material))
-    r["problems"] = _verify(crit, setting, material, [p for p in r.get("problems", []) if isinstance(p, dict)])
+    r["problems"] = _verify(crit, setting, material, [p for p in r.get("problems", []) if isinstance(p, dict) and p.get("criterion") != "coverage"])
+    # 원작이 있으면 장면 목록과 대조(2026-10-19 사용자 "스토리를 빼먹고 공간·에셋만 맞춰 작업했다, 내용 빼트리지 말고")
+    cov = coverage(ep, board)
+    if cov:
+        if cov["missing"]:
+            r["problems"].append({"criterion": "coverage", "panel": "-", "fix": f"원작 장면이 빠졌다(어느 컷에도 beats 태그 없음): {', '.join(cov['missing'])}"})
+        if cov["unknown"]:
+            r["problems"].append({"criterion": "coverage", "panel": "-", "fix": f"beats.json 에 없는 장면 번호: {', '.join(cov['unknown'])}"})
+        if not cov["missing"]:
+            r["problems"] += verify_beats(ep, board)
     low, total, hard, probs = _score(crit, [r])
     return {"gate": "storyboard", "score": round(total, 3), "scores": low, "hard_failed": hard, "problems": probs,
-            "passed": total >= crit["threshold"] and not hard, "hash": _hash(ep / "storyboard.json")}
+            "coverage": cov or None, "passed": total >= crit["threshold"] and not hard,
+            "hash": _hash(ep / "storyboard.json", ep.parents[1] / "source" / "beats.json")}
 
 
 def _talk(panel: dict) -> str:
@@ -183,7 +251,7 @@ def status(ep: Path) -> dict:
     f = ep / "review" / "gates.json"
     g = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
     sb, pn = g.get("storyboard", {}), g.get("panels", {})
-    return {"storyboard": bool(sb.get("passed")) and sb.get("hash") == _hash(ep / "storyboard.json"),
+    return {"storyboard": bool(sb.get("passed")) and sb.get("hash") == _hash(ep / "storyboard.json", ep.parents[1] / "source" / "beats.json"),
             "panels": bool(pn.get("passed")) and pn.get("hash") == _hash(ep / "panels.json", ep / "storyboard.json")}
 
 
@@ -195,6 +263,10 @@ def report(g: dict) -> str:
             continue
         lines.append(f"관문 {label}: {'통과' if r['passed'] else '걸림'} (점수 {r['score']}"
                      + (f", 꼭 지킬 기준 위반 {', '.join(r['hard_failed'])}" if r["hard_failed"] else "") + ")")
+        cov = r.get("coverage")
+        if cov:
+            lines.append(f"  원작 장면 {cov['assigned']}개 중 빠짐 {len(cov['missing'])}"
+                         + (f", 장면 태그 없는 인물 컷 {len(cov['untagged'])}({', '.join(cov['untagged'][:8])})" if cov.get("untagged") else ""))
         for p in r["problems"][:40]:
             lines.append(f"  - {p.get('panel', '')} [{p.get('criterion', '')}] {p.get('fix', '')}")
     return "\n".join(lines)

@@ -575,6 +575,39 @@ def kind_mail(spec, ep):
     return img
 
 
+def kind_doc(spec, ep):
+    """2000년대 PC 워드 창에 연 문서 한 장(계약서 등). 형광펜 줄을 칠할 수 있다. 실제 프로그램 로고는 넣지 않는다.
+    spec: {"title": "프리랜서 용역 계약서", "file": "계약서.doc", "lines": ["제3조 (계약 기간) …", …], "highlight": [줄 번호(0부터)],
+           "note": "별첨" (선택, 아래쪽 작은 글)}
+    (2026-10-19 외출 2화 b043: 계약서를 끝까지 읽고야 조건이 이해되는 장면. 그림 모델은 한글 문서를 못 그려서 코드로)"""
+    W, H = 1344, 1000
+    img = Image.new("RGB", (W, H), (40, 44, 52))
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = 70, 60, W - 70, H - 60
+    d.rectangle([x0, y0, x1, y1], fill=(236, 238, 242), outline=(150, 156, 170), width=2)
+    d.rectangle([x0, y0, x1, y0 + 44], fill=(46, 84, 150))
+    d.text((x0 + 18, y0 + 22), spec.get("file", "문서.doc"), font=f(22), fill=(240, 244, 252), anchor="lm")
+    for k, c in enumerate(((236, 96, 90), (240, 190, 70), (110, 190, 100))):
+        d.ellipse([x1 - 100 + k * 28, y0 + 13, x1 - 82 + k * 28, y0 + 31], fill=c)
+    px0, px1 = x0 + 120, x1 - 120  # 흰 종이
+    d.rectangle([px0, y0 + 64, px1, y1 - 12], fill=(255, 255, 255), outline=(200, 204, 212))
+    y = y0 + 110
+    d.text(((px0 + px1) // 2, y), spec.get("title", ""), font=f(34), fill=(20, 24, 32), anchor="mm")
+    y += 64
+    hl = set(spec.get("highlight", []))
+    for k, line in enumerate(spec.get("lines", [])):
+        for j, ln in enumerate(wrap_px(d, line, f(24, bold=False), px1 - px0 - 80)):
+            if k in hl:
+                w = d.textlength(ln, font=f(24, bold=False))
+                d.rectangle([px0 + 36, y - 16, px0 + 44 + w, y + 16], fill=(255, 236, 120))
+            d.text((px0 + 40, y), ln, font=f(24, bold=False), fill=(30, 34, 44), anchor="lm")
+            y += 38
+        y += 10
+    if spec.get("note"):
+        d.text((px0 + 40, y1 - 50), spec["note"], font=f(20, bold=False), fill=(110, 116, 130), anchor="lm")
+    return img
+
+
 def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
@@ -584,7 +617,8 @@ def main():
     spec = panel["composite"]
     img = {"title": kind_title, "profile": kind_profile, "chat": kind_chat, "calendar": kind_calendar,
            "insta": kind_insta, "calls": kind_calls, "blocked": kind_blocked, "search": kind_search,
-           "notice": kind_notice, "band": kind_band, "cover": kind_cover, "flip": kind_flip, "mail": kind_mail}[spec["kind"]](spec, ep)
+           "notice": kind_notice, "band": kind_band, "cover": kind_cover, "flip": kind_flip, "mail": kind_mail,
+           "doc": kind_doc}[spec["kind"]](spec, ep)
     out = ep / "panels" / f"{pid}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
