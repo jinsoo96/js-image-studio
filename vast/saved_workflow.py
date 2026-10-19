@@ -35,19 +35,30 @@ def models(refresh: bool = False) -> dict:
     if _models and not refresh and time.time() - _models_at < MODELS_TTL:
         return _models
     try:
+        from concurrent.futures import ThreadPoolExecutor
         c = _c()
         names = [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
-        have = {f: set(c.req(f"/models/{f}") or []) for f in ("diffusion_models", "loras", "text_encoders", "vae")}
+        verticals = sorted(n for n in names if re.fullmatch(r"webtoon_vertical_.+\.json", n))
+        folders = ("diffusion_models", "loras", "text_encoders", "vae")
+        with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(agent app 호출 한도 60초)
+            futs = {f: ex.submit(lambda f=f: set(c.req(f"/models/{f}") or [])) for f in folders}
+            uis = {n: ex.submit(load_ui, n) for n in verticals}
+            have = {f: fu.result() for f, fu in futs.items()}
+            loaded = {}
+            for n, fu in uis.items():
+                try:
+                    loaded[n] = fu.result()
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception:  # noqa: BLE001
         if _models:
             return _models
         return {k: {"gen": g, "edit": e, "refs": True, "label": k, "default": k == "uc", "models": {}, "missing": []} for k, (g, e) in OFFLINE.items()}
     out = {}
-    for fn in sorted(n for n in names if re.fullmatch(r"webtoon_vertical_.+\.json", n)):
+    for fn in verticals:
         suffix = fn[len("webtoon_vertical_"):-len(".json")]
-        try:
-            ui = load_ui(fn)
-        except Exception:  # noqa: BLE001
+        ui = loaded.get(fn)
+        if ui is None:
             continue
         meta = (ui.get("extra") or {}).get("webtoon") or {}
         nodes = ui.get("nodes", []) + [n for sg in (ui.get("definitions") or {}).get("subgraphs", []) for n in sg.get("nodes", [])]

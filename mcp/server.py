@@ -729,10 +729,10 @@ def add_to_series(series: str, kind: str, key: str, value: str) -> str:
     return f"{s.name} 에 {kind} {key} 를 더했다. 프롬프트 {len(files)}개. 그림은 make_episode 에셋 점검이 시안으로 그린다"
 
 
-def _draw_models() -> dict:
+def _draw_models(refresh: bool = False) -> dict:
     sys.path.insert(0, str(VAST))
     import saved_workflow
-    return saved_workflow.models(refresh=True)
+    return saved_workflow.models(refresh=refresh)
 
 
 def _check_model(name: str):
@@ -752,7 +752,7 @@ def draw_models(series: str = "") -> str:
     """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
     목록이 따라 바뀐다. 판마다: label(설명) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) · edit(고치기에 쓰는 워크플로우) · models(쓰는 모델 파일) ·
     ready(모델 파일이 서버에 다 있나) · default. series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
-    m = _draw_models()
+    m = _draw_models(refresh=True)
     cur = None
     if series:
         sys.path.insert(0, str(VAST))
