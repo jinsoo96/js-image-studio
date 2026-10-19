@@ -1,5 +1,5 @@
 {
- "id": "aa5c52a8-62b5-42e6-88ac-f5657f938673",
+ "id": "554cf82f-f752-48f9-8b88-172fb24b28ee",
  "revision": 0,
  "last_node_id": 8,
  "last_link_id": 8,
@@ -436,8 +436,7 @@
   "webtoon": {
    "model": "uc",
    "role": "train_lora",
-   "label": "인물 LoRA 학습(②, Qwen Image 2.1 UC, 서버 기본 학습 노드)",
-   "disabled": "ComfyUI 0.42.1(2026-10-19 MOSS 때문에 올림)에서 UC fp8 학습이 안 된다: dynamic VRAM 켬(기본) → 역전파 중 CUDA illegal memory access 로 ComfyUI 프로세스가 죽는다(서버 /var/log/portal/comfyui.log.old), 끔(--disable-dynamic-vram) → 메모리 부족이고 실패한 학습이 VRAM 을 남겨 그리기까지 막힌다. 0.37 에서는 같은 설정으로 됐다(재민 1500스텝 51분). 고칠 때까지 학습하지 않는다. 학습한 LoRA 를 그리기에 붙이는 건 된다."
+   "label": "인물 LoRA 학습(②, Qwen Image 2.1 UC, 서버 기본 학습 노드)"
   }
  },
  "version": 0.4

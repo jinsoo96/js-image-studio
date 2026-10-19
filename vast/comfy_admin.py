@@ -1,7 +1,7 @@
 """vast ComfyUI 서버 관리: 상태 · 버전 목록 · 버전 전환 · 재시작 · 서버 로그 · 모델 받기. MCP 도구(comfy_server · fetch_model · model_downloads)가 부른다.
 (2026-10-19 사용자 "자율 MCP 로, 이 기능 자체를 그렇게": MOSS-Image 때문에 ComfyUI 0.37 → 0.42.1 을 손으로 올리며 한 일을 에이전트가 스스로 하게)
 
-    .venv/Scripts/python vast/comfy_admin.py status | versions | logs [old] [줄수] | restart | switch <버전>
+    .venv/Scripts/python vast/comfy_admin.py status | versions | logs [old] [줄수] | restart | switch <버전> | patch [check]
 
 - 버전 전환·재시작은 공용 서버를 잠깐 멈춘다. 큐에 도는 작업이 있으면 하지 않는다(force 로만).
 - 버전 전환 전에 서버 워크플로우를 state/workflow_backups/<시각>_before_<버전>/ 에 받아 둔다. 전환은 ComfyUI-Manager(git checkout),
@@ -84,7 +84,13 @@ def logs(old: bool = False, lines: int = 80) -> str:
 
 
 def _busy(force: bool):
-    st = status()
+    """큐에 작업이 있으면 RuntimeError. force 이거나 서버가 응답을 못 하면(CUDA 오류 뒤 500 등 — 재시작이 바로 그걸 고친다) 막지 않는다."""
+    if force:
+        return
+    try:
+        st = status()
+    except Exception:  # noqa: BLE001
+        return
     if (st["queue_running"] or st["queue_pending"]) and not force:
         raise RuntimeError(f"서버 큐에 작업이 있다(도는 것 {st['queue_running']} · 기다리는 것 {st['queue_pending']}). 끝난 뒤 하거나 force")
 
@@ -118,6 +124,48 @@ def backup_workflows(tag: str) -> str:
     return str(out)
 
 
+PATCH_DIR = ROOT / "vast" / "server_patches"  # 상류에 아직 안 들어간 수정(README 에 이유)
+
+
+def _put_text(remote: str, text: str):
+    base, tok = _jupyter()
+    parent = remote.strip("/").rsplit("/", 1)[0]
+    try:  # Jupyter 파일 API 는 상위 폴더를 만들어 주지 않는다(없으면 500)
+        urllib.request.urlopen(urllib.request.Request(f"{base}/api/contents/{parent}", data=json.dumps({"type": "directory"}).encode(),
+                                                      headers={"Authorization": f"token {tok}", "Content-Type": "application/json"}, method="PUT"),
+                               timeout=60, context=_ctx)
+    except Exception:  # noqa: BLE001  이미 있으면 그대로
+        pass
+    body = json.dumps({"type": "file", "format": "text", "content": text}).encode()
+    urllib.request.urlopen(urllib.request.Request(f"{base}/api/contents/{remote.strip('/')}", data=body,
+                                                  headers={"Authorization": f"token {tok}", "Content-Type": "application/json"}, method="PUT"),
+                           timeout=60, context=_ctx)
+
+
+def patches(apply: bool = True) -> dict:
+    """server_patches/*.diff 를 서버 ComfyUI 에: 이미 붙었으면 그대로, 붙일 수 있으면 붙이고, 상류에 들어갔거나 안 맞으면 건너뛴다.
+    붙인 뒤에는 재시작해야 반영된다(돌려주는 changed)."""
+    out, changed = {}, False
+    for f in sorted(PATCH_DIR.glob("*.diff")):
+        remote = f"workspace/webtoon_patches/{f.name}"
+        _put_text(remote, f.read_text(encoding="utf-8"))
+        cmd = (f"cd /workspace/ComfyUI && if git apply --reverse --check /{remote} 2>/dev/null; then echo PATCH_STATE=applied; "
+               f"elif git apply --check /{remote} 2>/dev/null; then " + (f"git apply /{remote} && echo PATCH_STATE=newly_applied; " if apply else "echo PATCH_STATE=missing; ")
+               + "else echo PATCH_STATE=not_applicable; fi")
+        r = shell(cmd, 10)
+        state = next((l.split("=", 1)[1].strip() for l in r.splitlines() if l.startswith("PATCH_STATE=")), "unknown")
+        out[f.name] = state
+        changed |= state == "newly_applied"
+    return {"patches": out, "changed": changed}
+
+
+def _unpatch():
+    """버전 전환 전에 덧댄 수정을 걷어 낸다(작업 트리가 더러우면 Manager 의 git checkout 이 막힌다)."""
+    for f in sorted(PATCH_DIR.glob("*.diff")):
+        shell(f"cd /workspace/ComfyUI && git apply --reverse --check /workspace/webtoon_patches/{f.name} 2>/dev/null && "
+              f"git apply --reverse /workspace/webtoon_patches/{f.name}", 8)
+
+
 def switch(version: str, force: bool = False) -> dict:
     """워크플로우 백업 → ComfyUI-Manager 로 버전 전환 → supervisor 재시작 → 상태. 버전은 versions() 목록 중 하나."""
     vs = versions()
@@ -127,11 +175,13 @@ def switch(version: str, force: bool = False) -> dict:
         return {"already": version, **status()}
     _busy(force)
     bk = backup_workflows(f"before_{version}")
+    _unpatch()
     Comfy().req("/comfyui_manager/comfyui_switch_version", {"ver": version}, raw=True, timeout=600)
     now = versions().get("current")
     if now != version:
         raise RuntimeError(f"전환이 안 됐다(지금 {now}). 백업 {bk}")
-    return {"switched": f"{vs.get('current')} → {version}", "backup": bk, **restart(force=True)}
+    pt = patches(apply=True)  # 새 버전에 덧댈 수정(상류에 들어갔으면 건너뜀)
+    return {"switched": f"{vs.get('current')} → {version}", "backup": bk, **pt, **restart(force=True)}
 
 
 def main():
@@ -146,6 +196,11 @@ def main():
         print(logs(old, n))
     elif cmd == "restart":
         print(json.dumps(restart("force" in sys.argv), ensure_ascii=False))
+    elif cmd == "patch":
+        r = patches(apply="check" not in sys.argv)
+        if r["changed"] and "norestart" not in sys.argv:
+            r.update(restart(force="force" in sys.argv))
+        print(json.dumps(r, ensure_ascii=False))
     elif cmd == "switch":
         print(json.dumps(switch(sys.argv[2], "force" in sys.argv), ensure_ascii=False))
 

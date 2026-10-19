@@ -412,9 +412,9 @@ input/ 아래 폴더 하나에 그림과 같은 이름의 캡션 .txt(001.png + 
 # 학습을 막아 둘 이유(워크플로우 데이터 extra.webtoon.disabled, 도구 lora.train·MCP lora_train 이 읽고 학습하지 않는다). 막을 일이 생기면 이유를 적는다.
 # 2026-10-19 한때 막았다가 풀었다: 서버를 재시작시킨 것은 quantized_backward(fp8 역전파), 1024 메모리 초과는 checkpoint_depth 1(모델 통째),
 # 크기 오류는 앞부분 캐시였다. bf16 · 깊이 2 · 캐시 끔으로 1024 학습 스텝당 약 1.9초.
-TRAIN_DISABLED = ("ComfyUI 0.42.1(2026-10-19 MOSS 때문에 올림)에서 UC fp8 학습이 안 된다: dynamic VRAM 켬(기본) → 역전파 중 CUDA illegal memory access 로 "
-                  "ComfyUI 프로세스가 죽는다(서버 /var/log/portal/comfyui.log.old), 끔(--disable-dynamic-vram) → 메모리 부족이고 실패한 학습이 VRAM 을 남겨 "
-                  "그리기까지 막힌다. 0.37 에서는 같은 설정으로 됐다(재민 1500스텝 51분). 고칠 때까지 학습하지 않는다. 학습한 LoRA 를 그리기에 붙이는 건 된다.")
+# 2026-10-20 풀었다: 0.42.1 의 크래시는 Qwen 2.1 _gated_residual 의 제자리 연산(상류 PR #16654, vast/server_patches 로 덧댐)이었다.
+# 덧댄 뒤 기본 실행 인자(dynamic VRAM 켬)로 학습 스텝당 약 2초. 수정이 빠지면 다시 죽으니 버전을 바꾸면 comfy_server(action="patch") 로 확인
+TRAIN_DISABLED = ""
 
 
 def build_lora_dataset(folder="3d", model="uc"):

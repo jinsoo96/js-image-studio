@@ -1263,7 +1263,8 @@ def set_lora(series: str, character: str, strength: float = -1, on: bool = True,
 def comfy_server(action: str = "status", version: str = "", lines: int = 60, old: bool = False, force: bool = False) -> str:
     """vast ComfyUI 서버 관리(공용 서버). action:
     status(버전·실행 인자·VRAM·큐) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
-    · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고 ComfyUI-Manager 로 바꾼 뒤 재시작하고 상태를 돌려준다).
+    · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고, 덧댄 수정을 걷어 내고, ComfyUI-Manager 로 바꾼 뒤
+    수정을 다시 붙이고 재시작해 상태를 돌려준다) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654).
     restart·switch 는 큐에 작업이 있으면 하지 않는다(force=True 로만). 새 모델(예: 새 판)에 더 높은 ComfyUI 가 필요하면 versions → switch → draw_models 로 확인."""
     sys.path.insert(0, str(VAST))
     import comfy_admin as A
@@ -1276,13 +1277,18 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
             return json.dumps({"log": A.logs(old, max(10, min(lines, 400)))}, ensure_ascii=False)
         if action == "restart":
             return json.dumps(A.restart(force), ensure_ascii=False)
+        if action == "patch":  # 상류에 아직 안 들어간 수정(vast/server_patches)을 보고 붙인다. 새로 붙이면 재시작
+            r = A.patches(apply=True)
+            if r["changed"]:
+                r.update(A.restart(force))
+            return json.dumps(r, ensure_ascii=False)
         if action == "switch":
             if not version:
                 return _fail("version_required", given=version, candidates=A.versions().get("versions", []))
             return json.dumps(A.switch(version, force), ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         return _fail("comfy_server_failed", given={"action": action, "version": version}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return _fail("unknown_action", given=action, candidates=["status", "versions", "logs", "restart", "switch"])
+    return _fail("unknown_action", given=action, candidates=["status", "versions", "logs", "restart", "switch", "patch"])
 
 
 @mcp.tool()
