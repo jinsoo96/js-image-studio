@@ -59,19 +59,24 @@ def strip_people(text: str) -> str:
 _SAVED_WARNED = False
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
     edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
-    series 를 주면 그 작품의 판(series.json model, saved_workflow.pick). 그 판의 생성 워크플로우가 참고 그림을 못 받는데(Anima) 참고 그림을
+    series 를 주면 그 작품의 판(series.json model, saved_workflow.pick). role 을 주면(asset_expression · asset_base · candidate_location · candidate_sheet)
+    그 판의 그 역할 워크플로우(없으면 기본 판의 것)를 쓴다 — 화면에서 에셋용 설정을 고치면 에셋 도구가 따른다. 그 판의 생성 워크플로우가 참고 그림을 못 받는데(Anima) 참고 그림을
     넘기면(인물 시트 시안처럼 본보기가 꼭 필요한 일) 참고 그림을 받는 UC 판으로 그린다."""
     global _SAVED_WARNED
     try:
-        from saved_workflow import fill, load_ui, models, pick, refs_model, takes_refs, to_api
+        from saved_workflow import fill, load_ui, models, pick, refs_model, takes_refs, to_api, workflow_for
         _, gen, ed = pick(series)
-        ui = load_ui(ed if edit else gen)
+        ui = load_ui(workflow_for(role, series) if role else (ed if edit else gen))
         if ref_names and not edit and not takes_refs(ui):
             ui = load_ui(models()[refs_model()]["gen"])
+        mp = ((ui.get("extra") or {}).get("webtoon") or {}).get("max_pixels")  # 판이 학습된 크기(Anima 는 약 100만 화소). 더 큰 캔버스는 같은 장면을 타일처럼 반복해 그렸다(2026-10-19 외출 p112 4분할)
+        if mp and w * h > mp:
+            k = (mp / (w * h)) ** 0.5
+            w, h = max(512, int(w * k) // 32 * 32), max(512, int(h * k) // 32 * 32)
         return fill(to_api(ui, turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
@@ -305,7 +310,16 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
              text_rule
              + (" " + people_rule + (" " + extra.read_text(encoding="utf-8").strip() if extra.exists() else "") if n or extras else
                 " An empty scene: no people, no faces, no figures, no silhouettes, no reflections of people.")]
-    return "\n\n".join(x for x in parts if x), refs[:MAX_REFS]
+    prompt = "\n\n".join(x for x in parts if x)
+    if text_only:  # 글만 받는 판이 못 알아듣는 문구는 그 판의 워크플로우 데이터(extra.webtoon.prompt_drop)에 적는다. 그림체 글의 '(identical in every image)' 가
+        # 작은 글 인코더에게 여러 장짜리 세트로 읽혀 클로즈업마다 4분할로 그렸다(2026-10-19 Anima, 두 시드로 확인). 작품의 style 파일은 건드리지 않는다
+        try:
+            from saved_workflow import models, pick
+            for ph in (models()[pick(series)[0]].get("meta") or {}).get("prompt_drop", []):
+                prompt = prompt.replace(ph, "")
+        except Exception:  # noqa: BLE001
+            pass
+    return prompt, refs[:MAX_REFS]
 
 
 def upload(c, path: Path, cache: dict) -> str:

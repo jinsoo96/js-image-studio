@@ -88,7 +88,8 @@ def make(series: Path, kind: str, name: str, seed=None) -> Path:
     c, cache = Comfy(), {}
     refs = [upload(c, r, cache) for r in ref_paths]
     # 오래 쓰는 그림이라 터보 없이 40스텝, 16:9
-    g = graph(prompt, refs, 1920, 1088, seed if seed is not None else random.randrange(2**48), 40, 1024, turbo=False, series=series)
+    g = graph(prompt, refs, 1920, 1088, seed if seed is not None else random.randrange(2**48), 40, 1024, turbo=False, series=series,
+              role="candidate_location" if kind == "location" else "candidate_sheet")
     g["9"]["inputs"]["filename_prefix"] = f"webtoon_studio/new_{kind}"
     hist = c.wait(c.queue(g), 1200)
     cand.parent.mkdir(parents=True, exist_ok=True)

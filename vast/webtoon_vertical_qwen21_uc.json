@@ -735,7 +735,10 @@
    "label": "Qwen Image 2.1 Uncensored (참고 그림으로 얼굴·장소를 맞춘다)",
    "refs": true,
    "default": true,
-   "edit": "webtoon_edit_qwen21_uc.json"
+   "edit": "webtoon_edit_qwen21_uc.json",
+   "model": "uc",
+   "role": "vertical",
+   "use_for": "기본. 인물 시트·장소 그림을 참고해 얼굴·옷·장소·소품을 가장 충실하게 따른다. 얼굴이 일관돼야 하는 본편 컷(클로즈업·2인 컷) 전부. 2컷 비교(2026-10-19)에서 지시를 가장 잘 따랐다."
   }
  },
  "version": 0.4

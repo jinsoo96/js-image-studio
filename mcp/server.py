@@ -910,16 +910,18 @@ def _check_model(name: str):
 @mcp.tool()
 def draw_models(series: str = "") -> str:
     """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
-    목록이 따라 바뀐다. 판마다: label(설명) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) · edit(고치기에 쓰는 워크플로우) · models(쓰는 모델 파일) ·
-    ready(모델 파일이 서버에 다 있나) · default. series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
+    목록이 따라 바뀐다. 판마다: label(설명) · use_for(어디에 맞는지·한계, 판을 고를 때 읽는다) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) ·
+    roles(생성·고치기·에셋·시안 역할마다 쓰는 워크플로우, own_roles 밖은 기본 판의 것) · models(쓰는 모델 파일) · ready(모델 파일이 서버에 다 있나) · default.
+    series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
     m = _draw_models(refresh=True)
     cur = None
     if series:
         sys.path.insert(0, str(VAST))
         import saved_workflow
         cur = saved_workflow.pick(_series(series))[0]
-    out = [{"id": k, "label": vv["label"], "refs": vv["refs"], "edit": vv["edit"], "workflow": vv["gen"], "models": vv["models"], "ready": not vv["missing"],
-            "missing": vv["missing"], "default": vv["default"], **({"current": k == cur} if cur else {})} for k, vv in sorted(m.items())]
+    out = [{"id": k, "label": vv["label"], "use_for": vv["use_for"], "refs": vv["refs"], "workflow": vv["gen"], "roles": vv["roles"], "own_roles": vv.get("own_roles", []),
+            "models": vv["models"], "ready": not vv["missing"], "missing": vv["missing"], "default": vv["default"], **({"current": k == cur} if cur else {})}
+           for k, vv in sorted(m.items())]
     return json.dumps({"draw_models": out}, ensure_ascii=False)
 
 

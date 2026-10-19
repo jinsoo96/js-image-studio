@@ -1201,6 +1201,10 @@
     40,
     40
    ]
+  },
+  "webtoon": {
+   "model": "uc",
+   "role": "panel_2stage"
   }
  },
  "version": 0.4

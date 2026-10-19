@@ -239,22 +239,26 @@ def library(force=False):
     wfs = {
         "webtoon_edit_qwen21_uc.json": build_edit("Make him look heartbroken: eyes welling up with tears, trembling pressed lips. Keep everything else in "
                                                "<image1> exactly the same.", panel, EDIT_GUIDE, title="고칠 그림 <image1>"),
-        "webtoon_asset_expression_qwen21.json": build_edit(expr_prompt(STRONG[1]), face, ASSET_GUIDE.format(base=BASE),
+        "webtoon_asset_expression_uc.json": build_edit(expr_prompt(STRONG[1]), face, ASSET_GUIDE.format(base=BASE),
                                                            prefix="webtoon_studio/asset", title="인물 얼굴 <image1>"),
-        "webtoon_asset_base_qwen21.json": build_edit(BASE, front, ASSET_GUIDE.format(base=BASE), prefix="webtoon_studio/asset",
+        "webtoon_asset_base_uc.json": build_edit(BASE, front, ASSET_GUIDE.format(base=BASE), prefix="webtoon_studio/asset",
                                                      title="인물 정면 전신 <image1>"),
-        "webtoon_candidate_location_qwen21.json": build(loc_prompt, [], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_location",
+        "webtoon_candidate_location_uc.json": build(loc_prompt, [], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_location",
                                                         fix_prompt=remove),
-        "webtoon_candidate_sheet_qwen21.json": build(sheet_prompt, [sheet_ref], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_sheet"),
+        "webtoon_candidate_sheet_uc.json": build(sheet_prompt, [sheet_ref], steps=40, size=(1920, 1088), prefix="webtoon_studio/new_sheet"),
     }
     notes = {
-        "webtoon_candidate_location_qwen21.json": CAND_GUIDE.format(what="장소", kind="location", how=(
+        "webtoon_candidate_location_uc.json": CAND_GUIDE.format(what="장소", kind="location", how=(
             "장소 글은 작품 prompts/loc_<이름>.txt. 얼굴·눈 같은 사람 문장은 빼고 '앞·가운데는 비어 있음'을 붙인다(사람을 그려 넣는다). "
             "그래도 사람이 남으면 5번 2단 묶음이 지운다.")),
-        "webtoon_candidate_sheet_qwen21.json": CAND_GUIDE.format(what="인물 시트", kind="sheet", how=(
+        "webtoon_candidate_sheet_uc.json": CAND_GUIDE.format(what="인물 시트", kind="sheet", how=(
             "`<image1>` 은 시트 모양·그림체 본보기(다른 사람)다. 글 맨 앞에 아래 머리말을 두고, 나이를 못 박는다(중년이 젊게 나왔다).\n`"
             + SHEET_HEAD.strip() + "`")),
     }
+    role = {"webtoon_edit_qwen21_uc.json": "edit", "webtoon_asset_expression_uc.json": "asset_expression", "webtoon_asset_base_uc.json": "asset_base",
+            "webtoon_candidate_location_uc.json": "candidate_location", "webtoon_candidate_sheet_uc.json": "candidate_sheet"}
+    for name, wf in wfs.items():  # 판(model)·역할(role) 표시: 도구가 서버에서 판마다 역할별 워크플로우를 찾는다(saved_workflow.models)
+        wf.setdefault("extra", {})["webtoon"] = {"model": "uc", "role": role[name]}
     have = c.req("/api/userdata?dir=workflows")
     for name, wf in wfs.items():
         if name in notes:  # 생성 워크플로우의 사용법 칸을 시안 설명으로 바꾼다
@@ -279,7 +283,8 @@ webtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1
 **모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2
 
 글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
-ANIMA_NEGATIVE = "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands"  # 기준선의 네거티브
+ANIMA_NEGATIVE = ("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands, "
+                 "text, speech bubble, caption, comic page, multiple panels, collage, split screen, panel border")  # 기준선의 네거티브 + 한 컷용(글만 받는 모델은 '한 컷, 글자 없음' 지시를 안 따라 말풍선 있는 4분할 페이지를 그렸다, 2026-10-19)
 
 
 def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix="webtoon_studio/panel"):

@@ -29,8 +29,9 @@ MODELS_TTL = 60.0
 
 
 def models(refresh: bool = False) -> dict:
-    """{판 이름: {"gen": 파일, "edit": 파일, "refs": bool, "label": 설명, "default": bool, "models": {노드: 모델 파일}, "missing": [없는 모델 파일]}}.
-    서버 워크플로우 목록에서 읽고 60초 동안 재사용한다."""
+    """{판 이름: {"gen": 생성 워크플로우, "edit": 고치기, "roles": {역할: 워크플로우}, "refs": 참고 그림을 받나, "label": 설명, "use_for": 쓰임새, "default": bool,
+    "models": {폴더: [모델 파일]}, "missing": [서버에 없는 모델 파일]}}. 서버의 webtoon_*.json 을 extra.webtoon 의 model·role 로 묶고(역할 없는 옛 이름은
+    webtoon_vertical_<이름> 이면 그 판의 vertical), 판 = vertical(생성) 워크플로우가 있는 것. 판에 없는 역할은 기본 판의 것. 60초 동안 재사용."""
     global _models, _models_at
     if _models and not refresh and time.time() - _models_at < MODELS_TTL:
         return _models
@@ -38,11 +39,11 @@ def models(refresh: bool = False) -> dict:
         from concurrent.futures import ThreadPoolExecutor
         c = _c()
         names = [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
-        verticals = sorted(n for n in names if re.fullmatch(r"webtoon_vertical_.+\.json", n))
+        files = sorted(n for n in names if re.fullmatch(r"webtoon_.+\.json", n))
         folders = ("diffusion_models", "loras", "text_encoders", "vae")
         with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(agent app 호출 한도 60초)
             futs = {f: ex.submit(lambda f=f: set(c.req(f"/models/{f}") or [])) for f in folders}
-            uis = {n: ex.submit(load_ui, n) for n in verticals}
+            uis = {n: ex.submit(load_ui, n) for n in files}
             have = {f: fu.result() for f, fu in futs.items()}
             loaded = {}
             for n, fu in uis.items():
@@ -53,34 +54,53 @@ def models(refresh: bool = False) -> dict:
     except Exception:  # noqa: BLE001
         if _models:
             return _models
-        return {k: {"gen": g, "edit": e, "refs": True, "label": k, "default": k == "uc", "models": {}, "missing": []} for k, (g, e) in OFFLINE.items()}
-    out = {}
-    for fn in verticals:
-        suffix = fn[len("webtoon_vertical_"):-len(".json")]
-        ui = loaded.get(fn)
-        if ui is None:
-            continue
+        return {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}
+                for k, (g, e) in OFFLINE.items()}
+    by = {}
+    for fn, ui in loaded.items():
         meta = (ui.get("extra") or {}).get("webtoon") or {}
+        role = meta.get("role") or ("vertical" if fn.startswith("webtoon_vertical_") else None)
+        mid = str(meta.get("model") or meta.get("name") or (fn[len("webtoon_vertical_"):-len(".json")] if fn.startswith("webtoon_vertical_") else "")).lower()
+        if role and mid:
+            d = by.setdefault(mid, {"roles": {}, "meta": {}, "ui": None})
+            d["roles"][role] = fn
+            if role == "vertical":
+                d["meta"], d["ui"] = meta, ui
+    out = {}
+    for mid, d in by.items():
+        ui, meta = d["ui"], d["meta"]
+        if ui is None:  # 생성 워크플로우가 없으면 판이 아니다
+            continue
         nodes = ui.get("nodes", []) + [n for sg in (ui.get("definitions") or {}).get("subgraphs", []) for n in sg.get("nodes", [])]
-        files = {}
+        used = {}
         for n in nodes:
             v = (n.get("widgets_values") or [None])[0]
             folder = {"UNETLoader": "diffusion_models", "LoraLoaderModelOnly": "loras", "CLIPLoader": "text_encoders", "VAELoader": "vae"}.get(n.get("type"))
             if folder and isinstance(v, str) and n.get("mode", 0) != 2:
-                files.setdefault(folder, []).append(v)
-        unet = (files.get("diffusion_models") or ["?"])[0]
-        edit = meta.get("edit") or (f"webtoon_edit_{suffix}.json" if f"webtoon_edit_{suffix}.json" in names else None)
-        out[str(meta.get("name") or suffix).lower()] = {
-            "gen": fn, "edit": edit, "refs": bool(meta.get("refs", True)), "label": meta.get("label") or unet,
-            "default": bool(meta.get("default")), "models": {k: v for k, v in files.items()},
-            "missing": [f"{k}/{v}" for k, vs in files.items() for v in vs if v not in have.get(k, set())]}
+                used.setdefault(folder, []).append(v)
+        unet = (used.get("diffusion_models") or ["?"])[0]
+        out[mid] = {"gen": d["roles"]["vertical"], "roles": dict(d["roles"]), "refs": bool(meta.get("refs", True)), "label": meta.get("label") or unet,
+                    "use_for": meta.get("use_for") or "", "default": bool(meta.get("default")), "models": used, "meta": meta,
+                    "missing": [f"{k}/{v}" for k, vs in used.items() for v in vs if v not in have.get(k, set())]}
     if out:
         dflt = next((k for k, v in out.items() if v["default"]), None) or ("uc" if "uc" in out else sorted(out)[0])
         out[dflt]["default"] = True
-        for v in out.values():  # 고치기 워크플로우가 없는 판은 기본 판의 것을 쓴다
-            v["edit"] = v["edit"] or out[dflt]["edit"]
+        for v in out.values():  # 판에 없는 역할(고치기·에셋 등)은 기본 판의 것을 쓴다
+            v["own_roles"] = sorted(v["roles"])
+            for role, wf in out[dflt]["roles"].items():
+                v["roles"].setdefault(role, wf)
+            v["edit"] = v["roles"].get("edit")
         _models, _models_at = out, time.time()
-    return _models or {k: {"gen": g, "edit": e, "refs": True, "label": k, "default": k == "uc", "models": {}, "missing": []} for k, (g, e) in OFFLINE.items()}
+    return _models or {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}
+                       for k, (g, e) in OFFLINE.items()}
+
+
+def workflow_for(role: str, series=None) -> str:
+    """그 작품의 판에서 이 역할(vertical · edit · asset_expression · asset_base · candidate_location · candidate_sheet)을 하는 서버 워크플로우 이름.
+    판에 그 역할이 없으면 기본 판의 것."""
+    m = models()
+    name = pick(series)[0]
+    return m[name]["roles"].get(role) or m[default_model()]["roles"].get(role) or m[name]["gen"]
 
 
 def default_model() -> str:
@@ -199,10 +219,31 @@ def to_api(ui: dict, turbo=None) -> dict:
                 if s:
                     inputs[i["name"]] = s
         api[nid] = {"class_type": n["type"], "inputs": inputs}
-    api = _renumber(api)
+    api = _renumber(_first_stage(api))
     if turbo is not None and meta.get("cfg") and "7" in api:  # 판마다 터보·일반 cfg 가 다르면 워크플로우 데이터대로(Anima 1 · 4)
         api["7"]["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
     return api
+
+
+def _first_stage(api: dict) -> dict:
+    """KSampler 가 둘 이상(그리기 + 2단 다듬기 같은 묶음)이면 도구는 첫 단 결과만 필요하다: KSampler 를 가장 적게 거친 SaveImage 와 그 위쪽 노드만 남긴다.
+    번호·이름이 아니라 그래프 모양으로 가른다(시안 장소 워크플로우가 이 모양이라 도구가 못 불러 조용히 코드 그래프로 대신 그렸다, 2026-10-19)."""
+    if sum(1 for v in api.values() if v["class_type"] == "KSampler") < 2:
+        return api
+
+    def up(nid, seen):
+        for x in api[nid]["inputs"].values():
+            if isinstance(x, list) and len(x) == 2 and x[0] in api and x[0] not in seen:
+                seen.add(x[0])
+                up(x[0], seen)
+        return seen
+
+    saves = [k for k, v in api.items() if v["class_type"] == "SaveImage"]
+    if len(saves) < 2:
+        return api
+    best = min(saves, key=lambda s: sum(1 for a in up(s, set()) if api[a]["class_type"] == "KSampler"))
+    keep = up(best, set()) | {best}
+    return {k: v for k, v in api.items() if k in keep}
 
 
 def _renumber(api: dict) -> dict:

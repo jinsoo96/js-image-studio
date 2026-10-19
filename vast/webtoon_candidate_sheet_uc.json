@@ -1,0 +1,689 @@
+{
+ "id": "cd6272e4-874d-4f35-95f1-96fb53d22539",
+ "revision": 0,
+ "last_node_id": 12,
+ "last_link_id": 12,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "MarkdownNote",
+   "pos": [
+    -470,
+    0
+   ],
+   "size": [
+    420,
+    760
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "# 시안: 새 인물 시트 (Qwen Image 2.1, 40스텝, 16:9)\n새 화에 처음 나오는 인물 시트을 만든다. 사용자가 보고 고르면 작품 assets 에 넣는다.\n`<image1>` 은 시트 모양·그림체 본보기(다른 사람)다. 글 맨 앞에 아래 머리말을 두고, 나이를 못 박는다(중년이 젊게 나왔다).\n`<image1> is ONLY a reference for the sheet layout and the art style: it shows a DIFFERENT person. Draw a new character design reference sheet with exactly the same layout (four full-body views on the left, a grid of head-and-shoulders expressions on the right), the same plain background and the same art style, for the new character described below. Do NOT copy the face, hairstyle, hair color, body or outfit of <image1>.`\n작업실에서는 `vast/new_assets.py <작품> sheet <이름>` 이 같은 구성으로 돌리고, tools/make_episode.py 가 새 인물 시트을 만나면 이걸 부르고 멈춘다."
+   ],
+   "title": "사용법"
+  },
+  {
+   "id": 2,
+   "type": "UNETLoader",
+   "pos": [
+    20,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "qwen-image-2.1-UC-fp8.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen-image-2.1-UC-fp8.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "CLIPLoader",
+   "pos": [
+    20,
+    160
+   ],
+   "size": [
+    340,
+    106
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen3vl_8b_int8_convrot.safetensors",
+    "qwen_image",
+    "default"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "VAELoader",
+   "pos": [
+    20,
+    295
+   ],
+   "size": [
+    340,
+    58
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      4,
+      11
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "directory": "vae"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_vae_bf16.safetensors"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    380
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 4,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      2
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly",
+    "models": [
+     {
+      "name": "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "directory": "loras"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+    1.0
+   ],
+   "title": "터보 LoRA (켜면 steps 8)"
+  },
+  {
+   "id": 6,
+   "type": "QwenImage21Cache",
+   "pos": [
+    20,
+    490
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21Cache"
+   },
+   "widgets_values": [
+    "auto",
+    "default"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "LoadImage",
+   "pos": [
+    20,
+    670
+   ],
+   "size": [
+    340,
+    310
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "MASK",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "webtoon_487933230214.png",
+    "image"
+   ],
+   "title": "<image1>"
+  },
+  {
+   "id": 8,
+   "type": "TextEncodeQwenImage21",
+   "pos": [
+    440,
+    50
+   ],
+   "size": [
+    520,
+    760
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 3
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 4
+    },
+    {
+     "name": "images.image_1",
+     "type": "IMAGE",
+     "link": 5
+    },
+    {
+     "name": "images.image_2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "images.image_3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "images.image_4",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      8
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "TextEncodeQwenImage21"
+   },
+   "widgets_values": [
+    "<image1> is ONLY a reference for the sheet layout and the art style: it shows a DIFFERENT person. Draw a new character design reference sheet with exactly the same layout (four full-body views on the left, a grid of head-and-shoulders expressions on the right), the same plain background and the same art style, for the new character described below. Do NOT copy the face, hairstyle, hair color, body or outfit of <image1>.\n\nART STYLE (identical in every image): high-quality Japanese anime key-visual style adapted for a Korean webtoon. Thin, clean, dark lineart with delicate hand-drawn weight variation. Soft cel shading with smooth gradient shadows and a gentle bloom; warm golden key light from one side with a soft rim light on hair and shoulders; airy, slightly muted colors with natural skin tones; subtle paper grain texture over the whole image. Eyes: large glossy anime eyes with layered iris color gradients, two or three bright highlights and fine individual upper and lower lashes, but with adult eye shapes (not round childlike eyes). Hair: luminous highlight bands, defined strand clumps and fine flyaway strands catching the light. Delicate pink blush hatching lines on the cheeks only when emotional. Adult faces with mature jawlines, realistic adult proportions, women with a natural medium-size chest. Not chibi, not 3D, not photorealistic, no plastic skin, no thick outlines, no text.\n\nCharacter: Oh, team leader, Korean man, 45, an ordinary-looking middle-aged office manager (NOT handsome, NOT a pretty-boy): short side-parted black hair with gray streaks at the temples, rectangular thin-framed glasses, a few wrinkles, slight belly, average height. Outfit: plain gray suit, white shirt, no tie, black shoes.\n\nIMAGE: character design reference sheet on a plain light warm-gray background, no text, no labels. Left: four full-body views of the same person standing in a row (front, three-quarter, side profile, back), consistent proportions. Right: a 3x2 grid of head-and-shoulders expressions: neutral, pleased smile, clapping, announcing with one hand raised, pointing, mildly stern.\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described.",
+    "",
+    1024
+   ],
+   "title": "컷 설명 (<imageN> 으로 참고 그림 부르기)"
+  },
+  {
+   "id": 9,
+   "type": "EmptyLatentImage",
+   "pos": [
+    1040,
+    50
+   ],
+   "size": [
+    360,
+    106
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "EmptyLatentImage"
+   },
+   "widgets_values": [
+    1920,
+    1088,
+    1
+   ],
+   "title": "캔버스 16:9 (1920x1088)"
+  },
+  {
+   "id": 10,
+   "type": "KSampler",
+   "pos": [
+    1040,
+    190
+   ],
+   "size": [
+    360,
+    262
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 7
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 8
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      10
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "randomize",
+    40,
+    1,
+    "euler",
+    "simple",
+    1
+   ]
+  },
+  {
+   "id": 11,
+   "type": "VAEDecode",
+   "pos": [
+    1040,
+    490
+   ],
+   "size": [
+    360,
+    46
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 10
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 12,
+   "type": "SaveImage",
+   "pos": [
+    1440,
+    0
+   ],
+   "size": [
+    560,
+    830
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 12
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "webtoon_studio/new_sheet"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   5,
+   0,
+   6,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   3,
+   0,
+   8,
+   0,
+   "CLIP"
+  ],
+  [
+   4,
+   4,
+   0,
+   8,
+   1,
+   "VAE"
+  ],
+  [
+   5,
+   7,
+   0,
+   8,
+   2,
+   "IMAGE"
+  ],
+  [
+   6,
+   6,
+   0,
+   10,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   8,
+   0,
+   10,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   8,
+   8,
+   1,
+   10,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   9,
+   9,
+   0,
+   10,
+   3,
+   "LATENT"
+  ],
+  [
+   10,
+   10,
+   0,
+   11,
+   0,
+   "LATENT"
+  ],
+  [
+   11,
+   4,
+   0,
+   11,
+   1,
+   "VAE"
+  ],
+  [
+   12,
+   11,
+   0,
+   12,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1. 모델 (Qwen Image 2.1)",
+   "bounding": [
+    0,
+    0,
+    380,
+    590
+   ],
+   "color": "#3f789e",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2. 참고 그림 (넣은 순서 = <image1>, <image2> …)",
+   "bounding": [
+    0,
+    620,
+    380,
+    370
+   ],
+   "color": "#8a6a3f",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "3. 컷 설명",
+   "bounding": [
+    420,
+    0,
+    560,
+    830
+   ],
+   "color": "#3f8a5a",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 4,
+   "title": "4. 세로 캔버스 · 그리기",
+   "bounding": [
+    1020,
+    0,
+    400,
+    830
+   ],
+   "color": "#7a3f8a",
+   "font_size": 22,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.75,
+   "offset": [
+    40,
+    40
+   ]
+  },
+  "webtoon": {
+   "model": "uc",
+   "role": "candidate_sheet"
+  }
+ },
+ "version": 0.4
+}

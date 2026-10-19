@@ -1,7 +1,7 @@
 {
- "id": "cd6272e4-874d-4f35-95f1-96fb53d22539",
+ "id": "1ddeae81-6dc5-4f7b-bce7-799a8857bca4",
  "revision": 0,
- "last_node_id": 12,
+ "last_node_id": 11,
  "last_link_id": 12,
  "nodes": [
   {
@@ -13,7 +13,7 @@
    ],
    "size": [
     420,
-    760
+    640
    ],
    "flags": {},
    "order": 0,
@@ -24,7 +24,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "# 시안: 새 인물 시트 (Qwen Image 2.1, 40스텝, 16:9)\n새 화에 처음 나오는 인물 시트을 만든다. 사용자가 보고 고르면 작품 assets 에 넣는다.\n`<image1>` 은 시트 모양·그림체 본보기(다른 사람)다. 글 맨 앞에 아래 머리말을 두고, 나이를 못 박는다(중년이 젊게 나왔다).\n`<image1> is ONLY a reference for the sheet layout and the art style: it shows a DIFFERENT person. Draw a new character design reference sheet with exactly the same layout (four full-body views on the left, a grid of head-and-shoulders expressions on the right), the same plain background and the same art style, for the new character described below. Do NOT copy the face, hairstyle, hair color, body or outfit of <image1>.`\n작업실에서는 `vast/new_assets.py <작품> sheet <이름>` 이 같은 구성으로 돌리고, tools/make_episode.py 가 새 인물 시트을 만나면 이걸 부르고 멈춘다."
+    "# 에셋: 표정 은행 · 기본복 (Qwen Image 2.1 편집)\n인물 얼굴(또는 정면 전신)을 `<image1>` 에 넣고 바꿀 것 하나만 바꾼다. 얼굴·머리·그림체는 그대로.\n- 표정 은행: 기본 지시 그대로 표정 문장만 바꾼다. 센 표정 12가지 목록은 vast/make_assets.py 의 STRONG.\n- 기본복(옷 갈아입히기 출발점): 정면 전신을 넣고 아래 지시.\n`Change only the clothes of the person in <image1>: a plain fitted heather-gray crew-neck short-sleeve t-shirt and plain gray knee-length shorts, barefoot, nothing else, no accessories. Keep exactly the same person, face, hairstyle, hair color, body proportions, height, standing pose, framing, plain background and art style. Neutral face.`\n작업실에서는 `vast/make_assets.py <작품> <인물> expr|base` 가 한꺼번에 돌린다. 결과는 output/webtoon_studio/asset"
    ],
    "title": "사용법"
   },
@@ -161,7 +161,7 @@
    ],
    "flags": {},
    "order": 4,
-   "mode": 4,
+   "mode": 0,
    "inputs": [
     {
      "name": "model",
@@ -193,7 +193,7 @@
     "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
     1.0
    ],
-   "title": "터보 LoRA (켜면 steps 8)"
+   "title": "터보 LoRA (steps 8)"
   },
   {
    "id": 6,
@@ -269,10 +269,10 @@
     "Node name for S&R": "LoadImage"
    },
    "widgets_values": [
-    "webtoon_487933230214.png",
+    "webtoon_eec340c288a4.png",
     "image"
    ],
-   "title": "<image1>"
+   "title": "인물 얼굴 <image1>"
   },
   {
    "id": 8,
@@ -283,7 +283,7 @@
    ],
    "size": [
     520,
-    760
+    500
    ],
    "flags": {},
    "order": 7,
@@ -308,16 +308,6 @@
      "name": "images.image_2",
      "type": "IMAGE",
      "link": null
-    },
-    {
-     "name": "images.image_3",
-     "type": "IMAGE",
-     "link": null
-    },
-    {
-     "name": "images.image_4",
-     "type": "IMAGE",
-     "link": null
     }
    ],
    "outputs": [
@@ -340,7 +330,9 @@
     {
      "name": "LATENT",
      "type": "LATENT",
-     "links": [],
+     "links": [
+      9
+     ],
      "slot_index": 2
     }
    ],
@@ -348,60 +340,25 @@
     "Node name for S&R": "TextEncodeQwenImage21"
    },
    "widgets_values": [
-    "<image1> is ONLY a reference for the sheet layout and the art style: it shows a DIFFERENT person. Draw a new character design reference sheet with exactly the same layout (four full-body views on the left, a grid of head-and-shoulders expressions on the right), the same plain background and the same art style, for the new character described below. Do NOT copy the face, hairstyle, hair color, body or outfit of <image1>.\n\nART STYLE (identical in every image): high-quality Japanese anime key-visual style adapted for a Korean webtoon. Thin, clean, dark lineart with delicate hand-drawn weight variation. Soft cel shading with smooth gradient shadows and a gentle bloom; warm golden key light from one side with a soft rim light on hair and shoulders; airy, slightly muted colors with natural skin tones; subtle paper grain texture over the whole image. Eyes: large glossy anime eyes with layered iris color gradients, two or three bright highlights and fine individual upper and lower lashes, but with adult eye shapes (not round childlike eyes). Hair: luminous highlight bands, defined strand clumps and fine flyaway strands catching the light. Delicate pink blush hatching lines on the cheeks only when emotional. Adult faces with mature jawlines, realistic adult proportions, women with a natural medium-size chest. Not chibi, not 3D, not photorealistic, no plastic skin, no thick outlines, no text.\n\nCharacter: Oh, team leader, Korean man, 45, an ordinary-looking middle-aged office manager (NOT handsome, NOT a pretty-boy): short side-parted black hair with gray streaks at the temples, rectangular thin-framed glasses, a few wrinkles, slight belly, average height. Outfit: plain gray suit, white shirt, no tie, black shoes.\n\nIMAGE: character design reference sheet on a plain light warm-gray background, no text, no labels. Left: four full-body views of the same person standing in a row (front, three-quarter, side profile, back), consistent proportions. Right: a 3x2 grid of head-and-shoulders expressions: neutral, pleased smile, clapping, announcing with one hand raised, pointing, mildly stern.\n\nKeep the character's age exactly as described: do not make them look younger or more glamorous than described.",
+    "Change only the facial expression of the person in <image1> to: crying silently: tears running down the cheeks, biting the lower lip, eyebrows twisted up in pain, red wet eyes. Strong, instantly readable Korean webtoon acting: eyebrows, eyelids, eyes, mouth and cheeks all change together; webtoon expression marks are welcome when they fit. Keep exactly the same person, face shape, hairstyle, hair color, outfit, framing, plain background and art style. Keep the face attractive and on-model (no chibi, no gag face).",
     "",
     1024
    ],
-   "title": "컷 설명 (<imageN> 으로 참고 그림 부르기)"
+   "title": "지시"
   },
   {
    "id": 9,
-   "type": "EmptyLatentImage",
+   "type": "KSampler",
    "pos": [
     1040,
     50
    ],
    "size": [
     360,
-    106
-   ],
-   "flags": {},
-   "order": 8,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "LATENT",
-     "type": "LATENT",
-     "links": [
-      9
-     ],
-     "slot_index": 0
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "EmptyLatentImage"
-   },
-   "widgets_values": [
-    1920,
-    1088,
-    1
-   ],
-   "title": "캔버스 16:9 (1920x1088)"
-  },
-  {
-   "id": 10,
-   "type": "KSampler",
-   "pos": [
-    1040,
-    190
-   ],
-   "size": [
-    360,
     262
    ],
    "flags": {},
-   "order": 9,
+   "order": 8,
    "mode": 0,
    "inputs": [
     {
@@ -441,7 +398,7 @@
    "widgets_values": [
     0,
     "randomize",
-    40,
+    8,
     1,
     "euler",
     "simple",
@@ -449,18 +406,18 @@
    ]
   },
   {
-   "id": 11,
+   "id": 10,
    "type": "VAEDecode",
    "pos": [
     1040,
-    490
+    350
    ],
    "size": [
     360,
     46
    ],
    "flags": {},
-   "order": 10,
+   "order": 9,
    "mode": 0,
    "inputs": [
     {
@@ -490,7 +447,7 @@
    "widgets_values": []
   },
   {
-   "id": 12,
+   "id": 11,
    "type": "SaveImage",
    "pos": [
     1440,
@@ -501,7 +458,7 @@
     830
    ],
    "flags": {},
-   "order": 11,
+   "order": 10,
    "mode": 0,
    "inputs": [
     {
@@ -515,7 +472,7 @@
     "Node name for S&R": "SaveImage"
    },
    "widgets_values": [
-    "webtoon_studio/new_sheet"
+    "webtoon_studio/asset"
    ]
   }
  ],
@@ -564,7 +521,7 @@
    6,
    6,
    0,
-   10,
+   9,
    0,
    "MODEL"
   ],
@@ -572,7 +529,7 @@
    7,
    8,
    0,
-   10,
+   9,
    1,
    "CONDITIONING"
   ],
@@ -580,23 +537,23 @@
    8,
    8,
    1,
-   10,
+   9,
    2,
    "CONDITIONING"
   ],
   [
    9,
+   8,
+   2,
    9,
-   0,
-   10,
    3,
    "LATENT"
   ],
   [
    10,
-   10,
+   9,
    0,
-   11,
+   10,
    0,
    "LATENT"
   ],
@@ -604,15 +561,15 @@
    11,
    4,
    0,
-   11,
+   10,
    1,
    "VAE"
   ],
   [
    12,
-   11,
+   10,
    0,
-   12,
+   11,
    0,
    "IMAGE"
   ]
@@ -620,7 +577,7 @@
  "groups": [
   {
    "id": 1,
-   "title": "1. 모델 (Qwen Image 2.1)",
+   "title": "1. 모델 (Qwen Image 2.1 · 터보)",
    "bounding": [
     0,
     0,
@@ -633,12 +590,12 @@
   },
   {
    "id": 2,
-   "title": "2. 참고 그림 (넣은 순서 = <image1>, <image2> …)",
+   "title": "2. 고칠 그림 = <image1>",
    "bounding": [
     0,
     620,
     380,
-    370
+    380
    ],
    "color": "#8a6a3f",
    "font_size": 22,
@@ -646,7 +603,7 @@
   },
   {
    "id": 3,
-   "title": "3. 컷 설명",
+   "title": "3. 고칠 것 (짧게, 고칠 것만)",
    "bounding": [
     420,
     0,
@@ -659,7 +616,7 @@
   },
   {
    "id": 4,
-   "title": "4. 세로 캔버스 · 그리기",
+   "title": "4. 그리기 (캔버스 = <image1> 크기)",
    "bounding": [
     1020,
     0,
@@ -679,6 +636,10 @@
     40,
     40
    ]
+  },
+  "webtoon": {
+   "model": "uc",
+   "role": "asset_expression"
   }
  },
  "version": 0.4

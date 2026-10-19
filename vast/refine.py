@@ -100,7 +100,7 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
             keep = img_path.parent / "_stage1"
             keep.mkdir(exist_ok=True)
             (keep / img_path.name).write_bytes(img_path.read_bytes())
-        g = graph(remove_prompt(extras), [upload(c, img_path, cache)], 0, 0, seed + r, 8, 1024, turbo=True, edit=True)
+        g = graph(remove_prompt(extras), [upload(c, img_path, cache)], 0, 0, seed + r, 8, 1024, turbo=True, edit=True, series=series)
         g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/fixed"
         hist = c.wait(c.queue(g), 600)
         img = next(i for o in hist["outputs"].values() for i in o.get("images", []))
@@ -417,7 +417,7 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
             keep = dst.parent / "_stage1"
             keep.mkdir(exist_ok=True)
             (keep / f"{pid}_before_check.png").write_bytes(before)
-            g = graph(staging_edit_prompt(series, p, r, probs), [upload(c, dst, cache)], 0, 0, seed % 100000 + 17, 8, 1024, turbo=True, edit=True)
+            g = graph(staging_edit_prompt(series, p, r, probs), [upload(c, dst, cache)], 0, 0, seed % 100000 + 17, 8, 1024, turbo=True, edit=True, series=series)
             g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/checked"
             hist = c.wait(c.queue(g), 600)
             c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
@@ -463,7 +463,7 @@ def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
             return True
         prompt = (f"In <image1>, remove {extra[0]} entirely; fill the space with the background around them. Keep everyone else, the place, the light "
                   "and the framing exactly the same.")
-        g = graph(prompt, [upload(c, dst, cache)], 0, 0, seed % 100000 + 41 + k, 8, 1024, turbo=True, edit=True)
+        g = graph(prompt, [upload(c, dst, cache)], 0, 0, seed % 100000 + 41 + k, 8, 1024, turbo=True, edit=True, series=series)
         g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/count_fix"
         hist = c.wait(c.queue(g), 600)
         c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
@@ -488,7 +488,7 @@ def fix_facing(c, cache, dst: Path, series, ep_dir: Path, p, seed, log=print) ->
         return False
     before = dst.read_bytes()
     g = graph(TURN.format(problems="; ".join(dict.fromkeys(gaze)), text=panel_text(p)[:500]), [upload(c, dst, cache)], 0, 0, seed % 100000 + 29, 8, 1024,
-              turbo=True, edit=True)
+              turbo=True, edit=True, series=series)
     g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/turned"
     hist = c.wait(c.queue(g), 600)
     c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
@@ -521,7 +521,7 @@ def main():
         p = panels[pid]
         prompt, refs = refine_prompt(series, p, not args.no_expr)
         names = [upload(c, src / f"{pid}.png", cache)] + [upload(c, r, cache) for r in refs]
-        g = graph(prompt, names, 0, 0, args.seed, args.steps, 1024, turbo=args.steps <= 8, edit=True)
+        g = graph(prompt, names, 0, 0, args.seed, args.steps, 1024, turbo=args.steps <= 8, edit=True, series=series)
         g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/refined"
         t = time.time()
         hist = c.wait(c.queue(g), 900)

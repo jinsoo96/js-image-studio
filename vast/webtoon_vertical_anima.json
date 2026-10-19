@@ -242,7 +242,7 @@
     "Node name for S&R": "CLIPTextEncode"
    },
    "widgets_values": [
-    "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands"
+    "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands, text, speech bubble, caption, comic page, multiple panels, collage, split screen, panel border"
    ],
    "title": "네거티브"
   },
@@ -554,7 +554,14 @@
     "full": 30
    },
    "name": "anima",
-   "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)"
+   "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)",
+   "model": "anima",
+   "role": "vertical",
+   "use_for": "선이 또렷한 애니메이션 그림체. 글만 받아 얼굴 일관성이 약하다(참고 그림 없이 작품 설정의 생김새 글로 맞춘다): 전경·분위기 컷, 표지·키비주얼처럼 얼굴이 같을 필요가 적은 그림에 맞다. UC 보다 클로즈업 지시, 인원 수, 간판 글자를 덜 따른다(2026-10-19 4컷 시험: 클로즈업이 중간 샷으로, 한 명이어야 할 컷에 두 명, 간판에 글자). 학습 크기가 약 100만 화소라 캔버스를 그에 맞춰 줄인다(max_pixels). '모든 그림에서 똑같이' 같은 여러 장을 뜻하는 말이 프롬프트에 있으면 4분할로 그려서 그런 문구는 prompt_drop 으로 뺀다.",
+   "max_pixels": 1100000,
+   "prompt_drop": [
+    "(identical in every image)"
+   ]
   }
  },
  "version": 0.4

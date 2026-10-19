@@ -638,6 +638,10 @@
     40,
     40
    ]
+  },
+  "webtoon": {
+   "model": "uc",
+   "role": "edit"
   }
  },
  "version": 0.4

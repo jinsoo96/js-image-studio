@@ -936,6 +936,10 @@
     562.0646074988441,
     284.91121690864276
    ]
+  },
+  "webtoon": {
+   "model": "noctq",
+   "role": "asset_base"
   }
  },
  "version": 0.4

@@ -153,7 +153,8 @@ def main():
     # 전부 한꺼번에 큐에 넣는다: 한 장씩 넣고 기다리면 올리기·확인 사이에 GPU 가 논다(2026-10-15 사용자 "존나 오래 걸리노")
     queued = []
     for cid, src, prompt, outp, seed, res, label in jobs:
-        g = graph(prompt, [upload(c, src, cache)], 0, 0, seed, 8, res, turbo=True, edit=True)
+        g = graph(prompt, [upload(c, src, cache)], 0, 0, seed, 8, res, turbo=True, edit=True, series=series,
+                  role="asset_expression" if label else "asset_base")  # 표정(label 있음)·기본 몸은 각자 서버 워크플로우(판별)를 쓴다
         queued.append((cid, c.queue(g), outp, label))
     t0 = time.time()
     for n, (cid, pid, outp, label) in enumerate(queued, 1):
