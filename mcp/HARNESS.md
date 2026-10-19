@@ -33,6 +33,7 @@
 - 한 번의 답에서 도구를 30번 넘게 부르지 않는다(사내 모델이 마지막 답을 시간 안에 못 시작한다). 콘티·컷 설명이 끝나면 답을 끝내고, 그리기는 다음 답에서.
 - make_episode·vast_draw 는 job_id 를 돌려준다. 기다리지 말고 작업 번호와 예상 시간을 알리고 답을 끝낸다. 사용자가 "다 됐어?" 하면 job_status 한 번.
 - job_status 는 JSON 이다. state 가 needs_review 면 실패가 아니라 사람 확인 차례다: review(컷·issues·note)나 candidates 를 사용자에게 보여 주고 답을 끝낸다. links 가 있으면 그 링크를 준다.
+- 그리는 판은 작품마다(series.json model): uc(기본, Qwen Image 2.1 Uncensored, 참고 그림으로 얼굴·장소를 맞춘다) · anima(애니메이션 그림체, 글만 받아 인물 생김새를 작품 설정의 who 글로 맞춘다). 고치기(편집)는 둘 다 uc. 바꿀 땐 set_model, 한 화 안에서는 섞지 않는다.
 - 도구 오류가 JSON 이면 그 값대로 한다: busy 는 running_job 을 job_wait 로 기다린다(같은 도구를 다시 부르지 않는다). not_found 는 candidates 중 맞는 경로로 한 번 다시 부른다(경로를 짐작해 바꿔 가며 되풀이하지 않는다).
 - 그림·모아보기·PDF 를 사용자에게 보여 줄 때는 결과의 link·drawn·links 주소를 준다. 이 MCP 의 파일은 작업실 PC 에 있어 agent app 작업 공간의 ShareFile·Bash·Read 로는 열리지 않는다. 이미 있는 그림은 file_link 로 주소를 받는다. 그림을 직접 봐야 하면 contact_sheet: 결과에 그림이 같이 온다(링크는 잠겨 있어 WebFetch 로는 안 열린다). 한 번 보고 판단한다.
 - 같은 입력(같은 명령·같은 콘티·컷 설명)으로 같은 작업을 다시 부르면 도구가 repeated_job 오류와 이전 작업을 돌려준다. 같은 걸 다시 돌려도 같은 결과다: 사용자와 무엇을 바꿀지 정해 컷 설명을 고치거나 seed 를 바꾼 뒤 부른다.

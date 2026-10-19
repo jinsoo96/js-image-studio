@@ -10,15 +10,33 @@ import copy
 import json
 import os
 import urllib.parse
+from pathlib import Path
 
 from comfy_client import Comfy
 
-# 생성 · 편집(표정 은행·기본복·남는 사람 지우기·연출 손보기) 워크플로우. 모델 판은 환경변수 WEBTOON_MODEL 로 고른다(기본 uc).
-# 2026-10-18 사용자 "그 모델(Uncensored) 써서 해, 기본 모델이 너무 안 좋다" → 기본을 UC 판으로. 두 판은 모델(UNET)만 다르고 구성은 같다.
+# 판마다 (생성, 편집) 워크플로우. 고르는 순서: 환경변수 WEBTOON_MODEL → 작품 설정 series.json "model" → uc.
+# 2026-10-18 사용자 "그 모델(Uncensored) 써서 해" → 기본 UC. 2026-10-19 사용자 "아닌 버전은 지우고 UC 만, anima 버전 하나" → 일반 판을 지우고
+# Anima 판을 더했다. Anima 는 글만 받는 모델이라(참고 그림 입구 없음) 편집은 UC 편집 워크플로우를 같이 쓴다.
 MODELS = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json"),
-          "base": ("webtoon_vertical_qwen21.json", "webtoon_edit_qwen21.json")}
+          "anima": ("webtoon_vertical_anima.json", "webtoon_edit_qwen21_uc.json")}
 MODEL = os.environ.get("WEBTOON_MODEL", "uc").strip().lower()
 GEN, EDIT = MODELS.get(MODEL, MODELS["uc"])
+
+
+def pick(series=None) -> tuple:
+    """(판 이름, 생성 워크플로우, 편집 워크플로우). 환경변수 WEBTOON_MODEL 이 있으면 그것, 없으면 작품 설정의 model, 없으면 uc."""
+    name = os.environ.get("WEBTOON_MODEL", "").strip().lower()
+    if not name and series:
+        sj = Path(series) / "series.json"
+        if sj.exists():
+            name = str(json.loads(sj.read_text(encoding="utf-8")).get("model") or "").strip().lower()
+    name = name if name in MODELS else "uc"
+    return (name, *MODELS[name])
+
+
+def takes_refs(ui: dict) -> bool:
+    """이 워크플로우가 참고 그림을 받는가(워크플로우의 extra.webtoon.refs, 없으면 받는다고 본다: Qwen 판)."""
+    return bool(((ui.get("extra") or {}).get("webtoon") or {}).get("refs", True))
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 # 부르는 쪽이 노드를 찾는 번호. 전에 코드로 짜던 그래프와 같은 번호라 comfy_panel·refine·make_assets·xgen_catalog 는 그대로 쓴다.
 # 클래스가 워크플로우에 하나뿐일 때만 붙이고, 화면에서 더한 노드는 u<번호>.
@@ -74,6 +92,7 @@ def to_api(ui: dict, turbo=None) -> dict:
     """UI 형식 → API 형식. 우회(mode 4) 노드는 같은 타입 입력으로 건너 이어 주고, 끈(mode 2) 노드와 메모처럼 화면에만 있는 노드는 뺀다.
     turbo 가 True/False 면 이름에 turbo 가 든 LoRA 를 켜거나 우회한다(부르는 쪽 스텝 8·40 에 맞춤)."""
     nodes = {n["id"]: n for n in ui["nodes"]}
+    meta = (ui.get("extra") or {}).get("webtoon") or {}
     if turbo is not None:
         for n in nodes.values():
             if n["type"] == "LoraLoaderModelOnly" and "turbo" in str((n.get("widgets_values") or [""])[0]).lower():
@@ -103,7 +122,10 @@ def to_api(ui: dict, turbo=None) -> dict:
                 if s:
                     inputs[i["name"]] = s
         api[nid] = {"class_type": n["type"], "inputs": inputs}
-    return _renumber(api)
+    api = _renumber(api)
+    if turbo is not None and meta.get("cfg") and "7" in api:  # 판마다 터보·일반 cfg 가 다르면 워크플로우 데이터대로(Anima 1 · 4)
+        api["7"]["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
+    return api
 
 
 def _renumber(api: dict) -> dict:
@@ -126,7 +148,16 @@ def _renumber(api: dict) -> dict:
 
 def fill(g: dict, prompt: str, ref_names: list, w: int, h: int, seed: int, steps: int, ref_res: int,
          prefix: str = "webtoon_studio/panel") -> dict:
-    """그리기 도구가 정하는 값만 넣는다. 참고 그림은 워크플로우의 LoadImage 대신 넘긴 이름으로 <image1>… 를 다시 꽂는다."""
+    """그리기 도구가 정하는 값만 넣는다. 참고 그림은 워크플로우의 LoadImage 대신 넘긴 이름으로 <image1>… 를 다시 꽂는다.
+    글만 받는 판(Anima)은 KSampler 의 positive 로 이어진 글 칸에 프롬프트를 넣고 참고 그림은 받지 않는다(부르는 쪽 comfy_panel.graph 가 거른다)."""
+    if g.get("5", {}).get("class_type") != "TextEncodeQwenImage21":
+        pos = g["7"]["inputs"]["positive"][0]
+        g[pos]["inputs"]["text"] = prompt
+        if "6" in g:
+            g["6"]["inputs"].update(width=w, height=h, batch_size=1)
+        g["7"]["inputs"].update(seed=seed, steps=steps)
+        g["9"]["inputs"]["filename_prefix"] = prefix
+        return g
     enc = g["5"]["inputs"]
     enc["prompt"], enc["resolution"] = prompt, ref_res
     for k in [k for k in enc if k.startswith("images.")]:

@@ -1,7 +1,7 @@
 """서버 ComfyUI 화면에서 열어 쓰는 세로 웹툰 워크플로우(UI 형식)를 만들어 저장한다. 기준선 image_anima_base_v1.json 은 건드리지 않는다.
 comfy_panel.py 가 큐에 넣는 그래프와 같은 구성(Qwen Image 2.1 + 참고 그림 3장 + 세로 2:3 약 2MP)을 사람이 손으로 돌릴 수 있게 펼쳐 놓은 것.
 
-    .venv/Scripts/python vast/make_workflow.py [--name webtoon_vertical_qwen21.json] [--prompt-file 컷.txt] [--ref 그림 ...] [--save]
+    .venv/Scripts/python vast/make_workflow.py [--name webtoon_vertical_qwen21_uc.json] [--prompt-file 컷.txt] [--ref 그림 ...] [--save]
 --save 없이 돌리면 파일만 만든다(scratch). 같은 이름이 서버에 있으면 --force 없이는 덮지 않는다.
 """
 import argparse
@@ -33,7 +33,7 @@ webtoon-studio 의 컷 그리기와 같은 구성. 기준선 image_anima_base_v1
 참고 그림이 많을수록 느려진다. 한 컷에 인물 시트 + 장소면 충분하다.
 
 **모델**(models/ 에 받아 둠, Model Manager Neo · HuggingFace Comfy-Org/Qwen-Image-2.1)
-- diffusion_models/qwen_image_2.1_bf16.safetensors
+- diffusion_models/qwen-image-2.1-UC-fp8.safetensors (Uncensored 판)
 - text_encoders/qwen3vl_8b_int8_convrot.safetensors
 - vae/qwen_image_2.1_vae_bf16.safetensors
 
@@ -237,7 +237,7 @@ def library(force=False):
     remove = ("Remove every person from <image1>. Fill the empty space with the matching background. "
               "Keep everything else in <image1> exactly the same: the place, lighting and framing.")
     wfs = {
-        "webtoon_edit_qwen21.json": build_edit("Make him look heartbroken: eyes welling up with tears, trembling pressed lips. Keep everything else in "
+        "webtoon_edit_qwen21_uc.json": build_edit("Make him look heartbroken: eyes welling up with tears, trembling pressed lips. Keep everything else in "
                                                "<image1> exactly the same.", panel, EDIT_GUIDE, title="고칠 그림 <image1>"),
         "webtoon_asset_expression_qwen21.json": build_edit(expr_prompt(STRONG[1]), face, ASSET_GUIDE.format(base=BASE),
                                                            prefix="webtoon_studio/asset", title="인물 얼굴 <image1>"),
@@ -268,11 +268,71 @@ def library(force=False):
     print("지금 목록:", c.req("/api/userdata?dir=workflows"))
 
 
+ANIMA_GUIDE = """# 세로 웹툰 컷 (Anima)
+webtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1 과 같은 모델·설정을 서브그래프 없이 펼친 것(기준선은 그대로 둔다).
+
+**Qwen 판과 다른 점**: 글만 받는다(참고 그림 입구가 없다). 인물 생김새는 컷 설명 글에 적는다. 고치기(표정·남는 사람 지우기·검수 편집)는
+작업실 도구가 Qwen UC 편집 워크플로우(webtoon_edit_qwen21_uc)로 한다.
+
+**터보**: "터보 LoRA" 켜고 steps 8 · cfg 1(기본). 끄면 steps 30 · cfg 4(기준선 값). 작업실 도구가 켜고 끌 때 cfg 도 같이 바꾼다(extra.webtoon).
+
+**모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2
+
+글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
+ANIMA_NEGATIVE = "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands"  # 기준선의 네거티브
+
+
+def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix="webtoon_studio/panel"):
+    """Anima 판 생성 워크플로우(화면 형식). 참고 그림 없이 글로만 그린다. extra.webtoon 에 터보·일반 판 cfg 와 refs=False 를 적어
+    작업실 도구(saved_workflow)가 읽는다."""
+    w, h = size
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 640), [ANIMA_GUIDE], title="사용법")
+    g.group("1. 모델 (Anima)", 0, 0, 380, 520, "#3f789e")
+    unet = g.node("UNETLoader", (20, 50), (340, 82), ["anima-base-v1.0.safetensors", "default"], outputs=[("MODEL", "MODEL")])
+    lora = g.node("LoraLoaderModelOnly", (20, 160), (340, 82), ["anima-turbo-lora-v0.2.safetensors", 1.0], inputs=[("model", "MODEL")],
+                  outputs=[("MODEL", "MODEL")], title="터보 LoRA")
+    lora["mode"] = 0 if turbo else 4
+    clip = g.node("CLIPLoader", (20, 270), (340, 106), ["qwen_3_06b_base.safetensors", "stable_diffusion", "default"], outputs=[("CLIP", "CLIP")])
+    vae = g.node("VAELoader", (20, 400), (340, 58), ["qwen-image/qwen_image_vae.safetensors"], outputs=[("VAE", "VAE")])
+    g.group("2. 컷 설명", 400, 0, 520, 520, "#a1309b")
+    pos = g.node("CLIPTextEncode", (420, 50), (480, 260), [prompt], inputs=[("clip", "CLIP")], outputs=[("CONDITIONING", "CONDITIONING")], title="컷 설명")
+    neg = g.node("CLIPTextEncode", (420, 330), (480, 160), [ANIMA_NEGATIVE], inputs=[("clip", "CLIP")], outputs=[("CONDITIONING", "CONDITIONING")],
+                 title="네거티브")
+    g.group("3. 그리기", 940, 0, 700, 520, "#b58b2a")
+    lat = g.node("EmptyLatentImage", (960, 50), (300, 106), [w, h, 1], outputs=[("LATENT", "LATENT")], title="캔버스")
+    ks = g.node("KSampler", (960, 180), (300, 262), [seed, "fixed", steps, 1.0 if turbo else 4.0, "euler", "simple", 1.0],
+                inputs=[("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
+                outputs=[("LATENT", "LATENT")])
+    dec = g.node("VAEDecode", (1290, 50), (200, 46), None, inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
+    save = g.node("SaveImage", (1290, 130), (320, 360), [prefix], inputs=[("images", "IMAGE")])
+    g.link(unet, 0, lora, "model")
+    g.link(lora, 0, ks, "model")
+    g.link(clip, 0, pos, "clip")
+    g.link(clip, 0, neg, "clip")
+    g.link(pos, 0, ks, "positive")
+    g.link(neg, 0, ks, "negative")
+    g.link(lat, 0, ks, "latent_image")
+    g.link(ks, 0, dec, "samples")
+    g.link(vae, 0, dec, "vae")
+    g.link(dec, 0, save, "images")
+    wf = g.dump()
+    wf["extra"]["webtoon"] = {"refs": False, "cfg": {"turbo": 1.0, "full": 4.0}, "steps": {"turbo": 8, "full": 30}}
+    return wf
+
+
 def main():
     if sys.argv[1:2] == ["library"]:
         return library("--force" in sys.argv)
+    if sys.argv[1:2] == ["anima"]:  # Anima 판 생성 워크플로우를 서버에 저장(2026-10-19 사용자 "anima 버전 하나 만들어주라")
+        wf = build_anima()
+        c = Comfy()
+        name = "webtoon_vertical_anima.json"
+        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
+        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--name", default="webtoon_vertical_qwen21.json")
+    ap.add_argument("--name", default="webtoon_vertical_qwen21_uc.json")
     ap.add_argument("--prompt-file", required=True)
     ap.add_argument("--ref", action="append", default=[], help="참고 그림(순서대로 <image1>…), 서버 input/ 에 올린다")
     ap.add_argument("--aspect", default="2:3")

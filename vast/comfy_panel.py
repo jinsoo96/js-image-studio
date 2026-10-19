@@ -5,7 +5,7 @@
 
 먼저 한 번: .venv/Scripts/python vast/sheet_refs.py <series_hf_dir>  (시트에서 인물 머리 참고 그림을 잘라 둔다)
 모델(서버 models/ 에 Model Manager Neo 로 받아 둠, 없으면 comfy_client.py fetch):
-  diffusion_models/qwen_image_2.1_bf16.safetensors · text_encoders/qwen3vl_8b_int8_convrot.safetensors · vae/qwen_image_2.1_vae_bf16.safetensors
+  diffusion_models/qwen-image-2.1-UC-fp8.safetensors · text_encoders/qwen3vl_8b_int8_convrot.safetensors · vae/qwen_image_2.1_vae_bf16.safetensors
   loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors(--turbo)
 참고 그림은 프롬프트에서 <image1>…<image10> 으로 부른다(Qwen Image 2.1 규칙, 10장까지). 프롬프트·참고 그림을 고른 이유는 qwen_refs 설명.
 RTX 5090 기준 한 컷: 40스텝 약 100~160초, --turbo(8스텝) 약 30~50초.
@@ -26,9 +26,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
 
-UNET, CLIP, VAE = "qwen_image_2.1_bf16.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
-if os.environ.get("WEBTOON_MODEL", "uc").strip().lower() == "uc":  # 저장 워크플로우를 못 불러 코드로 짤 때도 같은 판(saved_workflow.MODELS)
-    UNET = "qwen-image-2.1-UC-fp8.safetensors"
+# 저장 워크플로우를 못 불러 코드로 짤 때의 Qwen 판(UC). 일반 판은 2026-10-19 사용자 요청으로 지웠다(saved_workflow.MODELS)
+UNET, CLIP, VAE = "qwen-image-2.1-UC-fp8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
 TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turbo LoRA: 8스텝 cfg 1(시안용, 모델 카드)
 # 약 2MP(모델 기본 1MP, 최대 2048x2048), 32 배수. 합성 폭 1600 보다 크게
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
@@ -60,14 +59,20 @@ def strip_people(text: str) -> str:
 _SAVED_WARNED = False
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
-    edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시)."""
+    edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
+    series 를 주면 그 작품의 판(series.json model, saved_workflow.pick). 그 판의 생성 워크플로우가 참고 그림을 못 받는데(Anima) 참고 그림을
+    넘기면(인물 시트 시안처럼 본보기가 꼭 필요한 일) 참고 그림을 받는 UC 판으로 그린다."""
     global _SAVED_WARNED
     try:
-        from saved_workflow import EDIT, GEN, fill, load_ui, to_api
-        return fill(to_api(load_ui(EDIT if edit else GEN), turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
+        from saved_workflow import MODELS, fill, load_ui, pick, takes_refs, to_api
+        _, gen, ed = pick(series)
+        ui = load_ui(ed if edit else gen)
+        if ref_names and not edit and not takes_refs(ui):
+            ui = load_ui(MODELS["uc"][0])
+        return fill(to_api(ui, turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
             print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
@@ -159,7 +164,16 @@ def panel_text(p) -> str:
     return " ".join(x for x in parts if x)
 
 
-def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
+def gen_takes_refs(series) -> bool:
+    """이 작품의 생성 판이 참고 그림을 받는가(Anima 는 못 받는다). 못 불러오면 받는다고 본다(코드 그래프는 Qwen)."""
+    try:
+        from saved_workflow import load_ui, pick, takes_refs
+        return takes_refs(load_ui(pick(series)[1]))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, text_only=False):
     """같은 컷 설명(panels.json)으로 Qwen 용 짧은 프롬프트와 참고 그림을 만든다. 2026-10-15 시험에서 정한 것:
     - 힉스필드 프롬프트(약 4천 자, 맥락·규칙·연기 일반론)를 그대로 쓰면 연기가 묻힌다(p045 울 컷이 무표정, 짧게 쓰니 눈물·입술 깨묾이 나옴)
       → 컷·연기·동작·옷·카메라를 앞에, 그림체는 뒤에, 규칙은 한 줄
@@ -184,11 +198,13 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
     if loc and p.get("view"):
         alt = loc.with_name(f"{p['location']}_{p['view']}.png")
         loc = alt if alt.exists() else loc
+    if text_only:  # 글만 받는 판(Anima): 장소·인물은 그림 대신 글로(아래 PLACE·PEOPLE)
+        loc = None
     if loc and not close:
         refs.append(loc)
         lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")
     bind = {}
-    for cid in p.get("chars", []):
+    for cid in ([] if text_only else p.get("chars", [])):
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
         # turned: 독자를 봐서 다시 그릴 때. 정면 표정 칸·정면 머리가 고개 방향까지 끌고 갔다(2026-10-18 추몽 p016) → 시트의 3/4 머리만 넣는다
         turn = series / "assets" / "vast_refs" / f"{cid}_turn.png"
@@ -221,8 +237,14 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
                      "softly blurred part of it shows behind the person. Do not draw the whole room.")
     chars = p.get("chars", [])
     n = len(chars)
-    if n:
+    if n and refs:
         lines.append("The person references only show who each person is. Do NOT copy their crop, plain background, outfit, pose or expression.")
+    people = place = ""
+    if text_only:  # 참고 그림이 없으니 작품 설정의 생김새(who)·장소 설명을 글로 넣는다. 컷마다 같은 문장이라 얼굴이 덜 흔들린다
+        sj = json.loads((series / "series.json").read_text(encoding="utf-8")) if (series / "series.json").exists() else {}
+        cast = sj.get("cast") or {}
+        people = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}: {cast.get(c, {}).get('who', '')}" for c in chars if c in NAMES)
+        place = str((sj.get("locations") or {}).get(p.get("location") or "", "")) if not insert else ""
     # 참고 얼굴이 모두 정면이라 거의 모든 컷이 독자를 쳐다봤다(2026-10-18 추몽 사용자 "왜 시점을 자꾸 독자 보는 거로 하냐").
     # 시선은 컷 글이 정한 대로, 글에 없을 때만 행동의 상대를 본다. 시점 컷인지는 그리기 모델이 글을 읽고 판단한다: 문구를 찾아 가르던 판별은
     # 표현이 조금만 달라도 틀렸다(2026-10-19 D+18 p022 "faces the viewer, who sits across the table" 을 놓침, 사용자 "문구 정규식은 땜질")
@@ -276,7 +298,8 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False):
                if "close-up" in (p.get("shot") or "") else "")
     parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.", framing,
              f"ACTING ({acting_rule}): {p['acting']}" if p.get("acting") else "",
-             action, outfit, f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,
+             action, outfit, f"PEOPLE (draw each person exactly like this): {people}." if people else "",
+             f"PLACE: {place}" if place else "", f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,
              ("REFERENCES: " + " ".join(lines)) if lines else "", style,
              f"COLOR AND TEXTURE OF THIS PANEL: {p['look']}" if p.get("look") else "",
              text_rule
@@ -324,12 +347,15 @@ def main():
     if miss:
         sys.exit(f"서버에 모델이 없다: {miss} (vast/comfy_client.py downloads 로 받는 중인지 확인)")
     cache, failed = {}, []
+    text_only = not gen_takes_refs(series)  # 이 작품의 판이 글만 받으면(Anima) 장소·인물을 글로
+    if text_only:
+        print("이 작품의 생성 판은 글만 받는다(참고 그림 없이 그림, 편집은 UC)", flush=True)
     for p in panels:
         if only and p["id"] not in only:
             continue
         if p.get("reuse") or not p.get("action"):
             continue
-        prompt, refs = qwen_refs(series, p, expr=args.expr)
+        prompt, refs = qwen_refs(series, p, expr=args.expr and not text_only, text_only=text_only)
         if any(not r.exists() for r in refs):
             print(f"{p['id']}: 참고 그림 없음 {[str(r) for r in refs if not r.exists()]}")
             failed.append(p["id"])
@@ -345,14 +371,15 @@ def main():
         log = lambda m: print(m, flush=True)  # noqa: E731
 
         def render(sd, turned=False, note=""):
-            pr, rf = (qwen_refs(series, p, expr=False, turned=True) if turned else (prompt, refs))
+            pr, rf = (qwen_refs(series, p, expr=False, turned=True, text_only=text_only) if turned else (prompt, refs))
             if note:  # 연출 확인에서 걸린 점(지난 판의 실수)을 피하라고 붙인다
                 pr += "\n\nTHE LAST ATTEMPT HAD THESE MISTAKES, AVOID THEM: " + note
             names = [upload(c, r, cache) for r in rf]
             steps = args.steps or (8 if args.turbo else 40)
-            from make_workflow import build as ui_build  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
-            ui = ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel")
-            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo), ui), timeout=1200)
+            from make_workflow import build as ui_build, build_anima  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
+            ui = (build_anima(pr, size=(w, h), steps=steps, seed=sd, turbo=args.turbo) if text_only else
+                  ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel"))
+            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series), ui), timeout=1200)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")

@@ -691,7 +691,8 @@ def new_series(spec: str) -> str:
                        "main": "English default outfit", "exprs": "six English expressions, comma separated"}},
      "locations": {"<name>": "English description: place, time of day, light, furniture"},
      "era": "시대(한국어, 예: 2000년대 후반 서울)", "era_rule": "English period rule for every image (phones, cars, signs of that time)",
-     "people_rule": "English rule for people (ages, proportions, restrained expressions)"}
+     "people_rule": "English rule for people (ages, proportions, restrained expressions)",
+     "model": "uc" | "anima"(그리는 판, 비우면 uc. anima 는 글만 받아 인물 생김새를 who 글로 맞춘다, 편집은 uc)}
     직함·호칭은 cast 의 role 에 적는다(콘티 관문이 대사의 호칭과 맞춰 본다). era_rule 은 그리기 지시와 그림 검수에 들어간다.
     폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 다음: new_episode(slug, "ep001") → 콘티 → set_panels →
     make_episode(에셋 점검에서 인물 시트·장소 시안을 vast 로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
@@ -723,6 +724,25 @@ def add_to_series(series: str, kind: str, key: str, value: str) -> str:
     except Exception as e:  # noqa: BLE001
         return f"실패: {type(e).__name__}: {e}"
     return f"{s.name} 에 {kind} {key} 를 더했다. 프롬프트 {len(files)}개. 그림은 make_episode 에셋 점검이 시안으로 그린다"
+
+
+@mcp.tool()
+def set_model(series: str, model: str) -> str:
+    """작품의 그리는 판을 바꾼다(series.json model). uc = Qwen Image 2.1 Uncensored(참고 그림으로 얼굴·장소를 맞춘다, 기본) ·
+    anima = Anima(애니메이션 그림체, 글만 받아 인물 생김새를 작품 설정의 who 글로 맞춘다). 고치기(표정·남는 사람·검수 편집)는 둘 다 uc 편집.
+    이미 그린 컷은 그대로다: 판을 바꾼 뒤 새로 그리는 컷부터 바뀐다(한 화 안에서 섞으면 그림체가 달라진다)."""
+    sys.path.insert(0, str(VAST))
+    from saved_workflow import MODELS
+    m = model.strip().lower()
+    if m not in MODELS:
+        return json.dumps({"error": "unknown_model", "models": sorted(MODELS)}, ensure_ascii=False)
+    d = _series(series)
+    f = d / "series.json"
+    spec = _json(f, {}) or {}
+    old = spec.get("model") or "uc"
+    spec["model"] = m
+    f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
+    return json.dumps({"series": d.name, "model": m, "was": old}, ensure_ascii=False)
 
 
 @mcp.tool()

@@ -3,7 +3,7 @@
 회사 공용 GPU(vast.ai RTX 5090 32GB, ComfyUI 0.37)에서 힉스필드와 **같은 컷 설명(`panels.json`)** 으로 컷을 그린다. 크레딧은 들지 않고 GPU 시간만 쓴다.
 2026-10-15 사용자 "vastai 에서 이 정도 이미지 수준의 웹툰 만들게 워크플로우 세로로"에서 시작.
 
-**모델 판**: 기본은 Qwen Image 2.1 **Uncensored**(`diffusion_models\qwen-image-2.1-UC-fp8.safetensors`, 저장 워크플로우 `webtoon_vertical_qwen21_uc`·`webtoon_edit_qwen21_uc`, 2026-10-18 사용자 "그 모델 써서 해"). 환경변수 `WEBTOON_MODEL=base` 면 원래 판(`webtoon_vertical_qwen21`·`webtoon_edit_qwen21`). 고르는 곳은 `saved_workflow.MODELS`·`comfy_panel.UNET`·`comfy_client` 상태 점검(셋이 같은 환경변수를 본다). 2026-10-19 서버 실행 기록 40건이 전부 UC 였다.
+**모델 판**(2026-10-19): 작품마다 series.json `model` 로 고른다(환경변수 `WEBTOON_MODEL` 이 있으면 그것). `uc`(기본) = Qwen Image 2.1 **Uncensored**(`qwen-image-2.1-UC-fp8`, 저장 워크플로우 `webtoon_vertical_qwen21_uc`·`webtoon_edit_qwen21_uc`). `anima` = Anima(`anima-base-v1.0` + 터보 LoRA, 저장 워크플로우 `webtoon_vertical_anima`, 회사 기준선 `image_anima_base_v1` 을 펼친 구성, 기준선은 그대로): 글만 받아서 인물·장소를 그림 대신 글(작품 설정 who·장소 설명)로 넣고, 편집은 UC 편집 워크플로우. 참고 그림이 꼭 필요한 일(인물 시트 시안)은 자동으로 UC. 일반 Qwen 판(`webtoon_vertical_qwen21`·`webtoon_edit_qwen21`)은 사용자 요청으로 서버에서 지웠고 (백업 `state/workflow_backups/20261019-161346`), 짝 없던 웹툰 워크플로우(2단·표정 에셋·시안 둘)는 UC 모델로 바꿨다. `webtoon_asset_base_qwen21` 은 화면에서 누가 `noctQAnimeUncensoredAnimeMix` 로 바꿔 둔 그대로. 고르는 곳: `saved_workflow.pick`.
 
 ## 지킬 것
 - **회사 공용 인스턴스다.** 조회·그리기·모델 받기만 한다. 인스턴스 만들기·끄기·지우기, 결제 설정, 남의 워크플로우 수정은 하지 않는다. 기준선 `image_anima_base_v1.json` 은 건드리지 않는다.
@@ -21,7 +21,7 @@
 | `comfy_panel.py` | 컷 그리기: `panels.json` → `episodes\<회차>\panels_hf_vast\`(힉스필드 `panels_hf\` 는 안 건드림) |
 | `saved_workflow.py` | 서버 저장 워크플로우(생성·편집)를 불러 API 형식으로 바꾸고 입력값만 채움. 그리는 스크립트가 모두 이걸 거친다(`comfy_panel.graph`) |
 | `make_workflow.py` | 서버 화면에서 손으로 돌리는 세로 워크플로우를 만들어 저장 |
-| `webtoon_vertical_qwen21.json` | 서버에 저장한 그 워크플로우의 사본 |
+| `webtoon_*.json` | 서버에 저장한 웹툰 워크플로우의 사본(생성·편집 UC 판 `*_qwen21_uc`, Anima 판 `webtoon_vertical_anima`, 에셋·시안) |
 | `refine.py` | 2단 다듬기: 그림 보는 사내 Qwen 이 컷 설명에 없는 사람을 옷·자리로 짚고, Qwen 편집으로 그 사람만 지운다(`--fix`, 원본은 `_stage1\`). 긴 다듬기 지시 실험도 이 파일 |
 | `webtoon_panel_2stage_qwen21.json` | 서버에 저장한 2단 워크플로우(1단 그리기 → 2단 편집 다듬기) 사본 |
 
@@ -41,7 +41,7 @@
 ## 서버 화면에서 손으로
 포털(Open 버튼) → ComfyUI → 워크플로우 목록의 `webtoon_vertical_qwen21` → 왼쪽 참고 그림(넣은 순서가 `<image1>`, `<image2>` …)을 바꾸고 컷 설명을 고쳐 실행. 사용법은 워크플로우 안 노트에. 결과는 서버 `output\webtoon_vertical\`.
 - 기본은 세로 2:3(1184x1760), 40스텝, cfg 1, euler/simple. "터보 LoRA" 노드를 켜고(Ctrl+B) steps 8 이면 시안.
-- 다시 만들기: `make_workflow.py --prompt-file <컷.txt> --ref <그림> ... --out vast\webtoon_vertical_qwen21.json --save --force`
+- 다시 만들기: `make_workflow.py --prompt-file <컷.txt> --ref <그림> ... --out vast\webtoon_vertical_qwen21_uc.json --save --force` · Anima 판: `make_workflow.py anima`
 
 저장 워크플로우 한 벌(스크립트가 큐에 넣는 그래프와 같은 구성을 화면에서 열어 고칠 수 있게 펼친 것, 예시 그림은 D+18 우빈):
 | 종류 | 워크플로우 | 같은 일을 하는 스크립트 |
@@ -81,7 +81,7 @@
 ## 모델(서버 `models\`, HuggingFace `Comfy-Org/Qwen-Image-2.1`)
 | 폴더 | 파일 | 크기 |
 |---|---|---|
-| diffusion_models | `qwen_image_2.1_bf16.safetensors` | 14.2GB |
+| diffusion_models | `qwen-image-2.1-UC-fp8.safetensors`(UC 판) · `anima-base-v1.0.safetensors`(Anima 판) | 7.1GB · - |
 | text_encoders | `qwen3vl_8b_int8_convrot.safetensors` | 9.4GB |
 | vae | `qwen_image_2.1_vae_bf16.safetensors` | 0.7GB |
 | loras | `qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors`(8스텝) | 0.9GB |
