@@ -312,7 +312,20 @@ def crop_for(img: Image.Image, boxes: dict, who: list, shot: str, aspect: str) -
 MAX_UPSCALE = 4.0  # 이보다 크게 키워야 하는 작은 자리(멀리 선 사람의 클로즈업)는 자르지 않고, 그 부근을 배경 참고로 넣어 새로 그린다(p306 상수가 둘로)
 
 
-def derive(series: Path, ep: Path, run: dict, only=None, log=print) -> list:
+def _doubled(img_path: Path, series: Path, who: list) -> dict:
+    """같은 사람이 둘로 그려졌거나 얼굴이 반투명하게 겹쳤나(편집 경로의 흔한 실패). {"doubled": bool, "why": str}. 판정이 안 되면 doubled False."""
+    want = "; ".join(f"{_person(series, w)['name']} ({_person(series, w)['who'][:70]})" for w in who)
+    q = (f"This comic panel should show these named people, each exactly once: {want}. Look for drawing errors: the same person drawn twice, "
+         "two overlapping or semi-transparent copies of one face or head (a ghost double), or two copies of one body. Background strangers are fine. "
+         'Answer only JSON: {"doubled": true|false, "why": "short reason"}')
+    try:
+        r = _ask(Image.open(img_path), q, 300)
+        return {"doubled": bool(r.get("doubled")), "why": str(r.get("why", ""))}
+    except Exception:  # noqa: BLE001
+        return {"doubled": False, "why": "check failed"}
+
+
+def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=None) -> list:
     """묶음의 컷(인물이 있는 것)을 기준판에서 잘라 다시 그린다. 컷의 view 에 맞는 기준판(front · reverse)이 없으면 그 컷은 건너뛴다."""
     from hf_panel import names
     NAMES = names(series)
@@ -338,10 +351,12 @@ def derive(series: Path, ep: Path, run: dict, only=None, log=print) -> list:
         aspect = p.get("aspect") or "16:9"
         l, t, cw, ch = crop_box(plate, boxes, who, shot, aspect)
         tw, th = SIZES.get(aspect, SIZES["16:9"])
+        # 새로 그리기 경로(기준판 부근을 배경 참고로 생성): 작은 자리, 모든 클로즈업, 그리고 부르는 쪽이 고른 컷.
+        # 클로즈업을 잘라 편집하면 같은 얼굴이 둘이거나 반투명하게 겹친 컷이 12장 나왔다(2026-10-20 외출 전 장면 롤아웃: p007·p055·p220·p493 …)
         small = th / max(ch, 1) > MAX_UPSCALE
-        if small:  # 배경 참고로 쓸 넓은 자리(미디엄 크기)
-            l, t, cw, ch = crop_box(plate, boxes, who, "medium shot", aspect)
-        crop = plate.crop((int(l), int(t), int(l + cw), int(t + ch))).resize((tw, th), Image.LANCZOS)
+        gen = small or "close" in shot or p["id"] in (force_gen or set())
+        lg, tg, cwg, chg = crop_box(plate, boxes, who, "medium shot", aspect) if gen else (l, t, cw, ch)
+        crop = plate.crop((int(lg), int(tg), int(lg + cwg), int(tg + chg))).resize((tw, th), Image.LANCZOS)
         cf = ep / "scenes" / f"crop_{p['id']}.png"
         crop.save(cf)
         # 얼굴 참고 그림은 얼굴·머리에만: 상반신 참고 그림의 백팩 끈이 클로즈업에 따라왔다(p312·p315)
@@ -351,30 +366,54 @@ def derive(series: Path, ep: Path, run: dict, only=None, log=print) -> list:
         text += " " + " ".join(f"{NAMES[w]} wears {(p.get('outfit') or {}).get(w) or _person(series, w).get('main', '')}." for w in who)
         alone = (f" Only {NAMES[who[0]]} is in this close-up: anyone else partly visible at the edges becomes a soft, out-of-focus background shape and "
                  f"never gets {NAMES[who[0]]}'s face." if len(who) == 1 and "close" in shot else
-                 " Every other person in the frame keeps their own face and clothes.")
-        if small:
-            prompt = (f"<image1> shows the place, the light and who sits where around this moment of the scene. Draw a sharp, detailed Korean webtoon panel "
+                 " Every person appears exactly once and keeps their own face and clothes; nobody is drawn twice.")
+        gen_prompt = (f"<image1> shows the place, the light and who sits where around this moment of the scene. Draw a sharp, detailed Korean webtoon panel "
                       f"({shot}) in this same place with the same light and the same background behind the person. {faces}{alone} This moment: {text} "
                       "Clean line art, no text, no speech bubbles.")
-        else:
-            prompt = (f"<image1> is an enlarged crop of one moment of a scene. Redraw it as a sharp, detailed Korean webtoon panel ({shot}), keeping its "
-                      "composition: the same people in the same seats and positions, the same furniture, walls, windows and the same light behind them. "
-                      f"{faces}{alone} This moment: {text} Keep the framing of <image1>; do not add or remove people except as this moment says. "
-                      "Clean line art, no blur, no text, no speech bubbles.")
+        edit_prompt = (f"<image1> is an enlarged crop of one moment of a scene. Redraw it as a sharp, detailed Korean webtoon panel ({shot}), keeping its "
+                       "composition: the same people in the same seats and positions, the same furniture, walls, windows and the same light behind them. "
+                       f"{faces}{alone} This moment: {text} Keep the framing of <image1>; do not add or remove people except as this moment says. "
+                       "Clean line art, no blur, no text, no speech bubbles.")
         dst = outdir / f"{p['id']}.png"
         if dst.exists() and not (keep / dst.name).exists():
             shutil.copy(dst, keep / dst.name)
         t0 = time.time()
         refs = [vr / f"{w}_bust.png" for w in who]
-        if small:  # 새로 그리기(편집이 아니라 생성 워크플로우, 기준판 부근을 첫 참고 그림으로)
+
+        def draw_gen(seed):
+            src = plate
+            if len(who) == 1 and "close" in shot:
+                # 혼자 나오는 클로즈업: 배경 참고 속 다른 사람 자리를 흐리게 지운다. 글이 '화면 밖의 그녀를 본다'고 하면 참고 그림에 찍힌 그 사람까지
+                # 그려 둘 다에 이 사람 얼굴을 입혔다(2026-10-20 p224·p341 상수가 둘)
+                from PIL import ImageDraw, ImageFilter
+                W, H = plate.size
+                mask = Image.new("L", plate.size, 0)
+                md = ImageDraw.Draw(mask)
+                for w2, b2 in boxes.items():
+                    if w2 not in who:
+                        x1, y1, x2, y2 = b2["body"]
+                        md.rectangle([x1 * W / 1000, y1 * H / 1000, x2 * W / 1000, y2 * H / 1000], fill=255)
+                src = Image.composite(plate.filter(ImageFilter.GaussianBlur(28)), plate, mask.filter(ImageFilter.GaussianBlur(10)))
+            lg2, tg2, cwg2, chg2 = crop_box(plate, boxes, who, "medium shot", aspect)
+            src.crop((int(lg2), int(tg2), int(lg2 + cwg2), int(tg2 + chg2))).resize((tw, th), Image.LANCZOS).save(cf)
             names = [upload(c, cf, cache)] + [upload(c, r, cache) for r in refs]
-            g = graph(prompt, names, tw, th, 7 + len(done), 8, 1024, turbo=True, series=series, chars=who)
+            g = graph(gen_prompt, names, tw, th, seed, 8, 1024, turbo=True, series=series, chars=who)
             h = c.wait(c.queue(g), timeout=900)
             img = next(i for o in h["outputs"].values() for i in o.get("images", []))
             c.download(img, dst)
+
+        if gen:
+            draw_gen(7 + len(done))
         else:
-            _edit(c, cache, series, cf, refs, prompt, 7 + len(done), dst)
-        log(f"{p['id']}: 기준판({view})에서 {'새로 그림(작은 자리, 배경 참고)' if small else '다시 그림'} {int(time.time() - t0)}초 → {dst}")
+            _edit(c, cache, series, cf, refs, edit_prompt, 7 + len(done), dst)
+        how = "새로 그림(배경 참고)" if gen else "다시 그림"
+        # 같은 사람이 둘이거나 얼굴이 겹쳤나: 걸리면 새로 그리기로 한 번 더(시드를 바꿔)
+        d = _doubled(dst, series, who)
+        if d.get("doubled"):
+            draw_gen(101 + len(done))
+            d2 = _doubled(dst, series, who)
+            how += f" → 겹침({d.get('why', '')[:60]}) → 새로 그림" + (" (아직 겹침, 사람 눈으로)" if d2.get("doubled") else "")
+        log(f"{p['id']}: 기준판({view})에서 {how} {int(time.time() - t0)}초 → {dst}")
         done.append(p["id"])
     return done
 
@@ -389,6 +428,7 @@ def main():
     ap.add_argument("--tries", type=int, default=3)
     ap.add_argument("--only")
     ap.add_argument("--runs")
+    ap.add_argument("--gen", help="derive: 이 컷들은 새로 그리기 경로로(쉼표)")
     a = ap.parse_args()
     series = Path(a.series).resolve()
     ep = series / "episodes" / a.episode
@@ -405,7 +445,7 @@ def main():
         if a.cmd == "plate":
             build_plate(series, ep, r, a.view, a.tries)
         else:
-            derive(series, ep, r, set(a.only.split(",")) if a.only else None)
+            derive(series, ep, r, set(a.only.split(",")) if a.only else None, force_gen=set(a.gen.split(",")) if a.gen else None)
         return
     targets = [pick(n) for n in a.runs.split(",")] if a.runs else [r for r in rs if worth_plate(r, ep)]
     for r in [t for t in targets if t]:
