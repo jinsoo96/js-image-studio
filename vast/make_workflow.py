@@ -327,6 +327,68 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     return wf
 
 
+MOSS_GUIDE = """# 세로 웹툰 컷 (MOSS-Image UC)
+OpenMOSS 의 MOSS-Image SFT(5B, 2026-10-16, Apache-2.0)에 무검열 LoRA 를 얹은 판. ComfyUI 0.41.3 이상 기본 노드(서버 0.42.1).
+공식 템플릿 image_moss_image_t2i 를 서브그래프 없이 펼쳤다(프롬프트를 늘려 주는 TextGenerate 단계는 뺐다: 작업실이 컷 설명으로 프롬프트를 쓴다).
+
+**Qwen UC 판과 다른 점**: 글만 받는다(참고 그림·편집 없음). 인물 생김새는 컷 설명 글(작품 설정 who)로. 고치기·에셋은 Qwen UC 편집 워크플로우.
+긴 글(4K 토큰)과 그림 속 글자에 강하다.
+
+**터보**: "터보 LoRA"(8스텝 DMD) 켜고 steps 8 · cfg 1 · euler. 끄면 공식 값 25스텝 · cfg 2.5 · er_sde, 레이어 건너뛰기 가이드(22층).
+
+**모델**: diffusion_models/moss_image_sft_bf16 · text_encoders/qwen3.5_9b_int8_convrot(moss_image) · vae/flux2-vae_small
+· loras/moss-image-uncensored-lora-comfy(axiomofmind UC LoRA, PEFT 키를 ComfyUI 키로 바꾼 것: 원본은 키를 못 알아봐 안 붙었다) · loras/moss-image-sft-8step-dmd-lora(lodestones)"""
+
+MOSS_NEGATIVE = "text, speech bubble, caption, watermark, comic page, multiple panels, collage, split screen, panel border, blurry, low quality, bad anatomy"
+
+
+def build_moss(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix="webtoon_studio/panel"):
+    """MOSS-Image UC 판 생성 워크플로우(화면 형식). extra.webtoon 에 판 이름·터보/일반 cfg·스텝·refs=False 를 적어 작업실 도구가 읽는다."""
+    w, h = size
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 700), [MOSS_GUIDE], title="사용법")
+    g.group("1. 모델 (MOSS-Image UC)", 0, 0, 380, 640, "#3f789e")
+    unet = g.node("UNETLoader", (20, 50), (340, 82), ["moss_image_sft_bf16.safetensors", "default"], outputs=[("MODEL", "MODEL")])
+    uc = g.node("LoraLoaderModelOnly", (20, 160), (340, 82), ["moss-image-uncensored-lora-comfy.safetensors", 1.0], inputs=[("model", "MODEL")],
+                outputs=[("MODEL", "MODEL")], title="UC LoRA (무검열)")
+    lora = g.node("LoraLoaderModelOnly", (20, 270), (340, 82), ["moss-image-sft-8step-dmd-lora.safetensors", 1.0], inputs=[("model", "MODEL")],
+                  outputs=[("MODEL", "MODEL")], title="터보 LoRA (켜면 steps 8 · cfg 1)")
+    lora["mode"] = 0 if turbo else 4
+    slg = g.node("SkipLayerGuidanceDiTSimple", (20, 380), (340, 130), ["", "22", 0.0, 0.5], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
+                 title="레이어 건너뛰기 가이드 (cfg 1 이면 효과 없음)")
+    clip = g.node("CLIPLoader", (20, 530), (340, 106), ["qwen3.5_9b_int8_convrot.safetensors", "moss_image", "default"], outputs=[("CLIP", "CLIP")])
+    vae = g.node("VAELoader", (400, 560), (340, 58), ["flux2-vae_small.safetensors"], outputs=[("VAE", "VAE")])
+    g.group("2. 컷 설명", 400, 0, 520, 540, "#a1309b")
+    pos = g.node("CLIPTextEncode", (420, 50), (480, 280), [prompt], inputs=[("clip", "CLIP")], outputs=[("CONDITIONING", "CONDITIONING")], title="컷 설명")
+    neg = g.node("CLIPTextEncode", (420, 350), (480, 160), [MOSS_NEGATIVE], inputs=[("clip", "CLIP")], outputs=[("CONDITIONING", "CONDITIONING")],
+                 title="네거티브 (cfg 1 이면 안 씀)")
+    g.group("3. 그리기", 940, 0, 700, 540, "#b58b2a")
+    lat = g.node("EmptyFlux2LatentImage", (960, 50), (300, 106), [w, h, 1], outputs=[("LATENT", "LATENT")], title="캔버스")
+    ks = g.node("KSampler", (960, 180), (300, 262), [seed, "fixed", steps, 1.0 if turbo else 2.5, "euler" if turbo else "er_sde", "simple", 1.0],
+                inputs=[("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
+                outputs=[("LATENT", "LATENT")])
+    dec = g.node("VAEDecode", (1290, 50), (200, 46), None, inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
+    save = g.node("SaveImage", (1290, 130), (320, 360), [prefix], inputs=[("images", "IMAGE")])
+    g.link(unet, 0, uc, "model")
+    g.link(uc, 0, lora, "model")
+    g.link(lora, 0, slg, "model")
+    g.link(slg, 0, ks, "model")
+    g.link(clip, 0, pos, "clip")
+    g.link(clip, 0, neg, "clip")
+    g.link(pos, 0, ks, "positive")
+    g.link(neg, 0, ks, "negative")
+    g.link(lat, 0, ks, "latent_image")
+    g.link(ks, 0, dec, "samples")
+    g.link(vae, 0, dec, "vae")
+    g.link(dec, 0, save, "images")
+    wf = g.dump()
+    wf["extra"]["webtoon"] = {"name": "moss", "label": "MOSS-Image UC (OpenMOSS 5B + 무검열 LoRA, 글만 받음, 긴 글·그림 속 글자에 강함)",
+                              "use_for": "글로 장면을 길게 적는 컷, 그림 속 글자(간판·화면)가 필요한 컷. 참고 그림을 못 받아 인물 얼굴 일관성은 Qwen UC 보다 약하다",
+                              "refs": False, "cfg": {"turbo": 1.0, "full": 2.5}, "steps": {"turbo": 8, "full": 25},
+                              "sampler": {"turbo": "euler", "full": "er_sde"}, "max_pixels": 2200000}
+    return wf
+
+
 TRAIN_GUIDE = """# 인물 LoRA 학습 (Qwen Image 2.1 UC) — 2단계 중 ②
 서버 ComfyUI 기본 노드만 쓴다(확장 설치 없음). 작업실 도구 `vast/lora.py train <작품> <인물>`(MCP lora_train)이 ① → 모델 내리기 → ② 순서로 돌린다.
 
@@ -350,7 +412,9 @@ input/ 아래 폴더 하나에 그림과 같은 이름의 캡션 .txt(001.png + 
 # 학습을 막아 둘 이유(워크플로우 데이터 extra.webtoon.disabled, 도구 lora.train·MCP lora_train 이 읽고 학습하지 않는다). 막을 일이 생기면 이유를 적는다.
 # 2026-10-19 한때 막았다가 풀었다: 서버를 재시작시킨 것은 quantized_backward(fp8 역전파), 1024 메모리 초과는 checkpoint_depth 1(모델 통째),
 # 크기 오류는 앞부분 캐시였다. bf16 · 깊이 2 · 캐시 끔으로 1024 학습 스텝당 약 1.9초.
-TRAIN_DISABLED = ""
+TRAIN_DISABLED = ("ComfyUI 0.42.1(2026-10-19 MOSS 때문에 올림)에서 UC fp8 학습이 안 된다: dynamic VRAM 켬(기본) → 역전파 중 CUDA illegal memory access 로 "
+                  "ComfyUI 프로세스가 죽는다(서버 /var/log/portal/comfyui.log.old), 끔(--disable-dynamic-vram) → 메모리 부족이고 실패한 학습이 VRAM 을 남겨 "
+                  "그리기까지 막힌다. 0.37 에서는 같은 설정으로 됐다(재민 1500스텝 51분). 고칠 때까지 학습하지 않는다. 학습한 LoRA 를 그리기에 붙이는 건 된다.")
 
 
 def build_lora_dataset(folder="3d", model="uc"):
@@ -437,6 +501,13 @@ def main():
             (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
             print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
         return
+    if sys.argv[1:2] == ["moss"]:  # MOSS-Image UC 판(2026-10-19 사용자 "MOSS-IMAGE 도 vast ComfyUI 워크플로우로, UC 로 최적화")
+        wf = build_moss()
+        c = Comfy()
+        name = "webtoon_vertical_moss.json"
+        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
+        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if sys.argv[1:2] == ["anima"]:  # Anima 판 생성 워크플로우를 서버에 저장(2026-10-19 사용자 "anima 버전 하나 만들어주라")
         wf = build_anima()
         c = Comfy()

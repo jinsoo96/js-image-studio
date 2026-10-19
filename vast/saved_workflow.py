@@ -208,7 +208,9 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
         more = list(loras[len(slots):])
     if turbo is not None:
         for n in nodes.values():
-            if n["type"] == "LoraLoaderModelOnly" and "turbo" in str((n.get("widgets_values") or [""])[0]).lower():
+            # 터보 LoRA: 파일 이름에 turbo 가 들었거나 노드 제목이 터보/turbo(MOSS 의 8스텝 DMD LoRA 는 이름에 turbo 가 없다)
+            if n["type"] == "LoraLoaderModelOnly" and ("turbo" in str((n.get("widgets_values") or [""])[0]).lower()
+                                                        or re.search(r"터보|turbo", str(n.get("title", "")), re.I)):
                 n["mode"] = 0 if turbo else 4
     if refine is not None:
         for n in nodes.values():
@@ -259,6 +261,8 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
         for k, v in api.items():
             if v["class_type"] == "KSampler":
                 v["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
+                if (meta.get("sampler") or {}).get("turbo" if turbo else "full"):  # 판마다 샘플러도 다르면(MOSS 터보 euler · 일반 er_sde)
+                    v["inputs"]["sampler_name"] = meta["sampler"]["turbo" if turbo else "full"]
     return api
 
 

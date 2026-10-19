@@ -1260,6 +1260,58 @@ def set_lora(series: str, character: str, strength: float = -1, on: bool = True,
 
 
 @mcp.tool()
+def comfy_server(action: str = "status", version: str = "", lines: int = 60, old: bool = False, force: bool = False) -> str:
+    """vast ComfyUI 서버 관리(공용 서버). action:
+    status(버전·실행 인자·VRAM·큐) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
+    · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고 ComfyUI-Manager 로 바꾼 뒤 재시작하고 상태를 돌려준다).
+    restart·switch 는 큐에 작업이 있으면 하지 않는다(force=True 로만). 새 모델(예: 새 판)에 더 높은 ComfyUI 가 필요하면 versions → switch → draw_models 로 확인."""
+    sys.path.insert(0, str(VAST))
+    import comfy_admin as A
+    try:
+        if action == "status":
+            return json.dumps(A.status(), ensure_ascii=False)
+        if action == "versions":
+            return json.dumps(A.versions(), ensure_ascii=False)
+        if action == "logs":
+            return json.dumps({"log": A.logs(old, max(10, min(lines, 400)))}, ensure_ascii=False)
+        if action == "restart":
+            return json.dumps(A.restart(force), ensure_ascii=False)
+        if action == "switch":
+            if not version:
+                return _fail("version_required", given=version, candidates=A.versions().get("versions", []))
+            return json.dumps(A.switch(version, force), ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        return _fail("comfy_server_failed", given={"action": action, "version": version}, reason=f"{type(e).__name__}: {str(e)[:300]}")
+    return _fail("unknown_action", given=action, candidates=["status", "versions", "logs", "restart", "switch"])
+
+
+@mcp.tool()
+def fetch_model(url: str, folder: str, name: str = "") -> str:
+    """Hugging Face 파일을 vast ComfyUI 의 models/<folder>/ 에 받는다(서버의 Model Manager 가 받는다, 이미 있으면 건너뜀).
+    url = https://huggingface.co/<저장소>/resolve/main/<경로>. folder = diffusion_models · text_encoders · vae · loras 등. name 을 주면 그 이름으로 저장
+    (로라 저장소들이 lora.safetensors 처럼 같은 이름을 쓴다). 진행은 model_downloads(). 받은 뒤 그 모델로 판을 만들려면 서버에 webtoon_vertical_<판> 워크플로우를 저장한다."""
+    sys.path.insert(0, str(VAST))
+    from comfy_client import Comfy
+    if "huggingface.co/" not in url or "/resolve/" not in url:
+        return _fail("bad_url", given=url, reason="https://huggingface.co/<저장소>/resolve/main/<경로> 꼴만 받는다")
+    try:
+        r = Comfy().fetch_model(folder, url, name)
+    except Exception as e:  # noqa: BLE001
+        return _fail("fetch_failed", given={"url": url, "folder": folder, "name": name}, reason=f"{type(e).__name__}: {str(e)[:300]}")
+    return json.dumps({"folder": folder, "name": name or url.rsplit("/", 1)[-1], "task": r, "next": "model_downloads()"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def model_downloads() -> str:
+    """서버가 받고 있거나 받은 모델 파일 목록(이름 · 상태 · 진행률 · 크기 · 오류)."""
+    sys.path.insert(0, str(VAST))
+    from comfy_client import Comfy
+    tasks = Comfy().req("/model-manager/download/task").get("data", [])
+    return json.dumps({"downloads": [{"name": t.get("fullname"), "status": t.get("status"), "progress": round(t.get("progress") or 0),
+                                      "size_gb": round((t.get("totalSize") or 0) / 1e9, 2), "error": t.get("error") or ""} for t in tasks]}, ensure_ascii=False)
+
+
+@mcp.tool()
 def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     """vast 로 그린 컷을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
     사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""

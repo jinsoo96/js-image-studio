@@ -1,0 +1,665 @@
+{
+ "id": "972692f9-8381-4e40-ace5-14079f2ec8d8",
+ "revision": 0,
+ "last_node_id": 13,
+ "last_link_id": 12,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "MarkdownNote",
+   "pos": [
+    -470,
+    0
+   ],
+   "size": [
+    420,
+    700
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "# 세로 웹툰 컷 (MOSS-Image UC)\nOpenMOSS 의 MOSS-Image SFT(5B, 2026-10-16, Apache-2.0)에 무검열 LoRA 를 얹은 판. ComfyUI 0.41.3 이상 기본 노드(서버 0.42.1).\n공식 템플릿 image_moss_image_t2i 를 서브그래프 없이 펼쳤다(프롬프트를 늘려 주는 TextGenerate 단계는 뺐다: 작업실이 컷 설명으로 프롬프트를 쓴다).\n\n**Qwen UC 판과 다른 점**: 글만 받는다(참고 그림·편집 없음). 인물 생김새는 컷 설명 글(작품 설정 who)로. 고치기·에셋은 Qwen UC 편집 워크플로우.\n긴 글(4K 토큰)과 그림 속 글자에 강하다.\n\n**터보**: \"터보 LoRA\"(8스텝 DMD) 켜고 steps 8 · cfg 1 · euler. 끄면 공식 값 25스텝 · cfg 2.5 · er_sde, 레이어 건너뛰기 가이드(22층).\n\n**모델**: diffusion_models/moss_image_sft_bf16 · text_encoders/qwen3.5_9b_int8_convrot(moss_image) · vae/flux2-vae_small\n· loras/moss-image-uncensored-lora-comfy(axiomofmind UC LoRA, PEFT 키를 ComfyUI 키로 바꾼 것: 원본은 키를 못 알아봐 안 붙었다) · loras/moss-image-sft-8step-dmd-lora(lodestones)"
+   ],
+   "title": "사용법"
+  },
+  {
+   "id": 2,
+   "type": "UNETLoader",
+   "pos": [
+    20,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "moss_image_sft_bf16.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    160
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      2
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "moss-image-uncensored-lora-comfy.safetensors",
+    1.0
+   ],
+   "title": "UC LoRA (무검열)"
+  },
+  {
+   "id": 4,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    270
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "moss-image-sft-8step-dmd-lora.safetensors",
+    1.0
+   ],
+   "title": "터보 LoRA (켜면 steps 8 · cfg 1)"
+  },
+  {
+   "id": 5,
+   "type": "SkipLayerGuidanceDiTSimple",
+   "pos": [
+    20,
+    380
+   ],
+   "size": [
+    340,
+    130
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SkipLayerGuidanceDiTSimple"
+   },
+   "widgets_values": [
+    "",
+    "22",
+    0.0,
+    0.5
+   ],
+   "title": "레이어 건너뛰기 가이드 (cfg 1 이면 효과 없음)"
+  },
+  {
+   "id": 6,
+   "type": "CLIPLoader",
+   "pos": [
+    20,
+    530
+   ],
+   "size": [
+    340,
+    106
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      5,
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3.5_9b_int8_convrot.safetensors",
+    "moss_image",
+    "default"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "VAELoader",
+   "pos": [
+    400,
+    560
+   ],
+   "size": [
+    340,
+    58
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      11
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae_small.safetensors"
+   ]
+  },
+  {
+   "id": 8,
+   "type": "CLIPTextEncode",
+   "pos": [
+    420,
+    50
+   ],
+   "size": [
+    480,
+    280
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    ""
+   ],
+   "title": "컷 설명"
+  },
+  {
+   "id": 9,
+   "type": "CLIPTextEncode",
+   "pos": [
+    420,
+    350
+   ],
+   "size": [
+    480,
+    160
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "CONDITIONING",
+     "type": "CONDITIONING",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPTextEncode"
+   },
+   "widgets_values": [
+    "text, speech bubble, caption, watermark, comic page, multiple panels, collage, split screen, panel border, blurry, low quality, bad anatomy"
+   ],
+   "title": "네거티브 (cfg 1 이면 안 씀)"
+  },
+  {
+   "id": 10,
+   "type": "EmptyFlux2LatentImage",
+   "pos": [
+    960,
+    50
+   ],
+   "size": [
+    300,
+    106
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "EmptyFlux2LatentImage"
+   },
+   "widgets_values": [
+    1184,
+    1760,
+    1
+   ],
+   "title": "캔버스"
+  },
+  {
+   "id": 11,
+   "type": "KSampler",
+   "pos": [
+    960,
+    180
+   ],
+   "size": [
+    300,
+    262
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 4
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 7
+    },
+    {
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 8
+    },
+    {
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      10
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    0,
+    "fixed",
+    8,
+    1.0,
+    "euler",
+    "simple",
+    1.0
+   ]
+  },
+  {
+   "id": 12,
+   "type": "VAEDecode",
+   "pos": [
+    1290,
+    50
+   ],
+   "size": [
+    200,
+    46
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "samples",
+     "type": "LATENT",
+     "link": 10
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAEDecode"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 13,
+   "type": "SaveImage",
+   "pos": [
+    1290,
+    130
+   ],
+   "size": [
+    320,
+    360
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 12
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "webtoon_studio/panel"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   3,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   3,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   4,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   4,
+   5,
+   0,
+   11,
+   0,
+   "MODEL"
+  ],
+  [
+   5,
+   6,
+   0,
+   8,
+   0,
+   "CLIP"
+  ],
+  [
+   6,
+   6,
+   0,
+   9,
+   0,
+   "CLIP"
+  ],
+  [
+   7,
+   8,
+   0,
+   11,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   8,
+   9,
+   0,
+   11,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   9,
+   10,
+   0,
+   11,
+   3,
+   "LATENT"
+  ],
+  [
+   10,
+   11,
+   0,
+   12,
+   0,
+   "LATENT"
+  ],
+  [
+   11,
+   7,
+   0,
+   12,
+   1,
+   "VAE"
+  ],
+  [
+   12,
+   12,
+   0,
+   13,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1. 모델 (MOSS-Image UC)",
+   "bounding": [
+    0,
+    0,
+    380,
+    640
+   ],
+   "color": "#3f789e",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2. 컷 설명",
+   "bounding": [
+    400,
+    0,
+    520,
+    540
+   ],
+   "color": "#a1309b",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "3. 그리기",
+   "bounding": [
+    940,
+    0,
+    700,
+    540
+   ],
+   "color": "#b58b2a",
+   "font_size": 22,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.75,
+   "offset": [
+    40,
+    40
+   ]
+  },
+  "webtoon": {
+   "name": "moss",
+   "label": "MOSS-Image UC (OpenMOSS 5B + 무검열 LoRA, 글만 받음, 긴 글·그림 속 글자에 강함)",
+   "use_for": "글로 장면을 길게 적는 컷, 그림 속 글자(간판·화면)가 필요한 컷. 참고 그림을 못 받아 인물 얼굴 일관성은 Qwen UC 보다 약하다",
+   "refs": false,
+   "cfg": {
+    "turbo": 1.0,
+    "full": 2.5
+   },
+   "steps": {
+    "turbo": 8,
+    "full": 25
+   },
+   "sampler": {
+    "turbo": "euler",
+    "full": "er_sde"
+   },
+   "max_pixels": 2200000
+  }
+ },
+ "version": 0.4
+}

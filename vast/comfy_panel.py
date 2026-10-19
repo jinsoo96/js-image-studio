@@ -166,7 +166,7 @@ def pick_expr(series, cid, name, text):
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            m = re.search(r"\d+", json.loads(r.read().decode())["choices"][0]["message"]["content"])
+            m = re.search(r"\d+", json.loads(r.read().decode())["choices"][0]["message"].get("content") or "")
     except Exception as e:
         print(f"  표정 고르기 실패({cid}): {str(e)[:80]}")
         return None
@@ -451,7 +451,10 @@ def main():
                 staging_pass(c, cache, dst, series, out.parent, p, seed, render, args.retries, log)
             print(f"{p['id']}: {w}x{h} 참고 {len(refs)}장 {time.time() - t0:.0f}초 → {dst}", flush=True)
         except Exception as e:
+            import traceback
             print(f"{p['id']}: 실패 {str(e)[:300]}", flush=True)
+            # 어디서 터졌는지 남긴다(검사 단계의 None 오류가 메시지 한 줄로만 남아 원인을 못 찾았다, 2026-10-19 Cherry 시험 p054)
+            print("".join(traceback.format_exception(e)[-4:]), file=sys.stderr, flush=True)
             failed.append(p["id"])
     if failed:
         print("실패한 컷:", ",".join(failed))

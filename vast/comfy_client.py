@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -38,17 +39,41 @@ def vast_key() -> str:
     return m.group(1)
 
 
+INSTANCE_CACHE = Path(__file__).resolve().parents[1] / "state" / "vast_instance.json"  # 깃에 안 올라가는 state/
+INSTANCE_TTL = 600
+
+
 def instance():
+    """돌고 있는 vast 인스턴스. 10분 동안은 저장해 둔 것을 쓴다: 도구가 프로세스마다 vast API 를 물어 429(요청이 너무 많음)로 막혔다(2026-10-19).
+    API 가 막히면 오래된 저장본이라도 쓴다."""
+    cached = None
+    try:
+        cached = json.loads(INSTANCE_CACHE.read_text(encoding="utf-8"))
+        if time.time() - cached.get("_at", 0) < INSTANCE_TTL and not os.environ.get("VAST_INSTANCE_ID"):
+            return cached
+    except Exception:  # noqa: BLE001
+        cached = None
     req = urllib.request.Request("https://console.vast.ai/api/v0/instances/?owner=me",
                                  headers={"Authorization": f"Bearer {vast_key()}", "User-Agent": "webtoon-studio"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        inst = json.loads(r.read().decode())["instances"]
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            inst = json.loads(r.read().decode())["instances"]
+    except urllib.error.HTTPError as e:
+        if e.code == 429 and cached:
+            return cached
+        raise
     if os.environ.get("VAST_INSTANCE_ID"):
         inst = [i for i in inst if str(i.get("id")) == os.environ["VAST_INSTANCE_ID"]]
     run = [i for i in inst if i.get("actual_status") == "running"] or inst
     if not run:
         sys.exit("인스턴스가 없다")
-    return run[0]
+    keep = {k: run[0].get(k) for k in ("id", "public_ipaddr", "ports", "jupyter_token", "gpu_name", "gpu_ram", "dph_total", "actual_status")}
+    try:
+        INSTANCE_CACHE.parent.mkdir(exist_ok=True)
+        INSTANCE_CACHE.write_text(json.dumps({**keep, "_at": time.time()}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    return keep
 
 
 class Comfy:
@@ -113,15 +138,17 @@ class Comfy:
             time.sleep(2)
         raise TimeoutError(pid)
 
-    def fetch_model(self, folder: str, url: str) -> str:
-        """서버의 Model Manager Neo 로 HuggingFace 파일을 models/<folder>/ 에 받는다(이미 있으면 건너뜀)."""
-        name = url.rsplit("/", 1)[-1]
+    def fetch_model(self, folder: str, url: str, name: str = "") -> str:
+        """서버의 Model Manager Neo 로 HuggingFace 파일을 models/<folder>/ 에 받는다(이미 있으면 건너뜀). name 을 주면 그 이름으로 저장한다
+        (로라 저장소들이 lora.safetensors · pytorch_lora_weights.safetensors 처럼 같은 이름을 써서 겹친다)."""
+        name = name or url.rsplit("/", 1)[-1]
         if name in (self.req(f"/models/{folder}") or []):
             return "있음"
         repo = "/".join(urllib.parse.urlparse(url).path.strip("/").split("/")[:2])
         sub = url.split("/resolve/main/", 1)[1].rsplit("/", 1)[0] if "/" in url.split("/resolve/main/", 1)[1] else ""
         with urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}/tree/main/{sub}", timeout=30) as r:
-            size = next(x["size"] for x in json.loads(r.read().decode()) if x["path"].endswith("/" + name) or x["path"] == name)
+            src = url.rsplit("/", 1)[-1]
+            size = next(x["size"] for x in json.loads(r.read().decode()) if x["path"].endswith("/" + src) or x["path"] == src)
         fields = {"type": folder, "pathIndex": "0", "fullname": name, "description": "", "downloadPlatform": "huggingface",
                   "downloadUrl": url, "sizeBytes": str(size)}
         bnd = uuid.uuid4().hex
@@ -174,8 +201,8 @@ if __name__ == "__main__":
         print(f"VRAM 남음 {d.get('vram_free', 0) / 1e9:.1f} / {d.get('vram_total', 0) / 1e9:.1f}GB")
         print(f"서버 큐: 도는 것 {len(q.get('queue_running', []))} · 기다리는 것 {len(q.get('queue_pending', []))} (그중 이 작업실 것 {mine})")
         print("그리는 판: " + (" · ".join(f"{k} " + ("다 있음" if not m else "없음 " + ", ".join(m)) for k, m in miss.items()) or "서버에 webtoon_vertical_* 워크플로우가 없다"))
-    elif cmd == "fetch":
-        print(sys.argv[3].rsplit("/", 1)[-1], c.fetch_model(sys.argv[2], sys.argv[3]))
+    elif cmd == "fetch":  # fetch <폴더> <HF 주소> [저장 이름]
+        print(sys.argv[3].rsplit("/", 1)[-1], c.fetch_model(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else ""))
     elif cmd == "downloads":
         for t in c.req("/model-manager/download/task").get("data", []):
             print(t.get("fullname"), t.get("status"), "%.0f%%" % (t.get("progress") or 0), "%.1fGB" % ((t.get("totalSize") or 0) / 1e9), t.get("error") or "")

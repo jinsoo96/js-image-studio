@@ -65,7 +65,8 @@ def chat(content: list, max_tokens: int = 600, temperature: float = 0.0, timeout
                                      headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())["choices"][0]["message"]["content"]
+                # 본문이 비어 None 으로 오는 때가 있다(생각만 하고 끝난 답). 부르는 쪽 re·json 이 None 에서 터져 컷이 '실패'로 빠졌다(2026-10-19 p054)
+                return json.loads(r.read().decode())["choices"][0]["message"].get("content") or ""
         except Exception as e:  # noqa: BLE001
             if attempt == 1:
                 raise JudgeDown(f"{url} {type(e).__name__}: {str(e)[:100]}") from e
