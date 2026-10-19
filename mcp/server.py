@@ -1186,14 +1186,14 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
 
 
 @mcp.tool()
-def job_wait(job_id: str, seconds: int = 80, tail_lines: int = 30) -> str:
-    """작업이 끝날 때까지 최대 seconds 초(85초까지, 주소 방식의 응답 한도 100초 안쪽) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
+def job_wait(job_id: str, seconds: int = 50, tail_lines: int = 30) -> str:
+    """작업이 끝날 때까지 최대 seconds 초(50초까지, agent app 의 도구 호출 한도 60초 안쪽) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
     컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 4번까지(약 5분). 그래도 running 이면 사용자에게 작업 번호·끝난 컷 수·예상 시간을 알리고 답을 끝낸다
     (사용자가 '다 됐어?' 하면 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다. sleep 같은 다른 도구로 기다리지 않는다.
     (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
     if not re.fullmatch(r"[\w-]+", job_id):
         return json.dumps({"error": "bad_job_id"})
-    end = time.time() + max(1, min(int(seconds), 85))  # 25초 상한이라 그림 한 장 기다리는 데 20번을 불렀다(2026-10-19 agent app)
+    end = time.time() + max(1, min(int(seconds), 50))  # agent app 는 MCP 호출을 60초에 끊는다(85초로 올렸더니 'Request timed out', 2026-10-19)
     while time.time() < end:
         if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "running"):
             break
