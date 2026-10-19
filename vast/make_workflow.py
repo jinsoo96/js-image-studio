@@ -317,7 +317,8 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     g.link(vae, 0, dec, "vae")
     g.link(dec, 0, save, "images")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"refs": False, "cfg": {"turbo": 1.0, "full": 4.0}, "steps": {"turbo": 8, "full": 30}}
+    wf["extra"]["webtoon"] = {"name": "anima", "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)", "refs": False,
+                              "cfg": {"turbo": 1.0, "full": 4.0}, "steps": {"turbo": 8, "full": 30}}
     return wf
 
 

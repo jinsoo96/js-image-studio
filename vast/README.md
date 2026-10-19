@@ -3,7 +3,7 @@
 회사 공용 GPU(vast.ai RTX 5090 32GB, ComfyUI 0.37)에서 힉스필드와 **같은 컷 설명(`panels.json`)** 으로 컷을 그린다. 크레딧은 들지 않고 GPU 시간만 쓴다.
 2026-10-15 사용자 "vastai 에서 이 정도 이미지 수준의 웹툰 만들게 워크플로우 세로로"에서 시작.
 
-**모델 판**(2026-10-19): 작품마다 series.json `model` 로 고른다(환경변수 `WEBTOON_MODEL` 이 있으면 그것). `uc`(기본) = Qwen Image 2.1 **Uncensored**(`qwen-image-2.1-UC-fp8`, 저장 워크플로우 `webtoon_vertical_qwen21_uc`·`webtoon_edit_qwen21_uc`). `anima` = Anima(`anima-base-v1.0` + 터보 LoRA, 저장 워크플로우 `webtoon_vertical_anima`, 회사 기준선 `image_anima_base_v1` 을 펼친 구성, 기준선은 그대로): 글만 받아서 인물·장소를 그림 대신 글(작품 설정 who·장소 설명)로 넣고, 편집은 UC 편집 워크플로우. 참고 그림이 꼭 필요한 일(인물 시트 시안)은 자동으로 UC. 일반 Qwen 판(`webtoon_vertical_qwen21`·`webtoon_edit_qwen21`)은 사용자 요청으로 서버에서 지웠고 (백업 `state/workflow_backups/20261019-161346`), 짝 없던 웹툰 워크플로우(2단·표정 에셋·시안 둘)는 UC 모델로 바꿨다. `webtoon_asset_base_qwen21` 은 화면에서 누가 `noctQAnimeUncensoredAnimeMix` 로 바꿔 둔 그대로. 고르는 곳: `saved_workflow.pick`.
+**모델 판**(2026-10-19): vast ComfyUI 에 저장된 `webtoon_vertical_<판>.json` 이 곧 판이다(`saved_workflow.models()` 가 서버에서 읽고 60초 재사용, MCP `draw_models` 가 목록·모델 파일 유무를 준다). 판의 성질은 워크플로우의 `extra.webtoon`(name·label·refs·edit·default·cfg·steps), 없으면 파일 이름과 노드에서. 작품마다 series.json `model`, 환경변수 `WEBTOON_MODEL`·`comfy_panel.py --model` 이 먼저, 없으면 default 판. 지금 서버: `uc`(Qwen Image 2.1 Uncensored, 기본, 참고 그림으로 얼굴·장소) · `anima`(`anima-base-v1.0` + 터보 LoRA, 글만 받아 인물·장소를 작품 설정 글로, 기준선 `image_anima_base_v1` 은 그대로). 고치기는 판의 edit → `webtoon_edit_<이름>` → 기본 판 순. 판을 더하려면 ComfyUI 화면에서 `webtoon_vertical_<이름>` 으로 저장하고 `extra.webtoon` 을 적는다(Anima 판은 `make_workflow.py anima`). 일반 Qwen 판은 사용자 요청으로 서버에서 지웠다(백업 `state/workflow_backups/20261019-161346`).
 
 ## 지킬 것
 - **회사 공용 인스턴스다.** 조회·그리기·모델 받기만 한다. 인스턴스 만들기·끄기·지우기, 결제 설정, 남의 워크플로우 수정은 하지 않는다. 기준선 `image_anima_base_v1.json` 은 건드리지 않는다.

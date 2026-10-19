@@ -31,9 +31,10 @@
 ## 4. 긴 작업과 대화
 - 파일이 길면(콘티 16KB 안팎) start_file → append_file(4천 자 안팎씩) → check_file 로 나눠 쓴다. 일부만 고칠 땐 edit_file.
 - 한 번의 답에서 도구를 30번 넘게 부르지 않는다(사내 모델이 마지막 답을 시간 안에 못 시작한다). 콘티·컷 설명이 끝나면 답을 끝내고, 그리기는 다음 답에서.
+- prepare_episode·make_episode·vast_draw·compose·export 는 모두 작업이다(긴 한 화는 몇 분에서 몇 시간): state 가 running 이면 panels_done/panels_total·eta_s 를 알리고 답을 끝낸다. 작업은 대화·턴 제한과 상관없이 이어 도니 기다리며 도구를 되풀이하지 않는다. 작업 번호를 잃었거나 새 대화면 list_jobs 로 이어 본다. stalled 가 true 면 멈춘 것이니 그대로 사용자에게 알린다.
 - make_episode·vast_draw 는 job_id 를 돌려준다. 기다리지 말고 작업 번호와 예상 시간을 알리고 답을 끝낸다. 사용자가 "다 됐어?" 하면 job_status 한 번.
 - job_status 는 JSON 이다. state 가 needs_review 면 실패가 아니라 사람 확인 차례다: review(컷·issues·note)나 candidates 를 사용자에게 보여 주고 답을 끝낸다. links 가 있으면 그 링크를 준다.
-- 그리는 판은 작품마다(series.json model): uc(기본, Qwen Image 2.1 Uncensored, 참고 그림으로 얼굴·장소를 맞춘다) · anima(애니메이션 그림체, 글만 받아 인물 생김새를 작품 설정의 who 글로 맞춘다). 고치기(편집)는 둘 다 uc. 작품 전체를 바꿀 땐 set_model, 컷 몇 장만 다른 판으로 시험할 땐 vast_draw(model=...). 한 화 안에서는 섞지 않는다.
+- 그리는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다. 쓸 수 있는 판·모델·참고 그림을 받는지·모델 파일이 서버에 있는지는 draw_models() 로 본다(서버에서 워크플로우를 저장하거나 지우면 목록이 따라 바뀐다). 작품 전체를 바꿀 땐 set_model, 컷 몇 장만 시험할 땐 vast_draw(model=...). 참고 그림을 못 받는 판은 글로만 그리고 고치기는 기본 판의 편집으로 한다. 한 화 안에서는 판을 섞지 않는다.
 - 도구 오류가 JSON 이면 그 값대로 한다: busy 는 running_job 을 job_wait 로 기다린다(같은 도구를 다시 부르지 않는다). not_found 는 candidates 중 맞는 경로로 한 번 다시 부른다(경로를 짐작해 바꿔 가며 되풀이하지 않는다).
 - 그림·모아보기·PDF 를 사용자에게 보여 줄 때는 결과의 link·drawn·links 주소를 준다. 이 MCP 의 파일은 작업실 PC 에 있어 agent app 작업 공간의 ShareFile·Bash·Read 로는 열리지 않는다. 이미 있는 그림은 file_link 로 주소를 받는다. 그림을 직접 봐야 하면 contact_sheet: 결과에 그림이 같이 온다(링크는 잠겨 있어 WebFetch 로는 안 열린다). 한 번 보고 판단한다.
 - 같은 입력(같은 명령·같은 콘티·컷 설명)으로 같은 작업을 다시 부르면 도구가 repeated_job 오류와 이전 작업을 돌려준다. 같은 걸 다시 돌려도 같은 결과다: 사용자와 무엇을 바꿀지 정해 컷 설명을 고치거나 seed 를 바꾼 뒤 부른다.

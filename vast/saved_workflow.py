@@ -9,34 +9,100 @@
 import copy
 import json
 import os
+import re
+import time
 import urllib.parse
 from pathlib import Path
 
 from comfy_client import Comfy
 
-# 판마다 (생성, 편집) 워크플로우. 고르는 순서: 환경변수 WEBTOON_MODEL → 작품 설정 series.json "model" → uc.
-# 2026-10-18 사용자 "그 모델(Uncensored) 써서 해" → 기본 UC. 2026-10-19 사용자 "아닌 버전은 지우고 UC 만, anima 버전 하나" → 일반 판을 지우고
-# Anima 판을 더했다. Anima 는 글만 받는 모델이라(참고 그림 입구 없음) 편집은 UC 편집 워크플로우를 같이 쓴다.
-MODELS = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json"),
-          "anima": ("webtoon_vertical_anima.json", "webtoon_edit_qwen21_uc.json")}
-MODEL = os.environ.get("WEBTOON_MODEL", "uc").strip().lower()
-GEN, EDIT = MODELS.get(MODEL, MODELS["uc"])
+# 그리는 판 = vast ComfyUI 에 저장된 웹툰 워크플로우(2026-10-19 사용자 "하드코딩 말고 vastai 에서 설정할 수 있는 모델을 따르게").
+# 서버의 workflows/ 에서 `webtoon_vertical_<이름>.json` 을 찾아 판으로 본다: 화면에서 저장하면 새 판이 생기고 지우면 사라진다.
+# 판의 성질은 워크플로우의 extra.webtoon 에 적는다(없으면 이름·노드에서 읽는다):
+#   name(판 이름, 없으면 파일 이름의 <이름>) · label(사람이 읽는 설명) · refs(참고 그림을 받나, 기본 True) · edit(고치기 워크플로우 파일)
+#   · default(true 면 작품에 판이 없을 때 쓰는 기본 판) · cfg {turbo, full} · steps {turbo, full}
+# 고치기 워크플로우는 판의 edit → webtoon_edit_<이름>.json → 기본 판의 것 순서로 찾는다.
+# 서버에 닿지 않으면 마지막으로 읽은 목록, 그것도 없으면 OFFLINE 의 이름만(그리기는 서버가 있어야 하니 그때는 어차피 실패한다).
+OFFLINE = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json")}
+_models, _models_at = {}, 0.0
+MODELS_TTL = 60.0
+
+
+def models(refresh: bool = False) -> dict:
+    """{판 이름: {"gen": 파일, "edit": 파일, "refs": bool, "label": 설명, "default": bool, "models": {노드: 모델 파일}, "missing": [없는 모델 파일]}}.
+    서버 워크플로우 목록에서 읽고 60초 동안 재사용한다."""
+    global _models, _models_at
+    if _models and not refresh and time.time() - _models_at < MODELS_TTL:
+        return _models
+    try:
+        c = _c()
+        names = [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
+        have = {f: set(c.req(f"/models/{f}") or []) for f in ("diffusion_models", "loras", "text_encoders", "vae")}
+    except Exception:  # noqa: BLE001
+        if _models:
+            return _models
+        return {k: {"gen": g, "edit": e, "refs": True, "label": k, "default": k == "uc", "models": {}, "missing": []} for k, (g, e) in OFFLINE.items()}
+    out = {}
+    for fn in sorted(n for n in names if re.fullmatch(r"webtoon_vertical_.+\.json", n)):
+        suffix = fn[len("webtoon_vertical_"):-len(".json")]
+        try:
+            ui = load_ui(fn)
+        except Exception:  # noqa: BLE001
+            continue
+        meta = (ui.get("extra") or {}).get("webtoon") or {}
+        nodes = ui.get("nodes", []) + [n for sg in (ui.get("definitions") or {}).get("subgraphs", []) for n in sg.get("nodes", [])]
+        files = {}
+        for n in nodes:
+            v = (n.get("widgets_values") or [None])[0]
+            folder = {"UNETLoader": "diffusion_models", "LoraLoaderModelOnly": "loras", "CLIPLoader": "text_encoders", "VAELoader": "vae"}.get(n.get("type"))
+            if folder and isinstance(v, str) and n.get("mode", 0) != 2:
+                files.setdefault(folder, []).append(v)
+        unet = (files.get("diffusion_models") or ["?"])[0]
+        edit = meta.get("edit") or (f"webtoon_edit_{suffix}.json" if f"webtoon_edit_{suffix}.json" in names else None)
+        out[str(meta.get("name") or suffix).lower()] = {
+            "gen": fn, "edit": edit, "refs": bool(meta.get("refs", True)), "label": meta.get("label") or unet,
+            "default": bool(meta.get("default")), "models": {k: v for k, v in files.items()},
+            "missing": [f"{k}/{v}" for k, vs in files.items() for v in vs if v not in have.get(k, set())]}
+    if out:
+        dflt = next((k for k, v in out.items() if v["default"]), None) or ("uc" if "uc" in out else sorted(out)[0])
+        out[dflt]["default"] = True
+        for v in out.values():  # 고치기 워크플로우가 없는 판은 기본 판의 것을 쓴다
+            v["edit"] = v["edit"] or out[dflt]["edit"]
+        _models, _models_at = out, time.time()
+    return _models or {k: {"gen": g, "edit": e, "refs": True, "label": k, "default": k == "uc", "models": {}, "missing": []} for k, (g, e) in OFFLINE.items()}
+
+
+def default_model() -> str:
+    m = models()
+    return next((k for k, v in m.items() if v.get("default")), "uc")
 
 
 def pick(series=None) -> tuple:
-    """(판 이름, 생성 워크플로우, 편집 워크플로우). 환경변수 WEBTOON_MODEL 이 있으면 그것, 없으면 작품 설정의 model, 없으면 uc."""
+    """(판 이름, 생성 워크플로우, 편집 워크플로우). 환경변수 WEBTOON_MODEL 이 있으면 그것, 없으면 작품 설정의 model, 없으면 기본 판.
+    이름이 서버에 없으면 기본 판으로 돌린다."""
+    m = models()
     name = os.environ.get("WEBTOON_MODEL", "").strip().lower()
     if not name and series:
         sj = Path(series) / "series.json"
         if sj.exists():
             name = str(json.loads(sj.read_text(encoding="utf-8")).get("model") or "").strip().lower()
-    name = name if name in MODELS else "uc"
-    return (name, *MODELS[name])
+    name = name if name in m else default_model()
+    return (name, m[name]["gen"], m[name]["edit"])
 
 
 def takes_refs(ui: dict) -> bool:
-    """이 워크플로우가 참고 그림을 받는가(워크플로우의 extra.webtoon.refs, 없으면 받는다고 본다: Qwen 판)."""
+    """이 워크플로우가 참고 그림을 받는가(워크플로우의 extra.webtoon.refs, 없으면 받는다고 본다)."""
     return bool(((ui.get("extra") or {}).get("webtoon") or {}).get("refs", True))
+
+
+def refs_model() -> str:
+    """참고 그림을 받는 판 중 기본 판(참고 그림이 꼭 필요한 일을 글만 받는 판이 맡게 됐을 때 대신 쓴다)."""
+    m = models()
+    ok = {k: v for k, v in m.items() if v["refs"]}
+    return default_model() if default_model() in ok else (sorted(ok)[0] if ok else default_model())
+
+
+MODEL = os.environ.get("WEBTOON_MODEL", "").strip().lower() or None  # 하위 호환(예전엔 이 환경변수로만 골랐다)
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 # 부르는 쪽이 노드를 찾는 번호. 전에 코드로 짜던 그래프와 같은 번호라 comfy_panel·refine·make_assets·xgen_catalog 는 그대로 쓴다.
 # 클래스가 워크플로우에 하나뿐일 때만 붙이고, 화면에서 더한 노드는 u<번호>.

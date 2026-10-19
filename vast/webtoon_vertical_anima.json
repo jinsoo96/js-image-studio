@@ -552,7 +552,9 @@
    "steps": {
     "turbo": 8,
     "full": 30
-   }
+   },
+   "name": "anima",
+   "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)"
   }
  },
  "version": 0.4

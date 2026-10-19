@@ -729,6 +729,13 @@
     40,
     40
    ]
+  },
+  "webtoon": {
+   "name": "uc",
+   "label": "Qwen Image 2.1 Uncensored (참고 그림으로 얼굴·장소를 맞춘다)",
+   "refs": true,
+   "default": true,
+   "edit": "webtoon_edit_qwen21_uc.json"
   }
  },
  "version": 0.4

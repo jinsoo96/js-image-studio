@@ -67,11 +67,11 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
     넘기면(인물 시트 시안처럼 본보기가 꼭 필요한 일) 참고 그림을 받는 UC 판으로 그린다."""
     global _SAVED_WARNED
     try:
-        from saved_workflow import MODELS, fill, load_ui, pick, takes_refs, to_api
+        from saved_workflow import fill, load_ui, models, pick, refs_model, takes_refs, to_api
         _, gen, ed = pick(series)
         ui = load_ui(ed if edit else gen)
         if ref_names and not edit and not takes_refs(ui):
-            ui = load_ui(MODELS["uc"][0])
+            ui = load_ui(models()[refs_model()]["gen"])
         return fill(to_api(ui, turbo=turbo), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
@@ -333,7 +333,7 @@ def main():
     ap.add_argument("--ref-res", type=int, default=1024, help="참고 그림을 이 크기 정사각 면적으로 줄여 넣는다(0 = 원본)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--variant", default="vast", help="결과 폴더 panels_hf_<이름>/")
-    ap.add_argument("--model", help="이번만 이 판으로 그린다(saved_workflow.MODELS: uc · anima). 없으면 작품 설정 series.json model")
+    ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
     args = ap.parse_args()
     if args.model:  # saved_workflow.pick 이 환경변수를 먼저 본다(이 작업만)
         os.environ["WEBTOON_MODEL"] = args.model.strip().lower()

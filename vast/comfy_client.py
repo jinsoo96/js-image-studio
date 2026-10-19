@@ -166,17 +166,12 @@ if __name__ == "__main__":
         d = (s.get("devices") or [{}])[0]
         q = c.req("/queue")
         mine = sum(1 for e in q.get("queue_running", []) + q.get("queue_pending", []) if len(e) > 3 and (e[3] or {}).get("client_id") == "webtoon-studio")
-        # 판마다 쓰는 모델(saved_workflow.MODELS: uc · anima). 일반 Qwen 판은 2026-10-19 지웠다
-        need = {"UC": {"diffusion_models": ["qwen-image-2.1-UC-fp8.safetensors"], "text_encoders": ["qwen3vl_8b_int8_convrot.safetensors"],
-                       "vae": ["qwen_image_2.1_vae_bf16.safetensors"], "loras": ["qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"]},
-                "Anima": {"diffusion_models": ["anima-base-v1.0.safetensors"], "text_encoders": ["qwen_3_06b_base.safetensors"],
-                          "vae": ["qwen-image/qwen_image_vae.safetensors"], "loras": ["anima-turbo-lora-v0.2.safetensors"]}}
-        have = {f: set(c.req(f"/models/{f}") or []) for f in ("diffusion_models", "text_encoders", "vae", "loras")}
-        miss = {k: [n for f, ns in v.items() for n in ns if n not in have[f]] for k, v in need.items()}
+        from saved_workflow import models as draw_models  # 판 = 서버에 저장된 webtoon_vertical_<판> 워크플로우(그 워크플로우가 쓰는 모델 파일이 서버에 있나)
+        miss = {k: v["missing"] for k, v in draw_models(refresh=True).items()}
         print(f"인스턴스 {c.info['id']} {c.info['gpu_name']} {c.info['actual_status']} · ComfyUI {s['system'].get('comfyui_version')}")
         print(f"VRAM 남음 {d.get('vram_free', 0) / 1e9:.1f} / {d.get('vram_total', 0) / 1e9:.1f}GB")
         print(f"서버 큐: 도는 것 {len(q.get('queue_running', []))} · 기다리는 것 {len(q.get('queue_pending', []))} (그중 이 작업실 것 {mine})")
-        print("모델: " + " · ".join(f"{k} " + ("다 있음" if not m else "없음 " + ", ".join(m)) for k, m in miss.items()))
+        print("그리는 판: " + (" · ".join(f"{k} " + ("다 있음" if not m else "없음 " + ", ".join(m)) for k, m in miss.items()) or "서버에 webtoon_vertical_* 워크플로우가 없다"))
     elif cmd == "fetch":
         print(sys.argv[3].rsplit("/", 1)[-1], c.fetch_model(sys.argv[2], sys.argv[3]))
     elif cmd == "downloads":

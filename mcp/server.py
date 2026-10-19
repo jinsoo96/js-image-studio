@@ -10,7 +10,7 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
 - 크레딧을 쓰는 도구(draw_panels·redraw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
-- vast_* 도구는 회사 공용 vast.ai GPU 로 크레딧 없이 그린다. 그리는 판은 작품마다(set_model: uc = Qwen Image 2.1 Uncensored · anima), vast_draw 는 model 로 한 번만 바꿀 수도 있다. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
+- vast_* 도구는 회사 공용 vast.ai GPU 로 크레딧 없이 그린다. 그리는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다 set_model, 한 번만 바꿀 땐 vast_draw 의 model. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
@@ -185,7 +185,7 @@ def _fingerprint(kind: str, ep: Path, steps: list) -> str:
     """작업의 지문 = 종류 + 명령 + 그 작업이 읽는 입력 파일(콘티·컷 설명) 내용. 입력이 바뀌면(컷 설명 수정·시드 변경) 다른 작업이다."""
     import hashlib
     h = hashlib.sha1(json.dumps([kind, [s.get("cmd") for s in steps]], ensure_ascii=False, default=str).encode())
-    for name in ("storyboard.json", "panels.json", "panels_spec.json"):
+    for name in ("make_storyboard.py", "build_panels.py", "storyboard.json", "panels.json", "panels_spec.json"):
         if (ep / name).exists():
             h.update((ep / name).read_bytes())
     return h.hexdigest()[:16]
@@ -387,12 +387,15 @@ def file_link(paths: str, series: str = "") -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
+SYNC_REVIEW_MAX = 3
+
+
 @mcp.tool()
 def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
     folder="vast" 면 vast 로 그린 컷을 본다(vast 판은 다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
-    8컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 사용자에게 보여 주고 동의를 받은 뒤 고칠 점을 build_panels.py 에 반영해 redraw_panels."""
+    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 사용자에게 보여 주고 동의를 받은 뒤 고칠 점을 build_panels.py 에 반영해 redraw_panels."""
     ep = _episode(series, episode)
     sd = _series(series)
     sub = _folder(folder)
@@ -403,7 +406,7 @@ def review_panels(series: str, episode: str, ids: str = "", scene: str = "", fol
         return str(e)
     if not pick:
         return "검수할 컷이 없다(ids·scene 을 확인)"
-    if len(pick) <= 8:
+    if len(pick) <= SYNC_REVIEW_MAX:  # 컷마다 모델을 두 번 부른다: 8컷은 한 호출이 60초를 넘겨 agent app 가 끊었다
         res = vision_review.review(sd, ep, pick)
         bad = [r["id"] for r in res if r.get("판정") == "다시" or r.get("error")]
         unsure = [r["id"] for r in res if r.get("판정") == "애매"]
@@ -726,16 +729,48 @@ def add_to_series(series: str, kind: str, key: str, value: str) -> str:
     return f"{s.name} 에 {kind} {key} 를 더했다. 프롬프트 {len(files)}개. 그림은 make_episode 에셋 점검이 시안으로 그린다"
 
 
+def _draw_models() -> dict:
+    sys.path.insert(0, str(VAST))
+    import saved_workflow
+    return saved_workflow.models(refresh=True)
+
+
+def _check_model(name: str):
+    """없는 판이면 JSON 오류(지금 있는 판 목록 포함), 모델 파일이 서버에 모자란 판이면 그 목록, 문제없으면 None."""
+    m = _draw_models()
+    k = (name or "").strip().lower()
+    if k not in m:
+        return json.dumps({"error": "unknown_model", "models": sorted(m)}, ensure_ascii=False)
+    if m[k]["missing"]:
+        return json.dumps({"error": "model_files_missing", "model": k, "missing": m[k]["missing"], "ready_models": sorted(x for x, vv in m.items() if not vv["missing"])},
+                          ensure_ascii=False)
+    return None
+
+
+@mcp.tool()
+def draw_models(series: str = "") -> str:
+    """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
+    목록이 따라 바뀐다. 판마다: label(설명) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) · edit(고치기에 쓰는 워크플로우) · models(쓰는 모델 파일) ·
+    ready(모델 파일이 서버에 다 있나) · default. series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
+    m = _draw_models()
+    cur = None
+    if series:
+        sys.path.insert(0, str(VAST))
+        import saved_workflow
+        cur = saved_workflow.pick(_series(series))[0]
+    out = [{"id": k, "label": vv["label"], "refs": vv["refs"], "edit": vv["edit"], "workflow": vv["gen"], "models": vv["models"], "ready": not vv["missing"],
+            "missing": vv["missing"], "default": vv["default"], **({"current": k == cur} if cur else {})} for k, vv in sorted(m.items())]
+    return json.dumps({"draw_models": out}, ensure_ascii=False)
+
+
 @mcp.tool()
 def set_model(series: str, model: str) -> str:
-    """작품의 그리는 판을 바꾼다(series.json model). uc = Qwen Image 2.1 Uncensored(참고 그림으로 얼굴·장소를 맞춘다, 기본) ·
-    anima = Anima(애니메이션 그림체, 글만 받아 인물 생김새를 작품 설정의 who 글로 맞춘다). 고치기(표정·남는 사람·검수 편집)는 둘 다 uc 편집.
-    이미 그린 컷은 그대로다: 판을 바꾼 뒤 새로 그리는 컷부터 바뀐다(한 화 안에서 섞으면 그림체가 달라진다)."""
-    sys.path.insert(0, str(VAST))
-    from saved_workflow import MODELS
+    """작품의 그리는 판을 바꾼다(series.json model). 쓸 수 있는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다: draw_models() 가 지금 목록과 각 판의
+    모델·참고 그림을 받는지·모델 파일이 서버에 다 있는지를 준다. 이미 그린 컷은 그대로다: 판을 바꾼 뒤 새로 그리는 컷부터 바뀐다(한 화 안에서 섞으면 그림체가 달라진다)."""
+    err = _check_model(model)
+    if err:
+        return err
     m = model.strip().lower()
-    if m not in MODELS:
-        return json.dumps({"error": "unknown_model", "models": sorted(MODELS)}, ensure_ascii=False)
     d = _series(series)
     f = d / "series.json"
     spec = _json(f, {}) or {}
@@ -840,21 +875,18 @@ def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", re
 def prepare_episode(series: str, episode: str) -> str:
     """회차의 make_storyboard.py → build_panels.py 를 돌려 storyboard.json·panels.json 을 다시 만들고, 관문(격리 judge)으로 콘티·컷 설명을 채점한다(크레딧 안 씀).
     관문 기준표는 skills/storyboard/judge.json · skills/panel-spec/judge.json(하네스 s08 judge 와 같은 꼴, 합격 0.8, 꼭 지킬 기준은 하나라도 어기면 걸림).
-    걸리면 결과의 '고칠 점'대로 make_storyboard.py(edit_file)나 컷 설명(set_panels)을 고치고 다시 부른다. 두 관문을 다 통과해야 make_episode 가 그린다."""
+    긴 한 화는 몇 분 걸려서 작업으로 돈다: 40초 안에 끝나면 그 자리에서 job_status 모양의 결과(gates = 관문 통과 여부, log_tail = 걸린 곳)를 주고,
+    아니면 state running 과 작업 번호를 주니 job_wait 로 이어 본다. 걸리면 결과의 '고칠 점'대로 make_storyboard.py(edit_file)나 컷 설명(set_panels)을 고치고 다시 부른다."""
     ep = _episode(series, episode)
-    out = []
-    for name in ("make_storyboard.py", "build_panels.py"):
+    steps = []
+    for name, label in (("make_storyboard.py", "콘티(make_storyboard.py)"), ("build_panels.py", "컷 설명(build_panels.py)")):
         if (ep / name).exists():
-            out.append(f"## {name}\n" + _run([PY, str(ep / name)], timeout=25))
+            steps.append({"label": label, "cmd": [PY, str(ep / name)]})
         else:
-            out.append(f"## {name} 없음(앞 회차를 본떠 먼저 만든다)")
-    if (ep / "storyboard.json").exists():
-        out.append("## 관문\n" + _run([PY, str(TOOLS / "gates.py"), str(ep), "all"], timeout=600))
-        st = gates.status(ep)
-        out.append("다음: " + ("관문 통과. 사용자에게 컷 목록을 보여 주고 '그릴까요?'로 답을 끝낸다. 그리라고 하면 make_episode."
-                              if all(st.values()) else
-                              "관문에 걸린 곳을 고친다(콘티는 edit_file 로 make_storyboard.py, 컷 설명은 set_panels). 고친 뒤 prepare_episode 를 다시 부른다."))
-    return "\n".join(out)
+            return json.dumps({"error": "missing_file", "file": name, "hint": "new_episode 로 앞 회차를 본떠 먼저 만든다"}, ensure_ascii=False)
+    steps.append({"label": "관문(콘티·컷 설명 채점)", "cmd": [PY, str(TOOLS / "gates.py"), str(ep), "all"], "allow_fail": True})
+    job = _start_job("prepare", ep, steps)
+    return _wait_job(job, 40, 80)
 
 
 @mcp.tool()
@@ -936,14 +968,14 @@ VAST_MAX = 80
 
 @mcp.tool()
 def vast_status() -> str:
-    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·판마다(uc · anima) 모델이 받아져 있는지. 크레딧 안 씀."""
+    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·그리는 판마다 모델 파일이 서버에 받아져 있는지. 크레딧 안 씀."""
     return _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)
 
 
 @mcp.tool()
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
               check: bool = True, model: str = "") -> str:
-    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 작품의 판(set_model, 기본 uc), "uc" · "anima" 를 주면 이 작업만 그 판으로. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 작품의 판(set_model), 판 이름(draw_models 목록)을 주면 이 작업만 그 판으로. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
@@ -966,10 +998,9 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
         return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
     m = (model or "").strip().lower()
     if m:
-        sys.path.insert(0, str(VAST))
-        from saved_workflow import MODELS
-        if m not in MODELS:
-            return json.dumps({"error": "unknown_model", "models": sorted(MODELS)}, ensure_ascii=False)
+        err = _check_model(m)
+        if err:
+            return err
     _ensure_idle(ep)
     cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(ep / "panels.json"), "--episode", ep.name, "--only", ",".join(want), "--variant", "vast"]
     cmd += ["--model", m] if m else []
@@ -1148,27 +1179,44 @@ def _job_review(spec: dict, started: str) -> list:
             for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
 
 
-@mcp.tool()
-def job_status(job_id: str, tail_lines: int = 40) -> str:
-    """작업(job)의 상태(JSON). state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나
-    candidates 의 시안을 사용자에게 보여 준다). review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), links = 내보낸 파일 링크."""
+STALLED_S = float(os.environ.get("WEBTOON_STALLED_S", "900"))
+
+
+def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     if not re.fullmatch(r"[\w-]+", job_id):
-        return json.dumps({"error": "bad_job_id"})
+        return {"error": "bad_job_id"}
     st = _json(JOBS / f"{job_id}.status.json", None) or {}
     spec = _json(JOBS / f"{job_id}.json", None)
     if spec is None:
-        return json.dumps({"error": "no_such_job", "job": job_id})
+        return {"error": "no_such_job", "job": job_id}
     log = JOBS / f"{job_id}.log"
     lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
     state = st.get("state", "starting")
     out = {"job": job_id, "kind": spec.get("kind"), "state": state}
+    ep = Path(spec.get("episode_dir", ""))
+    if ep.parent.name == "episodes":
+        out["series"], out["episode"] = ep.parent.parent.name, ep.name
     if st.get("started"):
         fmt = "%Y-%m-%d %H:%M:%S"
         end = time.mktime(time.strptime(st["finished"], fmt)) if st.get("finished") else time.time()
         out["elapsed_s"] = int(end - time.mktime(time.strptime(st["started"], fmt)))
-    out["panels_done"] = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
+    done = sum(1 for ln in lines if re.match(r"^\s*p\w+: \d+x\d+ ", ln))  # 끝난 컷 줄 "p030: 1664x1248 ..."
+    out["panels_done"] = done
+    ids = set()
+    for stp in spec.get("steps", []):
+        cmd = [str(x) for x in stp.get("cmd", [])]
+        if "--only" in cmd:
+            ids |= set(cmd[cmd.index("--only") + 1].split(","))
+    total = len(ids) or next((int(m.group(1)) for ln in lines for m in [re.search(r"그릴 컷 (\d+)개", ln)] if m), None)
+    if total:
+        out["panels_total"] = total
+        if state == "running" and done >= 2 and out.get("elapsed_s"):  # 거친 추정(앞 단계 시간이 섞여 조금 길게 나온다)
+            out["eta_s"] = int(out["elapsed_s"] / done * max(total - done, 0))
+    if state == "running" and log.exists():  # 로그가 오래 안 늘면 멈춘 것일 수 있다(프로세스가 죽었으면 바로 알린다)
+        out["idle_s"] = int(time.time() - log.stat().st_mtime)
+        out["stalled"] = out["idle_s"] > STALLED_S or not _alive(st.get("pid"))
     review = _job_review(spec, st.get("started", ""))
-    epd = Path(spec.get("episode_dir", ""))
+    epd = ep
     drawn = {}
     for stp in spec.get("steps", []):
         cmd = [str(x) for x in stp.get("cmd", [])]
@@ -1183,30 +1231,72 @@ def job_status(job_id: str, tail_lines: int = 40) -> str:
         out["review"] = review
         if state == "done":
             out["state"] = "needs_review"
+    if spec.get("kind") == "prepare" and state in ("done", "failed"):
+        out["gates"] = gates.status(epd)
+        tail_lines = max(tail_lines, 80)
     cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
     if cands:
         out["candidates"] = cands
     links = [x for x in (_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m) if x]
     if links:
         out["links"] = links
-    out["log_tail"] = "\n".join(lines[-tail_lines:])
-    return json.dumps(out, ensure_ascii=False)
+    out["log_tail"] = "\n".join(lines[-tail_lines:]) if tail_lines else ""
+    return out
+
+
+@mcp.tool()
+def job_status(job_id: str, tail_lines: int = 40) -> str:
+    """작업(job)의 상태(JSON). state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나
+    candidates 의 시안을 사용자에게 보여 준다). panels_done/panels_total/eta_s = 진행(그리는 작업), stalled = 로그가 오래 안 늘었거나 프로세스가 죽음,
+    gates = 준비 작업의 관문 통과 여부, review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), drawn · links = 그린 컷·내보낸 파일 링크."""
+    return json.dumps(_job_info(job_id, tail_lines), ensure_ascii=False)
+
+
+def _wait_job(job_id: str, seconds: int = 50, tail_lines: int = 30) -> str:
+    """작업이 끝날 때까지(또는 seconds 초) 기다렸다가 job_status 와 같은 결과(agent app 는 MCP 호출을 60초에 끊어 50초가 상한)."""
+    end = time.time() + max(1, min(int(seconds), 50))
+    while time.time() < end:
+        if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "starting", "running"):
+            break
+        time.sleep(2)
+    return job_status(job_id, tail_lines)
 
 
 @mcp.tool()
 def job_wait(job_id: str, seconds: int = 50, tail_lines: int = 30) -> str:
     """작업이 끝날 때까지 최대 seconds 초(50초까지, agent app 의 도구 호출 한도 60초 안쪽) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
-    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 4번까지(약 5분). 그래도 running 이면 사용자에게 작업 번호·끝난 컷 수·예상 시간을 알리고 답을 끝낸다
-    (사용자가 '다 됐어?' 하면 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다. sleep 같은 다른 도구로 기다리지 않는다.
+    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 4번까지(약 5분). 그래도 running 이면 사용자에게 작업 번호·panels_done/panels_total·eta_s 를 알리고 답을 끝낸다
+    (작업은 대화와 상관없이 이어 돈다. 사용자가 '다 됐어?' 하면 list_jobs 나 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다.
+    sleep 같은 다른 도구로 기다리지 않는다.
     (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
     if not re.fullmatch(r"[\w-]+", job_id):
         return json.dumps({"error": "bad_job_id"})
-    end = time.time() + max(1, min(int(seconds), 50))  # agent app 는 MCP 호출을 60초에 끊는다(85초로 올렸더니 'Request timed out', 2026-10-19)
-    while time.time() < end:
-        if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "running"):
+    return _wait_job(job_id, seconds, tail_lines)
+
+
+@mcp.tool()
+def list_jobs(series: str = "", episode: str = "", running_only: bool = False, limit: int = 8) -> str:
+    """최근 작업 목록(JSON, 최신순): 작업 번호·종류·작품·회차·state·진행(panels_done/panels_total)·eta_s·stalled. 작업 번호를 잃었거나 새 대화에서 '아까 시킨 거 어디까지
+    됐어?' 에 답할 때 쓴다(작업은 대화와 상관없이 이어 돈다). series·episode 로 좁히고, running_only 면 도는 것만. 자세한 건 그 번호로 job_status."""
+    want_ep = _episode(series, episode).resolve() if series and episode else None
+    want_series = _series(series).name if series and not episode else None
+    rows = []
+    for f in sorted((x for x in JOBS.glob("*.json") if not x.name.endswith(".status.json")), key=lambda x: x.stat().st_mtime, reverse=True):
+        info = _job_info(f.stem, 0)
+        if info.get("error"):
+            continue
+        spec = _json(f, {}) or {}
+        if want_ep and Path(spec.get("episode_dir", "")).resolve() != want_ep:
+            continue
+        if want_series and info.get("series") != want_series:
+            continue
+        if running_only and info["state"] not in ("starting", "running"):
+            continue
+        rows.append({k: info[k] for k in ("job", "kind", "series", "episode", "state", "elapsed_s", "panels_done", "panels_total", "eta_s", "stalled")
+                     if k in info})
+        if len(rows) >= max(1, min(int(limit), 30)):
             break
-        time.sleep(2)
-    return job_status(job_id, tail_lines)
+    return json.dumps({"jobs": rows}, ensure_ascii=False)
 
 
 if __name__ == "__main__":
