@@ -51,6 +51,11 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
     # 인서트(장소 그림을 안 씀)와 장소 "none" 은 장소 시안이 필요 없다(2026-10-19 외출 p122: "none" 을 새 장소로 보고 멈췄다)
     locs = sorted({p["location"] for p in pj if p.get("location") and p["location"] != "none"
                    and not any(w in str(p.get("shot") or "") for w in ("insert", "top view", "detail"))})
+    # 컷 설명의 view(예: "reverse")가 가리키는 같은 장소의 다른 각도 그림 <장소>_<view>. 없으면 그리기가 조용히 앞쪽 그림으로 대신해 듣는 쪽 컷 뒤에 스크린이 그려졌다
+    # (2026-10-19 외출 회의실). 앞쪽 장소가 아직 시안이면 그것부터 승인받아야 하니 그때는 뺀다(승인 뒤 다시 부르면 이 시안이 생긴다)
+    views = sorted({f"{p['location']}_{p['view']}" for p in pj if p.get("view") and p.get("location") in locs
+                    and (series / "assets" / "locations" / f"{p['location']}.png").exists()})
+    locs = sorted(set(locs) | set(views))
     todo = []
     for c in chars:
         if c not in cast:
@@ -90,6 +95,8 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
             vr = series / "assets" / "vast_refs"
             if not (vr / f"{c}_xp_12.png").exists() or not (vr / f"{c}_base.png").exists():
                 run([PY, VAST / "make_assets.py", series, c, "both", "--res", "768"], f"{c} 센 표정·베이스", allow_fail=True, capture=True)
+            if not (vr / f"{c}_xs_01.png").exists():  # 잔잔한 표정 묶음: 센 표정만 있으면 차분한 연기에 우쭐한 미소·오열이 골라졌다(2026-10-19 외출). 있는 건 건너뛴다
+                run([PY, VAST / "make_assets.py", series, c, "subtle", "--res", "768"], f"{c} 잔잔한 표정", allow_fail=True, capture=True)
     return need
 
 

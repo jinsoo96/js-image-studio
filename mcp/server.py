@@ -1170,10 +1170,11 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
 @mcp.tool()
 def vast_make_assets(series: str, character: str = "all", what: str = "both") -> str:
     """인물 에셋을 vast 로 만든다(크레딧 0): 시트에서 참고 그림 자르기 → 회색 기본복 베이스 몸·센 표정 12가지(오열·고함·경멸 등).
-    character: 인물 id(cast.json) 또는 all. what: base · expr · both. 이미 있는 그림은 건너뛴다. 새 인물 시트를 만든 뒤 한 번 부른다."""
+    character: 인물 id(cast.json) 또는 all. what: base · expr · both(센 표정) · subtle(잔잔한 표정 20가지, 차분한 연기용. series.json expressions 로 바꿀 수 있다).
+    이미 있는 그림은 건너뛴다. make_episode 가 새 화를 만들 때 필요한 것을 알아서 만드니, 따로 부르는 건 에셋만 다시 만들거나 보탤 때다."""
     sd = _series(series)
-    if what not in ("base", "expr", "both"):
-        return "what 은 base · expr · both"
+    if what not in ("base", "expr", "both", "subtle"):
+        return json.dumps({"error": "bad_what", "given": what, "allowed": ["base", "expr", "both", "subtle"]}, ensure_ascii=False)
     if character != "all" and not (sd / "assets" / f"{character}_sheet.png").exists():
         return f"{character}_sheet.png 가 없다(인물 시트를 먼저 만든다). 있는 인물: " + ", ".join(
             sorted(p.name[:-len('_sheet.png')] for p in (sd / "assets").glob("*_sheet.png")))
@@ -1386,8 +1387,8 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
         out["gates"] = gates.status(epd)
         tail_lines = max(tail_lines, 80)
     cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
-    if cands:
-        out["candidates"] = cands
+    if cands:  # 승인할 시안: 이 PC 경로와 원격에서 여는 링크(링크는 사용자가 브라우저로 본다)
+        out["candidates"] = [{"path": c, "link": _link(c if Path(c).is_absolute() else ROOT / c)} for c in cands]
     links = [x for x in (_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m) if x]
     if links:
         out["links"] = links
