@@ -92,7 +92,8 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
             k = (mp / (w * h)) ** 0.5
             w, h = max(512, int(w * k) // 32 * 32), max(512, int(h * k) // 32 * 32)
         # 인물 LoRA 는 컷 생성에만(고치기·에셋·시안은 그대로). 그 판으로 학습한 것만 붙는다(lora.for_panel)
-        lz = lora_for(series, chars, mid) if chars and not edit and not role and not NO_LORA else None
+        # 그림체 LoRA 는 사람 없는 컷에도 붙어서 chars 가 없어도 묻는다
+        lz = lora_for(series, chars, mid) if not edit and not role and not NO_LORA else None
         return fill(to_api(ui, turbo=turbo, refine=bool(refine), loras=lz), prompt, ref_names, w, h, seed, steps, ref_res)
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
@@ -325,7 +326,9 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
                "No room overview, no furniture layout, no bed, no people." if insert else
                "FRAMING: a tight close-up. The head and shoulders fill most of the frame; only a small, softly blurred part of the place shows."
                if "close-up" in (p.get("shot") or "") else "")
-    parts = [f"Korean webtoon panel, {p.get('shot', 'medium shot')}.", framing,
+    # 그림체 LoRA(lora.STYLE)가 있으면 그 trigger 로 시작한다(학습 캡션 'trigger, a Korean webtoon panel. …' 과 같은 머리)
+    head = f"{trig['_style']}, a Korean webtoon panel" if trig.get("_style") else "Korean webtoon panel"
+    parts = [f"{head}, {p.get('shot', 'medium shot')}.", framing,
              f"ACTING ({acting_rule}): {p['acting']}" if p.get("acting") else "",
              action, outfit, f"PEOPLE (draw each person exactly like this): {people}." if people else "",
              f"PLACE: {place}" if place else "", f"CAMERA: {p['camera']}" if p.get("camera") else "", gaze, count,

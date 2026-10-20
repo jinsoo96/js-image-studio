@@ -9,6 +9,7 @@
     .venv/Scripts/python vast/lora.py list  [<작품 폴더>]                                    서버의 LoRA 파일과 작품에 등록된 것
     .venv/Scripts/python vast/lora.py set   <작품 폴더> <인물> [--file F] [--strength 0.8] [--off]
     .venv/Scripts/python vast/lora.py slots <워크플로우 이름>                                  생성 워크플로우에 '인물 LoRA' 노드 둘을 단다(우회 상태)
+    인물 자리에 style 을 주면 그림체 LoRA: 본편 컷(panels_hf)으로 학습해 그 작품의 모든 컷에 붙는다(loras.json 의 _style).
 
 학습 값의 기본은 학습 워크플로우의 노드 값(화면에서 고치면 따른다). 데이터·캡션을 만드는 규칙은 아래 build_data 설명.
 """
@@ -36,6 +37,9 @@ def _read(f: Path) -> dict:
 
 def _sj(series: Path) -> dict:
     return _read(series / "series.json")
+
+
+STYLE = "_style"  # 작품 그림체 LoRA 의 칸 이름(loras.json). 인물이 아니라 그 작품의 모든 컷에 붙는다(2026-10-20 "D+18 그림체를 학습해서 다음 편까지")
 
 
 def registry(series: Path) -> dict:
@@ -77,6 +81,8 @@ def trigger(series: Path, who: str) -> str:
     if t:
         return t
     slug = _sj(series).get("slug") or series.name
+    if who == STYLE:
+        return re.sub(r"[^a-z0-9]+", "", slug.lower()) + "style"
     return re.sub(r"[^a-z0-9]+", "_", f"{slug}_{who}".lower()).strip("_")
 
 
@@ -167,12 +173,64 @@ def _solo_panels(series: Path, who: str, limit: int) -> list:
     return out
 
 
+def _style_panels(series: Path, limit: int) -> list:
+    """그림체 학습 컷 [(그림, 컷)]: 본편(panels_hf, 힉스필드 정본)에서 검수에 걸리지 않은 컷을 샷 종류가 고루 섞이게, 사람 없는 컷(배경·소품)은
+    다섯에 하나 정도. vast 판(panels_hf_vast)과 vast 로 다시 그린 회차(이름에 vast)는 빼서 그 작품 본래 그림체만 배운다."""
+    pools = {}
+    for pj in sorted((series / "episodes").glob("*/panels.json")):
+        ep = pj.parent
+        if "vast" in ep.name:
+            continue
+        d = json.loads(pj.read_text(encoding="utf-8"))
+        sf = ep / "review" / "staging.json"
+        flagged = set(json.loads(sf.read_text(encoding="utf-8"))) if sf.exists() else set()
+        for p in d["panels"] if isinstance(d, dict) else d:
+            img = ep / "panels_hf" / f"{p['id']}.png"
+            # vast 판에도 같은 컷이 있으면 vast 로 그려 본편에 넣은 컷이다(D+18 2화 v2 는 본편에 vast 컷이 섞였다)
+            if p["id"] in flagged or not img.exists() or (ep / "panels_hf_vast" / img.name).exists():
+                continue
+            kind = "none" if not p.get("chars") else re.split(r"[ ,]", (p.get("shot") or "medium").strip())[0]
+            pools.setdefault(kind, []).append((img, p))
+    out, keys = [], sorted(pools, key=lambda k: -len(pools[k]))
+    quota = {k: (max(1, limit // 5) if k == "none" else limit) for k in keys}
+    while len(out) < limit and any(pools[k] and quota[k] > 0 for k in keys):
+        for k in keys:
+            if pools[k] and quota[k] > 0 and len(out) < limit:
+                lst = pools[k]
+                out.append(lst.pop((len(lst) * 7 // 13) % len(lst)))  # 회차 여기저기서 고루
+                quota[k] -= 1
+    return out
+
+
+def build_style_data(series: Path, panels: int = 36, res: int = 1024) -> dict:
+    """그림체 LoRA 데이터: 본편 컷(_style_panels) + 캡션 'trigger, a Korean webtoon panel. 컷 내용.'
+    캡션에는 무엇이 그려졌는지(사람·옷·장소·연기)만 적고 그림체 말은 넣지 않는다: 글로 적지 않은 것(선·색·빛·얼굴 그리는 법)이 trigger 에 묻는다."""
+    from comfy_panel import panel_text
+    tg = trigger(series, STYLE)
+    out = series / "lora" / STYLE / "data"
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.iterdir():
+        old.unlink()
+    kept = []
+    for k, (src, p) in enumerate(_style_panels(series, panels), 1):
+        im = _fit(Image.open(src), res)
+        cap = f"{tg}, a Korean webtoon panel. {re.sub(r'\s*SPACE \(identical.*$', '', panel_text(p), flags=re.S)}"
+        im.save(out / f"{k:03d}.png")
+        (out / f"{k:03d}.txt").write_text(cap, encoding="utf-8")
+        kept.append({"file": f"{k:03d}.png", "from": str(src.relative_to(series)).replace("\\", "/"), "size": list(im.size), "caption": cap})
+    info = {"who": STYLE, "trigger": tg, "res": res, "count": len(kept), "skipped": [], "items": kept}
+    (out.parent / "data.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
+    return info
+
+
 def build_data(series: Path, who: str, panels: int = 12, res: int = 1024) -> dict:
-    """학습 데이터(그림 + 같은 이름의 .txt 캡션)를 series/<작품>/lora/<인물>/data 에 만든다.
+    """학습 데이터(그림 + 같은 이름의 .txt 캡션)를 series/<작품>/lora/<인물>/data 에 만든다. who 가 STYLE 이면 그림체 데이터(build_style_data).
     - 그림: 표정 은행(정면 상반신, 표정마다 한 장) + 기본 전신 + 혼자 나온 잘 된 컷(자세·배경·샷이 다양해야 얼굴만이 아니라 사람을 배운다).
       짧은 변이 448 미만인 잘라낸 조각(시트의 작은 머리·옷 칸)은 흐려서 뺀다.
     - 캡션: 'trigger, 이름. 생김새(person: series.json who 또는 옛 판 characters.json tags). 옷. 표정·하는 일. 샷·배경.' 바뀌는 것(옷·표정·배경·샷)을 글로 적어야 그것이 trigger 에 묻지 않고,
       생김새 문장은 그릴 때 프롬프트에도 들어가는 같은 문장이라 학습 때와 그릴 때 글이 맞는다."""
+    if who == STYLE:
+        return build_style_data(series, max(panels, 24), res)
     from comfy_panel import panel_text
     sj = _sj(series)
     cast = person(series, who)
@@ -350,10 +408,15 @@ def for_panel(series, chars, model: str) -> list:
     if not series:
         return []
     loras = registry(Path(series))
-    hit = [(w, loras[w]) for w in (chars or []) if isinstance(loras.get(w), dict) and loras[w].get("on", True) and loras[w].get("file")
-           and str(loras[w].get("model") or "").lower() == str(model).lower()]
-    return [{"who": w, "file": e["file"], "trigger": e.get("trigger") or "",
-             "strength": float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
+    ok = lambda w: (isinstance(loras.get(w), dict) and loras[w].get("on", True) and loras[w].get("file")  # noqa: E731
+                    and str(loras[w].get("model") or "").lower() == str(model).lower())
+    hit = [(w, loras[w]) for w in (chars or []) if ok(w)]
+    out = [{"who": w, "file": e["file"], "trigger": e.get("trigger") or "",
+            "strength": float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
+    if ok(STYLE):  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)
+        e = loras[STYLE]
+        out.insert(0, {"who": STYLE, "file": e["file"], "trigger": e.get("trigger") or "", "strength": float(e.get("strength", 0.8))})
+    return out
 
 
 def add_slots(wf_name: str, count: int = 2) -> dict:
@@ -421,6 +484,8 @@ def main():
             print("작품에 등록:", json.dumps(registry(Path(a.target)), ensure_ascii=False, indent=1), "· 학습할 수 있는 인물:", people(Path(a.target)))
         return
     series = Path(a.target).resolve()
+    if a.who in ("style", "그림체"):  # 그림체 LoRA(작품의 모든 컷)
+        a.who = STYLE
     if a.cmd == "data":
         info = build_data(series, a.who, a.panels, a.res)
         print(f"{info['count']}장 → {series / 'lora' / a.who / 'data'} (trigger {info['trigger']}, 뺀 것 {info['skipped']})")

@@ -11,6 +11,7 @@
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -90,6 +91,68 @@ def _edit(c, cache, series, dst: Path, prompt: str, seed: int):
     c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), dst)
 
 
+def face_distance(series: Path, who: str, img: Path, pick=None) -> float | None:
+    """그 인물 기준 얼굴(models/lora_src/cast4_picks.json, 없으면 상반신 참고 그림)과 이 그림 속 얼굴의 거리(CCIP, 작을수록 같은 사람). 얼굴을 못 찾으면 None."""
+    from PIL import Image
+    from char_check import char_crop, differences, features, references
+    ref = references(series.name).get(who)
+    if ref is None:
+        b = series / "assets" / "vast_refs" / f"{who}_bust.png"
+        if not b.exists():
+            return None
+        ref = char_crop(Image.open(b).convert("RGB")) or Image.open(b).convert("RGB")
+    crop = char_crop(Image.open(img).convert("RGB"), pick)
+    if crop is None:
+        return None
+    return float(differences(features([crop, ref]))[0, 1])
+
+
+FACE = ("<image2> is {name}'s face. In <image1>, redraw only {name}'s face and hair so it is clearly the same person as <image2>: the same face "
+        "shape, eyes, eyebrows, nose, mouth, hairline and hairstyle, the same age ({age}). Keep {name}'s expression ({acting}), head angle, gaze, "
+        "pose, hands, clothes and everything else in <image1> exactly the same: the other people, the place, the light, the framing and the art style.")
+
+
+def fix_face(c, cache, series: Path, ep: Path, folder: str, p: dict, who: str, seed: int, log=print, tries: int = 2) -> tuple:
+    """얼굴이 다른 사람처럼 보이는 컷: 그 인물 상반신 참고 그림을 <image2> 로 주고 얼굴·머리만 다시 그리는 편집. 고친 뒤 얼굴 거리를 다시 재
+    가장 가까워진 판만 남긴다(멀어지거나 얼굴을 못 찾으면 원본). (전 거리, 후 거리).
+    (2026-10-20 사용자 "캐릭터 얼굴 일관성도 신경 써 줘, 다른 사람처럼 보이는 경우도 있네": 외출 상수가 컷마다 나이·얼굴형이 달라 보였다)"""
+    from lora import person
+    dst = ep / folder / f"{p['id']}.png"
+    keep = ep / folder / "_qa_before"
+    keep.mkdir(exist_ok=True)
+    if not (keep / dst.name).exists():
+        shutil.copy(dst, keep / dst.name)
+    who_p = person(series, who)
+    pick = None
+    if len(p.get("chars") or []) > 1:  # 여럿이면 그 인물이 왼쪽부터 몇 번째인지(장면 배치 LEFT/RIGHT 를 몰라도 얼굴 거리로 가장 가까운 쪽을 고른다)
+        ds = [(face_distance(series, who, dst, k), k) for k in range(len(p["chars"]))]
+        ds = [x for x in ds if x[0] is not None]
+        pick = min(ds)[1] if ds else None
+    d0 = face_distance(series, who, dst, pick)
+    if d0 is None:
+        log(f"  {p['id']}: {who} 얼굴을 못 찾음 → 그대로")
+        return None, None
+    best = (d0, dst.read_bytes())
+    prompt = FACE.format(name=who_p["name"], age=re.split(r"(?<=\.)\s", who_p["who"])[0][:100], acting=p.get("acting") or "as in <image1>")
+    ref = series / "assets" / "vast_refs" / f"{who}_bust.png"
+    orig = dst.read_bytes()
+    for t in range(tries):
+        dst.write_bytes(orig)
+        g = graph(prompt, [upload(c, dst, cache), upload(c, ref, cache)], 0, 0, seed + t, 8, 1024, turbo=True, edit=True, series=series)
+        g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/face"
+        h = c.wait(c.queue(g), 600)
+        c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), dst)
+        d1 = face_distance(series, who, dst, pick)
+        log(f"  {p['id']}: {who} 얼굴 맞추기 {t + 1}회 거리 {d0:.3f} → {d1 if d1 is None else round(d1, 3)}")
+        if d1 is not None and d1 < best[0]:
+            best = (d1, dst.read_bytes())
+    dst.write_bytes(best[1])
+    if best[0] < d0 and folder == "panels_hf_vast":
+        from sync_vast import place
+        place(ep, p["id"])
+    return d0, best[0]
+
+
 ONLY: set = set()  # --checks 로 고른 항목(고친 뒤 다시 검사할 때도 같은 항목만)
 
 
@@ -143,12 +206,21 @@ def main():
     ap.add_argument("--fix", action="store_true")
     ap.add_argument("--from-report", help="검사를 다시 하지 않고 이 qa_*.json 의 걸린 컷만 고친다")
     ap.add_argument("--checks", help="이 기준표 항목만(쉼표, 예: emotion,mouth,footwear,body_view) + 같은 사람이 둘인지. 없으면 전체 연출 검사")
+    ap.add_argument("--faces", help="얼굴 맞추기만: '컷:인물' 쉼표 목록(예 p481:sangsu,p061:eunyoung). 인물을 빼면 그 컷의 첫 인물")
     a = ap.parse_args()
     global ONLY
     ONLY = set(a.checks.split(",")) if a.checks else set()
     series = Path(a.series).resolve()
     ep = series / "episodes" / a.episode
     panels = _panels(ep)
+    if a.faces:
+        c, cache = Comfy(), {}
+        for k, item in enumerate(a.faces.split(",")):
+            pid, _, who = item.partition(":")
+            p = panels[pid]
+            r = fix_face(c, cache, series, ep, a.folder, p, who or p["chars"][0], 900 + 7 * k)
+            print(f"{pid}: 얼굴 거리 {r[0]} → {r[1]}", flush=True)
+        return
     if a.from_report:
         res = json.loads(Path(a.from_report).read_text(encoding="utf-8"))
     else:

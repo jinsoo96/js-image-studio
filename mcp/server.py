@@ -1341,6 +1341,123 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
     return f"{len(want)}컷을 vast 그림으로 바꿨다(원본은 panels_hf/_rejected/*_before_vast.png). 놓기 작업 {job} → 끝나면 compose"
 
 
+# ── 부분 고치기(vast/panel_edit.py, 그 판의 '편집' 워크플로우). 다시 그리지 않고 본편 그림의 일부만 바꾼다(2026-10-20 사용자
+#    "부분부분만 고치는 것도 가능하냐, MCP 도 알아서 컨피 워크플로우를 활용해야"). 고친 판은 본편에 들어가고 옛 판은 panel_versions 로 되돌린다.
+FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 revert_panel ② 일부만 틀림(소품·사람 하나 지우기·입·손·크기)은 edit_panel ③ 자리·테이블·배경이 "
+              "같은 장면의 다른 컷과 어긋나면 그 잘 된 컷에서 잘라 derive_panel ④ 얼굴이 다른 사람 같으면 fix_faces ⑤ 구도·카메라가 통째로 틀리면 "
+              "컷 설명을 고치고 vast_draw. 고친 뒤엔 compare_panel 로 전/후를 꼭 눈으로 본다. 다 고친 뒤 compose 는 한 번만.")
+
+
+@mcp.tool()
+def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: str = "", seed: int = -1) -> str:
+    """그린 컷의 일부만 고친다(다시 그리지 않음, 크레딧 0, 컷당 약 30초): 그 판의 편집 워크플로우에 지금 본편 그림(<image1>)과 지시를 준다.
+    instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
+    Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
+    사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(derive_panel 이나 vast_draw). 끝나면 compare_panel 로 전/후를 본다. """ + FIX_LADDER
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    if not (instruction or "").strip():
+        return _fail("empty_instruction")
+    cmd = [PY, str(VAST / "panel_edit.py"), "edit", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
+    cmd += ["--seed", str(seed)] if seed >= 0 else []
+    job = _start_job("edit_panel", ep, [{"label": f"{pid} 부분 고치기", "cmd": cmd}], instruction[:120])
+    return f"작업 시작 {job}(약 30초~1분). job_status('{job}') → 끝나면 compare_panel('{series}', '{episode}', '{pid}')"
+
+
+@mcp.tool()
+def derive_panel(series: str, episode: str, panel: str, source_panel: str, box: str, instruction: str, refs: str = "", seed: int = -1) -> str:
+    """같은 장면의 잘 된 컷(source_panel)에서 상자를 잘라 키우고, 이 컷의 순간으로 다시 그린다(자리·테이블·음식·배경·빛이 그 컷과 같아진다).
+    인물이 컷마다 다른 테이블로 옮겨 앉거나 배경이 바뀌는 문제를 고칠 때 쓴다. box 는 source_panel 그림 기준 0~1000 비율 "x0,y0,x1,y1"
+    (예: 오른쪽 절반 "500,150,1000,750"). instruction 은 이 순간의 동작·표정(영어). refs 는 얼굴 참고 인물 id. """ + FIX_LADDER
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    src = _pids(ep, source_panel, "any")[0]
+    if not re.fullmatch(r"\s*\d+(\.\d+)?\s*(,\s*\d+(\.\d+)?\s*){3}", box or ""):
+        return _fail("bad_box", hint="0~1000 비율 네 숫자 'x0,y0,x1,y1'")
+    cmd = [PY, str(VAST / "panel_edit.py"), "derive", str(_series(series)), ep.name, pid, instruction, "--from", src, "--box", box.replace(" ", ""), "--refs", refs]
+    cmd += ["--seed", str(seed)] if seed >= 0 else []
+    job = _start_job("derive_panel", ep, [{"label": f"{pid} 를 {src} 에서 잘라 다시", "cmd": cmd}], instruction[:120])
+    return f"작업 시작 {job}(약 1분). job_status('{job}') → 끝나면 compare_panel('{series}', '{episode}', '{pid}')"
+
+
+@mcp.tool()
+def fix_faces(series: str, episode: str, panels: str) -> str:
+    """얼굴이 다른 사람처럼 보이는 컷: 그 인물 기준 얼굴(상반신 참고 그림)로 얼굴·머리만 다시 그리고, 얼굴 동일인 거리(CCIP)를 재 가까워진 판만
+    남긴다(멀어지면 원본 그대로). panels: "p061:eunyoung,p496:sangsu"(인물을 빼면 그 컷의 첫 인물). 컷당 약 1분. 결과의 distance 는 작을수록 같은 사람. """ + FIX_LADDER
+    ep = _episode(series, episode)
+    items = []
+    for it in [x.strip() for x in (panels or "").split(",") if x.strip()]:
+        p, _, who = it.partition(":")
+        items.append(_pids(ep, p, "any")[0] + (f":{who}" if who else ""))
+    if not items:
+        return _fail("no_panels")
+    if len(items) > VAST_MAX:
+        return f"한 번에 {VAST_MAX}컷까지"
+    job = _start_job("fix_faces", ep, [{"label": f"얼굴 맞추기 {len(items)}컷", "cmd": [PY, str(VAST / "panel_edit.py"), "faces", str(_series(series)), ep.name, ",".join(items)]}])
+    return f"작업 시작 {job}(컷당 약 1분). job_status('{job}') 의 RESULT 줄에 거리 전/후, 끝나면 compare_panel"
+
+
+@mcp.tool()
+def panel_versions(series: str, episode: str, panel: str) -> str:
+    """이 컷의 예전 판들(새 것부터, name·time): 본편에서 밀려난 판(_rejected), 고치기 전(_qa_before), 장면 기준판 전(_preplate), 1단 판(_stage1).
+    예전 판이 더 나으면 revert_panel 로 그 name 을 준다. 그림은 file_link(series/<작품>/episodes/<회차>/<폴더>/<name>) 로."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    # panel_edit.versions 와 같은 자리(툴 안에서 무거운 모듈을 import 하지 않는다: Windows 워커 스레드 데드락)
+    spots = [(ep / "panels_hf" / "_rejected", f"{pid}_*.png"), (ep / "panels_hf" / "_rejected", f"{pid}.png"),
+             (ep / "panels_hf_vast" / "_qa_before", f"{pid}.png"), (ep / "panels_hf_vast" / "_preplate", f"{pid}.png"),
+             (ep / "panels_hf_vast" / "_stage1", f"{pid}*.png")]
+    found = sorted(((f.stat().st_mtime, f"{d.name}/{f.name}") for d, pat in spots if d.exists() for f in d.glob(pat)), reverse=True)
+    return json.dumps({"panel": pid, "versions": [{"name": n, "time": time.strftime("%m-%d %H:%M", time.localtime(t))} for t, n in found[:20]]},
+                      ensure_ascii=False)
+
+
+@mcp.tool()
+def revert_panel(series: str, episode: str, panel: str, version: str) -> str:
+    """컷을 예전 판으로 되돌린다(version = panel_versions 의 name). 지금 판은 _rejected 로 옮겨 지지 않는다. 끝나면 compose."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    job = _start_job("revert_panel", ep, [{"label": f"{pid} 되돌리기", "cmd": [PY, str(VAST / "panel_edit.py"), "revert", str(_series(series)), ep.name, pid, version]}])
+    return f"작업 시작 {job}. job_status('{job}') → compare_panel"
+
+
+@mcp.tool()
+def compare_panel(series: str, episode: str, panel: str) -> list:
+    """이 컷의 마지막 고치기 전/후 나란히 그림(edit_panel·derive_panel·fix_faces·revert_panel 이 남긴 것)을 그림 자체로 돌려준다. 고친 뒤 반드시 본다:
+    지시한 곳이 고쳐졌는지, 다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → revert_panel."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    cands = sorted((ep / "review" / "edits").glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if (ep / "review" / "edits").exists() else []
+    if not cands:
+        return "이 컷의 고치기 기록이 없다"
+    im = Image.open(cands[-1]).convert("RGB")
+    im.thumbnail((1400, 1400))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=82)
+    return [json.dumps({"panel": pid, "compare": str(cands[-1]), "link": _link(cands[-1]), "edits": len(cands)}, ensure_ascii=False),
+            McpImage(data=buf.getvalue(), format="jpeg")]
+
+
+@mcp.tool()
+def workflows(series: str = "") -> str:
+    """vast ComfyUI 서버의 웹툰 워크플로우를 판(uc·moss·anima·noctq …)과 역할별로: vertical(컷 그리기, vast_draw) · edit(부분 고치기, edit_panel·
+    derive_panel·fix_faces 와 그리기 뒤 자동 고치기) · asset_base·asset_expression(인물 에셋, vast_make_assets) · candidate_location·candidate_sheet
+    (새 장소·인물 시안) · lora_dataset·train_lora(LoRA 학습, lora_train). refs = 참고 그림을 받는 판인지. series 를 주면 그 작품이 쓰는 판을 표시.
+    화면에서 워크플로우를 고치면 도구가 그대로 따른다."""
+    m = _draw_models(refresh=True)
+    from saved_workflow import load_ui, pick
+    cur = pick(_series(series))[0] if series else None
+    out = {}
+    for name, v in m.items():
+        try:
+            meta = ((load_ui(v["gen"]).get("extra") or {}).get("webtoon") or {})
+        except Exception:  # noqa: BLE001
+            meta = {}
+        out[name] = {"in_use": name == cur, "draw": v.get("gen"), "edit": v.get("edit"), "roles": v.get("roles"),
+                     "refs": meta.get("refs", True), "steps": meta.get("steps"), "note": meta.get("note") or meta.get("desc")}
+    return json.dumps(out, ensure_ascii=False)
+
+
 VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); d=Path(sys.argv[2]); ids=sys.argv[3].split(',')\n"
              "(d/'panels_hf').mkdir(parents=True,exist_ok=True); n=0\n"
              "for i in ids:\n"
