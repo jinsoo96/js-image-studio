@@ -215,28 +215,41 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str):
     sb = ep / "storyboard.json"
     d = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
     spec = {q["id"]: q for q in (d["panels"] if isinstance(d, dict) else d)}
-    ids = [b["id"] for b in json.loads(sb.read_text(encoding="utf-8"))["panels"] if b["id"] in spec] if sb.exists() else list(spec)
+    board = {b["id"]: b for b in json.loads(sb.read_text(encoding="utf-8"))["panels"]} if sb.exists() else {}
+    ids = [i for i in board if i in spec] if board else list(spec)
     if p["id"] not in ids:
         return None
     k = ids.index(p["id"])
+    # 장면이 끊기는 곳: 시간 자막(상자 내레이션 '수요일'·'일주일 뒤'·'밤 10시')이 붙은 컷부터는 새 장면이다. 같은 장소가 이어져도
+    # 월요일 사무실(p226) 다음 수요일(p228)처럼 날이 바뀐다(2026-10-20 사용자 "장소가 바뀌어야 하는 씬이면 그것도 고려하나")
+    def time_cut(i):
+        return any(dd.get("box") for dd in (board.get(i) or {}).get("dialogue") or [])
+
+    def same_outfit(q):  # 같은 인물의 옷이 다르면 다른 때다(같은 방에서 밤 → 다음 날, p028 → p210)
+        oa, ob = q.get("outfit") or {}, p.get("outfit") or {}
+        return all(oa.get(c) == ob.get(c) for c in set(oa) & set(ob))
 
     def img(q):
         fs = [f for f in (out / f"{q}.png", ep / "panels_hf" / f"{q}.png") if f.exists()]
         return max(fs, key=lambda f: f.stat().st_mtime) if fs else None
 
     chars, sc = p.get("chars") or [], _shot_class(p)
+    if time_cut(p["id"]):  # 이 컷이 새 장면의 첫 컷
+        return None
     if "next_scene" in own and len(chars) == 1 and sc == "close" and k > 0:
         q = spec[ids[k - 1]]
         if (q.get("location") == p.get("location") and (q.get("chars") or []) == chars and _shot_class(q) == "close"
-                and q.get("aspect") == p.get("aspect") and img(q["id"]) and q["id"] not in CONT_MADE):
+                and q.get("aspect") == p.get("aspect") and same_outfit(q) and img(q["id"]) and q["id"] not in CONT_MADE):
             return "next_scene", img(q["id"]), q["id"]
     if "layout_lock" in own and len(chars) >= 2 and sc in ("wide", "medium"):
         for j in range(k - 1, max(-1, k - 9), -1):
             q = spec[ids[j]]
-            if q.get("location") != p.get("location"):
+            if q.get("location") != p.get("location") or not same_outfit(q):
                 break
             if set(q.get("chars") or []) == set(chars) and _shot_class(q) == sc and img(q["id"]):
                 return "layout_lock", img(q["id"]), q["id"]
+            if time_cut(q["id"]):  # 이 컷부터가 이 장면: 더 앞으로 가지 않는다
+                break
     return None
 
 
