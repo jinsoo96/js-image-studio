@@ -7,7 +7,7 @@ description: 세로 스크롤 웹툰 한 화를 만드는 템플릿. 시나리�
 
 ## 묶음
 - **스킬(순서대로)**: `storyboard` → `panel-spec` → (`asset`, 새 장소·인물이 있으면) → `continuity` → `staging-review` → `lettering-publish`
-- **ComfyUI 워크플로우(코어)**: 생성(참고 그림으로 컷) · 편집(남는 사람 지우기·표정·옷) · 에셋(표정 은행·베이스 몸) · 시안(장소·인물 시트). 서버에 저장된 것 `webtoon_vertical_qwen21` · `webtoon_panel_2stage_qwen21`, agent platform 카탈로그 `studio_webtoon_panel_1` · `studio_webtoon_panel_2` · `studio_image_free`
+- **ComfyUI 워크플로우(코어)**: 생성(참고 그림으로 컷) · 편집(남는 사람 지우기·표정·옷) · 에셋(표정 은행·베이스 몸) · 시안(장소·인물 시트). 서버에 저장된 것 `webtoon_vertical_qwen21_uc` 와 역할별 워크플로우(판 + 역할, `vast/saved_workflow.py`), agent platform 카탈로그 `studio_webtoon_panel_1` · `studio_webtoon_panel_2` · `studio_image_free`
 - **출력 형식**: 세로 조각(폭 800) · PDF · epub · 예고편(mp4·gif) → `exports/<날짜>/`
 
 ## 작품마다 바뀌는 것(데이터)

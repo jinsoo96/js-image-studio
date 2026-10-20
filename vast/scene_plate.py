@@ -413,6 +413,8 @@ def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=No
             draw_gen(101 + len(done))
             d2 = _doubled(dst, series, who)
             how += f" → 겹침({d.get('why', '')[:60]}) → 새로 그림" + (" (아직 겹침, 사람 눈으로)" if d2.get("doubled") else "")
+        from sync_vast import place  # 본편(panels_hf)에도 넣는다: vast 판에만 두면 합성(PDF)에 안 들어갔다(2026-10-20)
+        place(ep, p["id"])
         log(f"{p['id']}: 기준판({view})에서 {how} {int(time.time() - t0)}초 → {dst}")
         done.append(p["id"])
     return done

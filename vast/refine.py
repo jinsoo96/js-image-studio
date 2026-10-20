@@ -239,20 +239,22 @@ def _compare(check: dict, fill: dict, img_path: Path) -> list:
     want = _text_json(check["expect"].format(**fill), max_tokens=check.get("max_tokens", 200))
     got = _vlm([img_path], check["observe"].format(**fill), max_tokens=check.get("max_tokens", 200))
     skip = set(check.get("unknown", ["unknown", "unclear", "none", ""]))
-    pairs = {frozenset(x) for x in check.get("conflicts", [])}
+    # directed(기준표 데이터): 짝을 (기대, 관찰) 순서로 본다. 입은 '말없음 → 말하는 입'만 문제다(말하는 컷에서 입을 다문 건 괜찮다)
+    pairs = {tuple(x) for x in check.get("conflicts", [])} if check.get("directed") else {frozenset(x) for x in check.get("conflicts", [])}
     low = {str(k).lower(): v for k, v in got.items()}
     out = []
     for k, v in want.items():
         g = low.get(str(k).lower())
         if not (isinstance(v, str) and isinstance(g, str)) or v.lower() in skip or g.lower() in skip or v.lower() == g.lower():
             continue
-        if pairs and frozenset((v.lower(), g.lower())) not in pairs:
+        key = (v.lower(), g.lower()) if check.get("directed") else frozenset((v.lower(), g.lower()))
+        if pairs and key not in pairs:
             continue
         out.append(check["problem"].format(name=k, want=v, got=g))
     return out
 
 
-def run_checks(series, img_path: Path, p: dict, layout: str = "") -> dict:
+def run_checks(series, img_path: Path, p: dict, layout: str = "", speakers: str = "", only: set | None = None) -> dict:
     """기준표(skills/staging-review/checks.json)의 항목을 돌려 {항목 이름(category): [걸린 점]}. 항목마다 이 컷의 글을 주고 글대로인지만 묻는다.
     어느 항목을 돌릴지는 인물 수로만 정한다(글 속 문구로 켜고 끄지 않는다)."""
     spec = json.loads(CHECKS.read_text(encoding="utf-8"))
@@ -264,8 +266,11 @@ def run_checks(series, img_path: Path, p: dict, layout: str = "") -> dict:
     from hf_panel import names
     nm = names(Path(series))
     fill["names"] = ", ".join(re.sub(r"\s*\(.*?\)", "", nm.get(c, c)) for c in p.get("chars") or [])
+    fill["speakers"] = speakers or "(not given)"
     out = {}
     for c in spec["checks"]:
+        if only and c["name"] not in only:
+            continue
         when = c.get("when", "always")
         if (when == "people" and not (n or p.get("extras"))) or (when == "two_or_more" and n < 2):
             continue
@@ -338,7 +343,13 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
             probs.add("빈자리")
             notes.append("장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
                          + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부를 화면 끝에")
-    for cat, found in run_checks(series, img_path, p, layout).items():
+    board = json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8")) if (ep_dir / "storyboard.json").exists() else {}
+    bp = next((x for x in (board.get("panels") or []) if x.get("id") == pid), {})
+    from hf_panel import names as _nm
+    nmap = _nm(series)
+    spk = sorted({d.get("who") for d in bp.get("dialogue") or [] if d.get("who") and d.get("type") not in ("monologue", "narration", "caption", "sfx")})
+    speakers = ", ".join(re.sub(r"\s*\(.*?\)", "", nmap.get(w, w)) for w in spk) or "nobody (only narration, no one speaks aloud)"
+    for cat, found in run_checks(series, img_path, p, layout, speakers).items():
         probs.add(cat)
         notes.append(f"{cat}: " + "; ".join(found))
     if JUDGE_FAILS["n"] > fails0:
