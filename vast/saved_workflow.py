@@ -187,6 +187,10 @@ def _widget_names(spec: dict) -> list:
     return names
 
 
+# 학습한 LoRA(인물·그림체)를 그릴 때 fp8 가중치에 섞지 않고 옆길(LoraLoaderBypassModelOnly)로 건다. 섞으면 fp8 로 다시 무작위 반올림하고
+# (comfy/model_patcher patch_weight_to_device), D+18 그림체 0.8 + 재민 0.8 을 섞으니 그림 전체가 초록·보라 얼룩이 됐는데 옆길로는 같은 강도에서
+# 멀쩡했다(2026-10-21 p008). 학습도 bypass_mode 로 했다. 환경변수 WEBTOON_LORA_BYPASS=0 이면 예전처럼 섞는다
+LORA_BYPASS = os.environ.get("WEBTOON_LORA_BYPASS", "1") != "0"
 LORA_SLOT = "인물 LoRA"  # 생성 워크플로우에서 그 컷 인물의 LoRA 를 넣는 노드의 제목 머리(vast/lora.py slots 가 단다)
 
 
@@ -205,6 +209,8 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
             n["mode"] = 0 if k < len(loras) else 4
             if k < len(loras):
                 n["widgets_values"] = [loras[k]["file"], float(loras[k].get("strength", 0.8))]
+                if LORA_BYPASS:  # 학습한 LoRA 를 fp8 가중치에 섞지 않고 옆길로(학습도 bypass 로 했다)
+                    n["type"] = "LoraLoaderBypassModelOnly"
         more = list(loras[len(slots):])
     if turbo is not None:
         for n in nodes.values():
@@ -252,7 +258,7 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
             users = [(k, nm) for k, v in api.items() for nm, x in v["inputs"].items() if x == [src, 0]]
             prev = [src, 0]
             for i, lz in enumerate(more, 1):
-                api[f"L{i}"] = {"class_type": "LoraLoaderModelOnly",
+                api[f"L{i}"] = {"class_type": "LoraLoaderBypassModelOnly" if LORA_BYPASS else "LoraLoaderModelOnly",
                                 "inputs": {"model": prev, "lora_name": lz["file"], "strength_model": float(lz.get("strength", 0.8))}}
                 prev = [f"L{i}", 0]
             for k, nm in users:
