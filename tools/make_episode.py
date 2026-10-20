@@ -97,6 +97,8 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
                 run([PY, VAST / "make_assets.py", series, c, "both", "--res", "768"], f"{c} 센 표정·베이스", allow_fail=True, capture=True)
             if not (vr / f"{c}_xs_01.png").exists():  # 잔잔한 표정 묶음: 센 표정만 있으면 차분한 연기에 우쭐한 미소·오열이 골라졌다(2026-10-19 외출). 있는 건 건너뛴다
                 run([PY, VAST / "make_assets.py", series, c, "subtle", "--res", "768"], f"{c} 잔잔한 표정", allow_fail=True, capture=True)
+            if not (vr / f"{c}_turnaround.png").exists():  # 캐릭터 시트(앞·뒤·옆): 뒷모습·옆모습 컷의 참고 그림(2026-10-20 보조 도구 시험)
+                run([PY, VAST / "make_assets.py", series, c, "turn"], f"{c} 캐릭터 시트", allow_fail=True, capture=True)
     return need
 
 

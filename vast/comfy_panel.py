@@ -72,7 +72,7 @@ def lora_for(series, chars, model=None) -> list:
 NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None, control=None):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
     edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
@@ -93,8 +93,17 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
             w, h = max(512, int(w * k) // 32 * 32), max(512, int(h * k) // 32 * 32)
         # 인물 LoRA 는 컷 생성에만(고치기·에셋·시안은 그대로). 그 판으로 학습한 것만 붙는다(lora.for_panel)
         # 그림체 LoRA 는 사람 없는 컷에도 붙어서 chars 가 없어도 묻는다
-        lz = lora_for(series, chars, mid) if not edit and not role and not NO_LORA else None
-        return fill(to_api(ui, turbo=turbo, refine=bool(refine), loras=lz), prompt, ref_names, w, h, seed, steps, ref_res)
+        draw_role = role in (None, "layout_lock")  # 배치 고정도 컷 그리기라 인물·그림체 LoRA 를 붙인다
+        lz = lora_for(series, chars, mid) if not edit and draw_role and not NO_LORA else None
+        g = fill(to_api(ui, turbo=turbo, refine=bool(refine), loras=lz), prompt, ref_names, w, h, seed, steps, ref_res)
+        if control:  # 배치 기준 컷(올린 이름): 선 따기(Canny) 앞의 크기 맞추기·불러오기 노드에 넣는다(노드 번호가 아니라 연결로 찾는다)
+            cny = next(k for k, v in g.items() if v["class_type"] == "Canny")
+            sc = g[cny]["inputs"]["image"][0]
+            if g[sc]["class_type"] == "ImageScale":
+                g[sc]["inputs"].update(width=w, height=h)
+                sc = g[sc]["inputs"]["image"][0]
+            g[sc]["inputs"]["image"] = control
+        return g
     except Exception as e:  # noqa: BLE001
         if not _SAVED_WARNED:
             print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
@@ -186,6 +195,48 @@ def panel_text(p) -> str:
     return " ".join(x for x in parts if x)
 
 
+def _shot_class(p: dict) -> str:
+    s = (p.get("shot") or "").lower()
+    return "insert" if any(w in s for w in ("insert", "detail", "top view")) else "close" if "close" in s else "wide" if "wide" in s else "medium"
+
+
+def continuity(series, ep: Path, out: Path, p: dict, mid: str):
+    """같은 장면 앞 컷을 이용할지(2026-10-20 보조 도구 시험 → 사용자 "진행"). (방식, 기준 그림, 기준 컷) 또는 None.
+    next_scene: 바로 앞 컷이 같은 장소·같은 한 사람·같은 비율의 클로즈업 → 그 컷에서 잇는다(얼굴·옷·배경·그림체 유지, Next-Scene LoRA).
+    layout_lock: 같은 장소가 이어지는 앞 컷(여덟 컷 안) 중 같은 인물 묶음·같은 샷 종류(넓은·미디엄) → 그 컷의 선으로 사람 자리·테이블 배치 고정.
+    그 판에 그 역할 워크플로우가 있을 때만(지금은 Qwen UC). 앞 컷 그림은 이번 결과 폴더와 본편 중 새것."""
+    from saved_workflow import models
+    own = (models().get(mid) or {}).get("own_roles", [])
+    if "next_scene" not in own and "layout_lock" not in own:
+        return None
+    sb = ep / "storyboard.json"
+    d = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
+    spec = {q["id"]: q for q in (d["panels"] if isinstance(d, dict) else d)}
+    ids = [b["id"] for b in json.loads(sb.read_text(encoding="utf-8"))["panels"] if b["id"] in spec] if sb.exists() else list(spec)
+    if p["id"] not in ids:
+        return None
+    k = ids.index(p["id"])
+
+    def img(q):
+        fs = [f for f in (out / f"{q}.png", ep / "panels_hf" / f"{q}.png") if f.exists()]
+        return max(fs, key=lambda f: f.stat().st_mtime) if fs else None
+
+    chars, sc = p.get("chars") or [], _shot_class(p)
+    if "next_scene" in own and len(chars) == 1 and sc == "close" and k > 0:
+        q = spec[ids[k - 1]]
+        if (q.get("location") == p.get("location") and (q.get("chars") or []) == chars and _shot_class(q) == "close"
+                and q.get("aspect") == p.get("aspect") and img(q["id"])):
+            return "next_scene", img(q["id"]), q["id"]
+    if "layout_lock" in own and len(chars) >= 2 and sc in ("wide", "medium"):
+        for j in range(k - 1, max(-1, k - 9), -1):
+            q = spec[ids[j]]
+            if q.get("location") != p.get("location"):
+                break
+            if set(q.get("chars") or []) == set(chars) and _shot_class(q) == sc and img(q["id"]):
+                return "layout_lock", img(q["id"]), q["id"]
+    return None
+
+
 def gen_takes_refs(series) -> bool:
     """이 작품의 생성 판이 참고 그림을 받는가(Anima 는 못 받는다). 못 불러오면 받는다고 본다(코드 그래프는 Qwen)."""
     try:
@@ -228,7 +279,16 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
         refs.append(loc)
         lines.append(f"<image{len(refs)}> is the location: draw the panel inside this same place with the same furniture, colors and lighting.")
     bind = {}
+    # 뒷모습·옆모습 컷이면 캐릭터 시트에서 자른 그 방향 그림을 더 준다(make_assets turn → <id>_view_back·side). 정면 참고 그림만 주면 뒷모습의
+    # 머리 모양·옷 뒤판을 지어냈다. 방향은 컷 설명의 카메라 칸이 정한다(panel-spec 스킬이 'seen from behind'·'profile' 로 적는다)
+    cam = " ".join(str(p.get(k) or "") for k in ("camera", "shot")).lower()
+    view_kind = "back" if any(w in cam for w in ("from behind", "back view", "back to the camera", "seen from the back")) else (
+        "side" if any(w in cam for w in ("profile", "side view")) else None)
     for cid in ([] if text_only else p.get("chars", [])):
+        vf = series / "assets" / "vast_refs" / f"{cid}_view_{view_kind}.png" if view_kind else None
+        if vf is not None and vf.exists() and (len(p.get("chars") or []) == 1 or re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1].lower() in cam):
+            refs.append(vf)
+            lines.append(f"<image{len(refs)}> shows {NAMES[cid]} from the {view_kind}: use it for how the hair, build and clothes look from that side.")
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
         # turned: 독자를 봐서 다시 그릴 때. 정면 표정 칸·정면 머리가 고개 방향까지 끌고 갔다(2026-10-18 추몽 p016) → 시트의 3/4 머리만 넣는다
         turn = series / "assets" / "vast_refs" / f"{cid}_turn.png"
@@ -385,6 +445,7 @@ def main():
     ap.add_argument("--refine", action="store_true", help="2차 다듬기(잠재 확대 + 낮은 강도로 한 번 더): 얼굴·선이 또렷해지지만 컷당 시간이 약 1.5배")
     ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
     ap.add_argument("--no-lora", action="store_true", help="학습한 인물 LoRA(series.json loras)를 이번엔 붙이지 않는다(견줘 보기)")
+    ap.add_argument("--no-continuity", action="store_true", help="같은 장면 앞 컷 이용(클로즈업 잇기·배치 고정, continuity)을 끈다")
     args = ap.parse_args()
     global NO_LORA
     NO_LORA = args.no_lora
@@ -428,17 +489,39 @@ def main():
         dst = out / f"{p['id']}.png"
         log = lambda m: print(m, flush=True)  # noqa: E731
 
+        cont = None if args.no_continuity or text_only else continuity(series, out.parent, out, p, mid)
+        if cont:
+            print(f"{p['id']}: {'앞 컷에서 잇기' if cont[0] == 'next_scene' else '배치 고정'} ← {cont[2]}", flush=True)
+
         def render(sd, turned=False, note=""):
             pr, rf = (qwen_refs(series, p, expr=False, turned=True, text_only=text_only) if turned else (prompt, refs))
             if note:  # 연출 확인에서 걸린 점(지난 판의 실수)을 피하라고 붙인다
                 pr += "\n\nTHE LAST ATTEMPT HAD THESE MISTAKES, AVOID THEM: " + note
             names = [upload(c, r, cache) for r in rf]
             steps = args.steps or (8 if args.turbo else 40)
-            from make_workflow import build as ui_build, build_anima  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
-            ui = (build_anima(pr, size=(w, h), steps=steps, seed=sd, turbo=args.turbo) if text_only else
-                  ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel"))
-            hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine,
-                                                 chars=p.get("chars")), ui), timeout=1800)
+            first = cont and not turned and not note  # 다시 그리기(연출 확인에서 걸림)는 보통 방식으로: 같은 앞 컷을 또 베끼지 않게
+            if first and cont[0] == "next_scene":
+                from hf_panel import names as _names
+                cid = p["chars"][0]
+                face = series / "assets" / "vast_refs" / f"{cid}_bust.png"
+                nm = re.sub(r"\s*\(.*?\)", "", _names(series).get(cid, cid))
+                pr_ns = (f"Next Scene: the same moment continues in the same place, a new panel of {nm}. {p['action']} "
+                         + (f"Acting: {p['acting']}. " if p.get("acting") else "")
+                         + f"Keep {nm}'s face, hair and clothes, the place and the light exactly as in <image1>; change only the expression, gaze, "
+                           "head angle and hands as described." + (f" <image2> is {nm}'s face (identity only)." if face.exists() else "")
+                         + " Korean webtoon panel, no text, no speech bubbles.")
+                g = graph(pr_ns, [upload(c, cont[1], cache)] + ([upload(c, face, cache)] if face.exists() else []), 0, 0, sd, 25, args.ref_res,
+                          turbo=False, edit=True, series=series, role="next_scene")
+                hist = c.wait(c.queue(g), timeout=1800)
+            elif first and cont[0] == "layout_lock":
+                hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine,
+                                            chars=p.get("chars"), role="layout_lock", control=upload(c, cont[1], cache))), timeout=1800)
+            else:
+                from make_workflow import build as ui_build, build_anima  # 화면용 워크플로우(같은 구성)를 같이 실어 보낸다
+                ui = (build_anima(pr, size=(w, h), steps=steps, seed=sd, turbo=args.turbo) if text_only else
+                      ui_build(pr, names, steps=steps, seed=sd, turbo=args.turbo, size=(w, h), prefix="webtoon_studio/panel"))
+                hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine,
+                                            chars=p.get("chars")), ui), timeout=1800)
             st = hist.get("status", {})
             if st.get("status_str") == "error":
                 msg = next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?")

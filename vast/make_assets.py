@@ -9,6 +9,7 @@
 """
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -101,6 +102,54 @@ def expr_prompt(ex):
             "and on-model (no chibi, no gag face).")
 
 
+TURN = ("turn this photo into a character reference sheet: a 3x2 grid on a plain grey background with a close-up portrait of {pr} face, then {pr} full "
+        "outfit from the front, back, side, three-quarter front and three-quarter back, cropped at the neck")  # 캐릭터 시트 LoRA 작성자의 문장 그대로
+VIEWS = ["front", "back", "side", "side2", "34front", "34back"]  # 얼굴 칸 아래 2열 × 3행의 차례(2026-10-20 상수 시험 그림)
+
+
+def split_turnaround(src: Path, vr: Path, cid: str) -> list:
+    """캐릭터 시트를 흰 구분선으로 칸마다 잘라 <id>_view_face·front·back·side·side2·34front·34back.png 로. 구분선을 못 찾으면 []."""
+    import numpy as np
+    from PIL import Image
+    im = Image.open(src).convert("RGB")
+    a = np.asarray(im).astype(int)
+    white = a.min(axis=2) > 235
+
+    def runs(idx):
+        out, s0, p0 = [], None, None
+        for x in idx:
+            if s0 is None:
+                s0 = p0 = x
+            elif x == p0 + 1:
+                p0 = x
+            else:
+                out.append((s0, p0))
+                s0 = p0 = x
+        return out + ([(s0, p0)] if s0 is not None else [])
+
+    rows = runs([y for y in range(a.shape[0]) if white[y].mean() > 0.9])
+    if len(rows) < 3:
+        return []
+    ys = [0] + [r[1] + 1 for r in rows]
+    ye = [r[0] for r in rows] + [a.shape[0]]
+    bands = [(y0, y1) for y0, y1 in zip(ys, ye) if y1 - y0 > 40]
+    if len(bands) != 4:
+        return []
+    made = []
+    im.crop((0, bands[0][0], im.width, bands[0][1])).save(vr / f"{cid}_view_face.png")
+    made.append(f"{cid}_view_face.png")
+    k = 0
+    for y0, y1 in bands[1:]:
+        cols = runs([x for x in range(a.shape[1]) if white[y0:y1, x].mean() > 0.6])
+        mid = (cols[0][0] + cols[0][1]) // 2 if cols else im.width // 2
+        for x0, x1 in ((0, mid), (mid + 3, im.width)):
+            f = vr / f"{cid}_view_{VIEWS[k]}.png"
+            im.crop((x0, y0, x1, y1)).save(f)
+            made.append(f.name)
+            k += 1
+    return made
+
+
 def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
     """(출발 그림, 프롬프트, 결과 경로, 시드, 크기, 표정 이름) 목록. 이미 있는 결과는 건너뛴다(끊겼다 다시 돌려도 이어짐)."""
     out = []
@@ -114,6 +163,15 @@ def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
             if (only and k not in only) or f.exists():
                 continue
             out.append((src, subtle_prompt(ex), f, seed + 100 + k, res, ex.split(":")[0]))
+        return out
+    if what == "turn":  # 캐릭터 시트(얼굴 + 앞·뒤·옆·3/4 전신): 뒷모습·옆모습 참고 그림(2026-10-20 보조 도구 시험)
+        src = vr / f"{cid}_front.png"
+        if not src.exists():
+            print(f"{cid}: 정면 전신이 없어 캐릭터 시트 건너뜀")
+        elif not (vr / f"{cid}_turnaround.png").exists():
+            from lora import person
+            pr = "her" if re.search(r"woman|girl", person(vr.parents[1], cid).get("who", "")) else "his"
+            out.append((src, TURN.format(pr=pr), vr / f"{cid}_turnaround.png", seed, 1024, None))
         return out
     if what in ("base", "both"):
         src = vr / f"{cid}_front.png"
@@ -138,7 +196,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("series_dir")
     ap.add_argument("cid", help="인물 id, 또는 all(시트가 있는 인물 전부)")
-    ap.add_argument("what", choices=["base", "expr", "both", "subtle"], help="subtle = 잔잔한 표정 묶음(<id>_xs_NN, series.json expressions)")
+    ap.add_argument("what", choices=["base", "expr", "both", "subtle", "turn"],
+                    help="subtle = 잔잔한 표정 묶음(<id>_xs_NN, series.json expressions) · turn = 캐릭터 시트(<id>_turnaround + 칸마다 <id>_view_*)")
     ap.add_argument("--only", help="표정 번호(1부터) 일부만")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--res", type=int, default=1024, help="표정 그림 크기(면적 기준). 768 이면 장당 더 빠르다")
@@ -146,6 +205,8 @@ def main():
     series = Path(args.series_dir)
     vr = series / "assets" / "vast_refs"
     cids = [s.name[: -len("_sheet.png")] for s in sorted((series / "assets").glob("*_sheet.png"))] if args.cid == "all" else [args.cid]
+    if args.cid == "all" and not cids:  # 새 작품은 assets/<id>_sheet.png 대신 vast_refs/<id>_front.png 만 있다
+        cids = sorted(f.name[: -len("_front.png")] for f in vr.glob("*_front.png"))
     only = {int(x) for x in args.only.split(",")} if args.only else None
     jobs = [(cid,) + j for cid in cids for j in jobs_for(vr, cid, args.what, only, args.seed, args.res)]
     print(f"할 일 {len(jobs)}장", flush=True)
@@ -153,8 +214,11 @@ def main():
     # 전부 한꺼번에 큐에 넣는다: 한 장씩 넣고 기다리면 올리기·확인 사이에 GPU 가 논다(2026-10-15 사용자 "존나 오래 걸리노")
     queued = []
     for cid, src, prompt, outp, seed, res, label in jobs:
-        g = graph(prompt, [upload(c, src, cache)], 0, 0, seed, 8, res, turbo=True, edit=True, series=series,
-                  role="asset_expression" if label else "asset_base")  # 표정(label 있음)·기본 몸은 각자 서버 워크플로우(판별)를 쓴다
+        if args.what == "turn":  # 캐릭터 시트 LoRA 는 터보를 쓰면 격자가 깨진다(작성자): 역할 워크플로우의 25스텝, 터보 끔
+            g = graph(prompt, [upload(c, src, cache)], 0, 0, seed, 25, res, turbo=False, edit=True, series=series, role="asset_sheet")
+        else:
+            g = graph(prompt, [upload(c, src, cache)], 0, 0, seed, 8, res, turbo=True, edit=True, series=series,
+                      role="asset_expression" if label else "asset_base")  # 표정(label 있음)·기본 몸은 각자 서버 워크플로우(판별)를 쓴다
         queued.append((cid, c.queue(g), outp, label))
     t0 = time.time()
     for n, (cid, pid, outp, label) in enumerate(queued, 1):
@@ -168,7 +232,10 @@ def main():
             extra[outp.name] = {"file": outp.name, "label": label}
             meta["extra"] = sorted(extra.values(), key=lambda x: x["file"])
             jf.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"[{n}/{len(queued)}] {outp.name} {label or '베이스'} (누적 {time.time() - t0:.0f}초)", flush=True)
+        if outp.name.endswith("_turnaround.png"):
+            cells = split_turnaround(outp, vr, cid)
+            print(f"  {cid}: 칸 {len(cells)}개로 자름" + ("" if cells else " (구분선을 못 찾음, 시트만 남김)"), flush=True)
+        print(f"[{n}/{len(queued)}] {outp.name} {label or ('캐릭터 시트' if args.what == 'turn' else '베이스')} (누적 {time.time() - t0:.0f}초)", flush=True)
 
 
 if __name__ == "__main__":

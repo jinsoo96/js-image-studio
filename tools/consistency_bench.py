@@ -20,6 +20,11 @@ sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 
+# CCIP 기본 문턱(0.178)은 '다른 캐릭터인가'를 가르는 값이라 같은 작품 안에서는 너무 너그럽다: 외출에서 사용자가 "다른 사람 같다"고 한 컷이
+# 0.057~0.097, 괜찮은 컷이 0.03 안팎이었다(2026-10-20). 같은 그림체 안의 같은 사람은 이 값으로 본다
+STRICT = 0.05
+
+
 def pick_panels(ep: Path, who: str, n: int) -> list:
     """그 인물 혼자 나오는 컷을 샷 종류가 고르게 n 개(인서트·뒷모습 빼고)."""
     import re
@@ -75,6 +80,7 @@ def main():
         ds = [r["distance"] for r in rows.get(m, []) if r["distance"] is not None]
         found = len(ds)
         summary[m] = {"panels": len(rows.get(m, [])), "face_found": found, "same_person_rate": round(sum(d <= th for d in ds) / max(1, found), 2),
+                      "strict_rate": round(sum(d <= STRICT for d in ds) / max(1, found), 2),
                       "median_distance": round(statistics.median(ds), 3) if ds else None, "secs": int(rows.get(m + "_secs", 0))}
     out = ROOT / "exports" / time.strftime("%Y-%m-%d") / "비교"
     out.mkdir(parents=True, exist_ok=True)
@@ -95,8 +101,8 @@ def main():
             im = im.resize((W, int(im.height * W / im.width)))
             c = Image.new("RGB", (W, im.height + 26), "white")
             c.paste(im, (0, 26))
-            tag = "" if d is None else (f" {d:.3f} 같음" if d <= th else f" {d:.3f} 다름")
-            ImageDraw.Draw(c).text((4, 3), lab + tag, fill=(0, 110, 0) if (d is not None and d <= th) else (170, 0, 0) if d is not None else "black", font=f)
+            tag = "" if d is None else (f" {d:.3f} 같음" if d <= STRICT else f" {d:.3f} 닮음" if d <= th else f" {d:.3f} 다름")
+            ImageDraw.Draw(c).text((4, 3), lab + tag, fill=(0, 110, 0) if (d is not None and d <= STRICT) else (170, 0, 0) if d is not None else "black", font=f)
             row.append(c)
         cells.append(row)
     H = sum(max(c.height for c in r) + 6 for r in cells)
@@ -109,7 +115,8 @@ def main():
         y += max(c.height for c in r) + 6
     S.save(out / f"{stem}.jpg", quality=86)
     for m, s in summary.items():
-        print(f"{m}: 같은 사람 {s['same_person_rate'] * 100:.0f}% (얼굴 찾음 {s['face_found']}/{s['panels']}, 거리 중간값 {s['median_distance']}, {s['secs']}초)")
+        print(f"{m}: 엄격 기준(≤{STRICT}) 같은 사람 {s['strict_rate'] * 100:.0f}% · 기본 문턱 {s['same_person_rate'] * 100:.0f}% "
+              f"(얼굴 찾음 {s['face_found']}/{s['panels']}, 거리 중간값 {s['median_distance']}, {s['secs']}초)")
     print(out / f"{stem}.jpg", f"{int(time.time() - t0)}초")
 
 
