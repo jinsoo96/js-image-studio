@@ -297,6 +297,47 @@ def _compare(check: dict, fill: dict, img_path: Path) -> list:
     return out
 
 
+def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
+    """사실 하나씩 묻는 항목(checks.json kind). 약한 판정 모델도 여럿을 한꺼번에 물으면 놓치고 하나씩 물으면 잡았다(2026-10-20 하네스 시험,
+    tools/harness_selftest.py). facts: 글에서 꼭 보여야 할 사실을 예/아니오 질문으로 뽑아 하나씩 · count_each: 인물마다 그 생김새인 사람 수 ·
+    fixed: 고정 질문 하나(field 가 양수면 걸림) · each: 사람마다 한 질문(expect 가 'no' 인 사람이 bad_value 면 걸림)."""
+    from hf_panel import names
+    nm = names(Path(series))
+    out = []
+    kind = c["kind"]
+    if kind == "facts":
+        for f in (_text_json(c["extract"].format(**fill), c.get("max_tokens", 400)).get("facts") or [])[:4]:
+            if not isinstance(f, dict) or str(f.get("a", "")).lower() not in ("yes", "no"):
+                continue
+            got = str(_vlm([img_path], c["ask_each"].format(q=f.get("q", "")), 60).get("answer", "")).lower()
+            if got in ("yes", "no") and got != f["a"].lower():
+                out.append(c["problem"].format(q=f.get("q", ""), want=f["a"], got=got))
+    elif kind == "count_each":
+        wears = {ch: " ".join(re.split(r",| with | over | under ", (p.get("outfit") or {}).get(ch, ""))[0].split()[:4]) for ch in p.get("chars") or []}
+        for ch, top in wears.items():
+            if not top:
+                continue
+            same = sum(1 for t in wears.values() if t.lower() == top.lower())  # 같은 옷을 입은 인물이 여럿이면 그만큼은 정상
+            n = _vlm([img_path], c["observe"].format(top=top), 60).get("count")
+            if isinstance(n, int) and n > same:
+                out.append(c["problem"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch)), n=n))
+    elif kind == "fixed":
+        v = _vlm([img_path], c["observe"].format(**fill), 80).get(c["field"])
+        if isinstance(v, (int, float)) and v > 0 and c.get("bad") == "positive":
+            out.append(c["problem"].format(v=v))
+    elif kind == "each":
+        want = _text_json(c["expect"].format(**fill), c.get("max_tokens", 150))
+        low = {str(k).lower(): str(v).lower() for k, v in want.items()}
+        for ch in p.get("chars") or []:
+            name = re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch))
+            if low.get(name.lower(), "no") != "no":
+                continue
+            got = str(_vlm([img_path], c["observe"].format(looks=_looks(series, {"chars": [ch], "outfit": p.get("outfit")})), 60).get("looking", "")).lower()
+            if got == c["bad_value"]:
+                out.append(c["problem"].format(name=name))
+    return out
+
+
 def run_checks(series, img_path: Path, p: dict, layout: str = "", speakers: str = "", only: set | None = None) -> dict:
     """기준표(skills/staging-review/checks.json)의 항목을 돌려 {항목 이름(category): [걸린 점]}. 항목마다 이 컷의 글을 주고 글대로인지만 묻는다.
     어느 항목을 돌릴지는 인물 수로만 정한다(글 속 문구로 켜고 끄지 않는다)."""
@@ -317,11 +358,13 @@ def run_checks(series, img_path: Path, p: dict, layout: str = "", speakers: str 
         when = c.get("when", "always")
         if (when == "people" and not (n or p.get("extras"))) or (when == "two_or_more" and n < 2):
             continue
-        if "expect" in c:  # 비교형: 글에서 기대값, 그림에서 관찰값을 따로 받아 코드가 비교한다(판정 모델 혼자 비교하면 좌우를 놓쳤다, 외출 p016)
+        if c.get("kind"):  # 사실 하나씩 묻는 항목(_kind_check)
+            found = _kind_check(c, fill, img_path, series, p)
+        elif "expect" in c:  # 비교형: 글에서 기대값, 그림에서 관찰값을 따로 받아 코드가 비교한다(판정 모델 혼자 비교하면 좌우를 놓쳤다, 외출 p016)
             found = _compare(c, fill, img_path)
         else:
             found = [str(x) for x in _vlm([img_path], c["ask"].format(**fill), max_tokens=c.get("max_tokens", 300)).get("problems", []) if x]
-        if found and spec.get("verify"):  # 걸린 점만 두 번째 판정이 다시 거른다(트집·좌우 착각을 덜어 낸다)
+        if found and spec.get("verify") and c.get("verify", True):  # 걸린 점만 두 번째 판정이 다시 거른다(트집·좌우 착각을 덜어 낸다)
             listing = "\n".join(f"{k}. {x}" for k, x in enumerate(found))
             keep = _vlm([img_path], spec["verify"].format(text=fill["text"], problems=listing), max_tokens=120).get("keep")
             if isinstance(keep, list):
@@ -336,7 +379,7 @@ Panel 1 shows: {who1}. Panel 2 shows: {who2}. Compare only the people who appear
 panel (a shot of the other speaker, a close-up of one person after a wide shot) is normal, not a mistake.
 What happens in panel 2: {desc}
 List differences between the two panels that a reader would notice as continuity mistakes, unless the text above explains them:
-a person who was sitting is now standing (or the reverse); the number or kind of drinks, cups or props on the table changes; clothes, hairstyle or glasses change; a person looks like a different person (face, age, build); the drawing style changes (line, coloring, proportions, realism); the left-right positions of the people swap.
+a person who was sitting is now standing (or the reverse); people who sat together at one table now sit at different tables or far apart; the number or kind of drinks, cups or props on the table changes; a handheld object such as a phone changes size a lot; clothes, hairstyle or glasses change; a person looks like a different person (face, age, build); the drawing style changes (line, coloring, proportions, realism); the left-right positions of the people swap.
 Only report clear mistakes. Answer JSON only: {{"problems": ["short description", ...]}} (empty list if none)."""
 
 

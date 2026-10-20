@@ -1,0 +1,165 @@
+{
+ "_why": "사용자가 실제로 지적한 결함 사례(나쁜 판 ↔ 고친 판)로 검수 하네스를 시험한다(tools/harness_selftest.py). 검사를 고치거나 판정 모델이 바뀌면 다시 돌려, 나쁜 판을 잡는지(잡음)와 고친 판을 괜히 걸지 않는지(헛걸림)를 본다. 2026-10-20 사용자 '내가 쿠사리 줬던 지시사항이 하네스화가 잘 돼서 이뤄지는지 확인'. 그림은 레포 밖(회차 폴더)이라 경로는 회차 폴더 기준. check: absent(이 순간 없어야 할 인물) · doubled(같은 사람 둘) · limbs(팔·손 개수) · checks:<기준표 항목,…> · continuity:<앞 컷>. '+' 로 여럿을 함께(하나라도 걸리면 잡음).",
+ "cases": [
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p006",
+   "bad": "panels_hf/_rejected/p006_20261020-111158.png",
+   "check": "absent",
+   "user": "빡빡이 인사하고 갔는데 왜 또 옆에 있어"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p104",
+   "bad": "panels_hf/_rejected/p104_20261020-111158.png",
+   "check": "absent",
+   "user": "(같은 지적) 떠난 박 과장이 남음"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p464",
+   "bad": "panels_hf/_rejected/p464_20261020-112059.png",
+   "check": "absent",
+   "user": "(전 컷 검수) 다방 주인이 상수 곁에 계속 서 있음"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p226",
+   "bad": "panels_hf_vast/_qa_before/p226.png",
+   "check": "absent",
+   "user": "(전 컷 검수) 수요일에 오는 은영이 월요일 사무실에"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p008",
+   "bad": "panels_hf/_rejected/p008_20261020-111158.png",
+   "check": "checks:count_each",
+   "user": "버스 잘 만들더니 망가짐(은영 둘)"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p341",
+   "bad": "panels_hf/_rejected/p341_20261020-112059.png",
+   "check": "checks:count_each",
+   "user": "(전 컷 검수) 상수가 둘"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p416",
+   "bad": "panels_hf/_rejected/p416_20261020-112211.png",
+   "check": "checks:count_each",
+   "user": "(전 컷 검수) 상민이 둘"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p203",
+   "bad": "panels_hf/_rejected/p203_20261020-111625.png",
+   "check": "checks:scale,facts",
+   "user": "핸드폰은 왜 갑자기 작아지고"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p493",
+   "bad": "panels_hf/_rejected/p493_20261020-112059.png",
+   "check": "checks:scale,facts",
+   "user": "(같은 지적) 라이터만 한 폰"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p489",
+   "bad": "panels_hf/_rejected/p489_20261020-112059.png",
+   "check": "checks:scale,logic,facts",
+   "user": "(전 컷 검수) 2008년에 하얀 스마트폰"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p488",
+   "bad": "panels_hf/_rejected/p488_20261020-130648.png",
+   "check": "checks:scale,unheld,facts",
+   "user": "맥주는 공중에 왜 떠 있지"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p207",
+   "bad": "panels_hf/_rejected/p207_20261020-112159.png",
+   "check": "checks:scale,unheld",
+   "user": "(전 컷 검수) 손 없이 귀에 뜬 폰"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p437",
+   "bad": "panels_hf/_rejected/p437_20261020-112059.png",
+   "check": "checks:logic,facts",
+   "user": "(전 컷 검수) 벤치 없이 허공에 앉음"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p061",
+   "bad": "panels_hf/_rejected/p061_20261020-144110.png",
+   "check": "checks:eye_contact,gaze_each",
+   "user": "어디 보고 말함, 마주 보는 곳인데"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p495",
+   "bad": "panels_hf/_rejected/p495_20261020-144112.png",
+   "check": "limbs+checks:facts",
+   "user": "손이 두 개임"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p016",
+   "bad": "panels_hf/_rejected/p016_20261020-144516.png",
+   "check": "continuity:p012+checks:facts",
+   "user": "좌석이 왜 갑자기 이동되고 분리됨"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p334",
+   "bad": "panels_hf_vast/_qa_before/p334.png",
+   "check": "continuity:p332+checks:facts",
+   "user": "은영 대리 위에 좌석이랑 왜 다른 데로 옮겨 갔냐"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p059",
+   "bad": "panels_hf/_rejected/p059_20261020-141713.png",
+   "check": "checks:view,logic,facts",
+   "user": "택시 씬도 왜 앞문을 여는 거야, 뒷문에 같이 타는 씬"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p120",
+   "bad": "panels_hf/_rejected/p120_20261020-112648.png",
+   "check": "checks:logic,view,facts",
+   "user": "(전 컷 검수) 버스에 오른다는데 버스가 없음"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p452",
+   "bad": "panels_hf/_rejected/p452_20261020-144536.png",
+   "check": "checks:gaze,facing,gaze_each,facts",
+   "user": "둘이 만나는 짤인데 어디 보냐 둘이"
+  }
+ ]
+}

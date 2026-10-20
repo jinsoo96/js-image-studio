@@ -23,7 +23,9 @@ _picked = None
 
 def candidates() -> list:
     out = [(os.environ.get("VLM_URL", DEFAULT_URL), os.environ.get("VLM_MODEL", DEFAULT_MODEL), os.environ.get("VLM_API_KEY", "EMPTY"))]
-    for item in os.environ.get("VLM_FALLBACK", "").split(","):
+    # 대체 후보를 안 줬으면 이 작업실의 사내 VL 터널(agent app 로컬 MCP 가 쓰는 localhost:12361)을 둔다. 사내 judge 가 502 로 반나절 죽었을 때
+    # 대체가 없어 모든 검사가 '검사불가'로 끝났다(2026-10-20 외출). 대체 모델(8B)은 약해서 job 로그에 고른 주소가 남는다(endpoint)
+    for item in (os.environ.get("VLM_FALLBACK") or "http://localhost:12361/v1|Qwen3-VL-8B-FP8").split(","):
         parts = [x.strip() for x in item.split("|")]
         if len(parts) >= 2 and parts[0]:
             out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))

@@ -72,7 +72,11 @@ def char_crop(img, pick=None):
 
 
 def references(series_name):
-    picks = load_json(ROOT / "models" / "lora_src" / "cast4_picks.json").get(series_name, {})
+    """인물별 기준 얼굴: 사용자가 고른 얼굴(models/lora_src/cast4_picks.json, 레포 밖) → 없으면 작품 에셋의 상반신 참고 그림(assets/vast_refs/<id>_bust.png).
+    고른 얼굴만 보던 때 새 작품(외출·추몽)은 기준이 없어 '기준과 다름'이 비어 있었다(2026-10-20 사용자 "다른 사람처럼 보이는 경우도 있네")."""
+    picks = dict(load_json(ROOT / "models" / "lora_src" / "cast4_picks.json").get(series_name, {}) if (ROOT / "models" / "lora_src" / "cast4_picks.json").exists() else {})
+    for f in sorted((ROOT / "series" / series_name / "assets" / "vast_refs").glob("*_bust.png")):
+        picks.setdefault(f.name[:-len("_bust.png")], str(f.relative_to(ROOT)))
     refs = {}
     for cid, rel in picks.items():
         p = ROOT / rel

@@ -229,6 +229,61 @@
     ]
    ],
    "problem": "{name} is seen from the {got}, but the text has them seen from the {want}"
+  },
+  {
+   "name": "scale",
+   "category": "소품",
+   "when": "people",
+   "max_tokens": 250,
+   "ask": "Panel text: {text}\nLook only at objects people hold, use or that stand near their hands: phones, cups, glasses, mugs, bottles, bags. Report clear problems: an object far too small or too large for the hand or person (a phone as small as a fingertip or as big as a book, a mug bigger than a head), an object floating in the air or at the mouth or ear with no hand holding it, two of an object where one person should hold one, an object that does not fit the period.{era}\nOnly sizes a reader would find plainly wrong or impossible at a glance; ignore small differences. Write each problem in one short sentence.\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none).",
+   "why": "2026-10-20 외출: 손가락만 한 폴더폰(p203·p493), 손 없이 입에 뜬 맥주잔(p488), 귀에 뜬 폰(p207), 2008년에 하얀 스마트폰(p489)을 어떤 검사도 못 잡았다(사용자 '핸드폰은 왜 갑자기 작아지고', '맥주는 공중에 왜 떠 있지'). 공통 규칙의 '크기는 보지 않는다'가 막아 따로 묻는다"
+  },
+  {
+   "name": "facts",
+   "category": "논리",
+   "when": "always",
+   "kind": "facts",
+   "verify": false,
+   "max_tokens": 400,
+   "why": "2026-10-20 하네스 시험: 여러 점을 한꺼번에 물으면 대체 판정 모델(8B)이 버스 없음·앞문 열림·다른 테이블을 다 놓쳤고, 사실 하나씩 물으니 잡았다. 예시 질문('버스가 있나')을 프롬프트에 두니 약한 모델이 버스 없는 컷에도 베껴 와서 예시를 뺐다",
+   "extract": "Panel text: {text}\nFrom this text only (there is no picture): which big, unmistakable things does the text EXPLICITLY say must be seen? Consider only these kinds, and only when the text itself names them: a vehicle and which of its doors is open; two people sitting at one shared table; the seat a sitting person sits on; an object a person holds in a hand. If the text names none of these, answer an empty list. Never invent a vehicle, table or object the text does not name. Do not ask about left or right, counts, poses, emotions, faces or gaze. Write at most 3, each as a yes/no question about the picture with the answer the text requires. Answer JSON only: {{\"facts\": [{{\"q\": \"<question>\", \"a\": \"yes\" | \"no\"}}]}}",
+   "ask_each": "Look at the picture and answer this one question: {q}\nAnswer JSON only: {{\"answer\": \"yes\" | \"no\" | \"unclear\"}}",
+   "problem": "{q} — 글은 {want}, 그림은 {got}"
+  },
+  {
+   "name": "count_each",
+   "category": "인원",
+   "when": "people",
+   "kind": "count_each",
+   "verify": false,
+   "why": "같은 사람이 둘(p341 상수 둘)을 '둘로 그렸나'로 물으면 놓치고, 그 생김새의 사람 수를 세게 하니 잡았다(2026-10-20). 생김새 글 전체로 세면 못 셌고, 윗옷 하나(앞 네 낱말)로 세니 셌다",
+   "observe": "How many people wearing a {top} are in this picture? Count every one, background included. Answer JSON only: {{\"count\": N}}",
+   "problem": "{name} 처럼 생긴 사람이 {n}명"
+  },
+  {
+   "name": "unheld",
+   "category": "소품",
+   "when": "people",
+   "kind": "fixed",
+   "verify": false,
+   "field": "unheld",
+   "why": "귀에 뜬 폰(p207)·입에 뜬 잔: 손에 쥐었나만 물으니 잡았다(2026-10-20)",
+   "observe": "Look at each cup, glass, mug and phone in the picture that is at someone's mouth or ear. Is each one gripped by fingers of a hand? Answer JSON only: {{\"unheld\": <number of such objects with no fingers around them>}}",
+   "bad": "positive",
+   "problem": "손에 쥐지 않고 입·귀에 떠 있는 물건 {v}개"
+  },
+  {
+   "name": "gaze_each",
+   "category": "시선",
+   "when": "people",
+   "kind": "each",
+   "verify": false,
+   "max_tokens": 150,
+   "why": "얼굴 맞추기 뒤 은영이 카메라를 봤는데(p061) 여럿을 한꺼번에 물으면 놓쳤다. 한 사람씩 '카메라를 보나'만 물으니 잡았다(2026-10-20)",
+   "expect": "Panel text: {text}\nFrom the text only, should any of these people look straight at the viewer (eye contact with the camera): {names}? Answer \"yes\" only if the text asks for it. Answer JSON only: {{\"<name>\": \"yes\" | \"no\"}}",
+   "observe": "Look at the person who looks like this: {looks}. Where is this person looking? Answer JSON only: {{\"looking\": \"camera\" | \"left\" | \"right\" | \"down\" | \"up\" | \"not_visible\"}}",
+   "bad_value": "camera",
+   "problem": "{name} 가 카메라(독자)를 본다"
   }
  ],
  "common": "Left and right always mean the viewer's left and right side of the picture ('screen left' is the left side of the image as you look at it). Report only clear mismatches a careful reader would notice at a glance at normal webtoon size. Fine and not worth reporting: small differences in camera angle, position or framing, hair shade, the exact moment of an action in progress, and anything the panel text does not mention (jewelry, exact sizes, colors of unnamed people's clothes, background furniture or devices), unless it is clearly impossible for the period or the real world. Write each problem as one short sentence of at most 25 words.",
