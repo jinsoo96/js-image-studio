@@ -224,7 +224,12 @@ def absent_cast(series, ep_dir: Path, pid: str, img_path: Path | None = None) ->
     loc = p.get("location")
     if not loc or loc == "none":
         return []
-    same = [q for q in spec.values() if q.get("location") == loc]
+    # 같은 장소라도 앞뒤 여덟 컷 안(같은 장면 언저리)만: 회차 전체로 모으면 다른 날 회의 장면의 김희원·이주연을 마지막 날 사무실 컷의
+    # 이름 없는 팀원에게서 찾아 지우려다 세 번 실패했다(2026-10-20 p101)
+    sb = Path(ep_dir) / "storyboard.json"
+    order = [b["id"] for b in json.loads(sb.read_text(encoding="utf-8"))["panels"] if b["id"] in spec] if sb.exists() else list(spec)
+    k = order.index(pid) if pid in order else 0
+    same = [spec[i] for i in order[max(0, k - 8):k + 9] if spec[i].get("location") == loc]
     others = sorted({c for q in same for c in q.get("chars") or []} - set(p.get("chars") or []))
     if not others:
         return []

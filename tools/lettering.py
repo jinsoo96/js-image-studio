@@ -621,20 +621,34 @@ def layout_panel(panel, items, W, H, img):
             return sum(overlap(box, a) for a in avoid) / (q.w * q.h) > 0.012
         need = [i for i, q in enumerate(bubbles) if getattr(q, "gutter", False) or (q.cy - q.ry < 0 and q.cy < q.ry) or hits_face(q)]
         if need:
-            group = bubbles[:max(need) + 1]
+            last = max(need)
+            # 목으로 이어진 같은 사람 풍선은 같이 올린다: 앞 풍선만 위 여백으로 가고 뒤 풍선이 컷 아래쪽에 남아 목이 그림을 세로로 가로질렀다
+            # (2026-10-20 외출 p012 사용자 "말풍선 꼬라지 이상")
+            while last + 1 < len(bubbles) and bubbles[last + 1].side == bubbles[last].side and bubbles[last].neck_to:
+                last += 1
+            group = bubbles[:last + 1]
             y = -6.0
             for q in reversed(group):
                 q.cy = y - q.ry
                 y = q.cy - q.ry - 8
                 q.gutter = True
+            # 위 여백에 쌓인 같은 사람 풍선은 말하는 사람 쪽에 세로로 맞춘다(이어 말하기마다 40px 씩 옆으로 밀려 오른쪽 사람 말이
+            # 왼쪽 사람 위로 갔다, 2026-10-20 외출 p012)
+            for k, q in enumerate(group):
+                if k and q.side == group[k - 1].side and q.side in SIDE_X:
+                    q.cx = min(max(group[k - 1].cx, margin + q.rx), W - margin - q.rx)
         for i in range(1, len(bubbles)):
             if bubbles[i].side == bubbles[i - 1].side and bubbles[i - 1].neck_to:
                 bubbles[i - 1].neck_to = (bubbles[i].cx, bubbles[i].cy)
     # 목이 얼굴을 지나가면: 뒤 풍선을 앞 풍선 바로 아래(같은 쪽)로 붙여 보고, 거기도 얼굴·다른 풍선에 걸리면 목을 빼고 따로 꼬리를 단다
     unchained = set()
+
+    def long_neck(a, b):  # 두 풍선 가장자리 사이가 풍선 하나 높이보다 멀면 목이 그림을 가로지른다
+        return abs(b.cy - a.cy) - (a.ry + b.ry) > min(a.ry, b.ry) * 2 or abs(b.cx - a.cx) - (a.rx + b.rx) > min(a.rx, b.rx)
+
     for i in range(1, len(bubbles)):
         a, b = bubbles[i - 1], bubbles[i]
-        if not a.neck_to or not neck_hits(a, b, avoid):
+        if not a.neck_to or not (neck_hits(a, b, avoid) or long_neck(a, b)):
             continue
         cx, cy = a.cx, a.cy + (a.ry + b.ry) * 1.04
         box = (cx - b.rx, cy - b.ry, cx + b.rx, cy + b.ry)
@@ -665,6 +679,19 @@ def layout_panel(panel, items, W, H, img):
             chained_tails.add(i)
     for i in chained_tails:
         bubbles[i].tail = None
+    # 위 여백에 쌓인 같은 사람 묶음은 맨 아래(컷에 가장 가까운) 풍선이 꼬리를 단다: 맨 위 풍선 꼬리는 아래 풍선들에 가려 안 보였다
+    for i in range(1, len(bubbles)):
+        b, a = bubbles[i], bubbles[i - 1]
+        last_of_chain = i + 1 == len(bubbles) or bubbles[i + 1].side != b.side
+        if (i in chained_tails and last_of_chain and getattr(b, "gutter", False) and b.side in heads
+                and b.item.get("tail", "auto") == "auto"):
+            hx, hy = heads[b.side]
+            if hy > b.cy + b.ry:
+                b.tail = (hx, hy)
+                j = i
+                while j > 0 and j in chained_tails:  # 묶음의 첫 풍선 꼬리는 뗀다
+                    j -= 1
+                bubbles[j].tail = None
     for i in unchained:  # 목을 뺀 풍선은 제 꼬리로 말하는 사람을 가리킨다(얼굴을 지나지 않을 때만)
         b = bubbles[i]
         if b.item.get("tail", "auto") == "auto" and b.side in heads:

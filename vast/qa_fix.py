@@ -107,6 +107,27 @@ def face_distance(series: Path, who: str, img: Path, pick=None) -> float | None:
     return float(differences(features([crop, ref]))[0, 1])
 
 
+LOOKS_AT_VIEWER = ('Is any person in this picture looking straight at the viewer (eyes on the camera, face turned to us)? '
+                   'Answer only JSON: {"looking_at_viewer": true|false}')
+
+
+def _new_flaws(before: bytes, after: Path) -> list:
+    """편집 뒤에 새로 생긴 결함(원본에는 없던 것): 카메라 정면 응시 · 남는 팔·손."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(before)
+        b = Path(f.name)
+    try:
+        out = []
+        if R._vlm([after], LOOKS_AT_VIEWER).get("looking_at_viewer") is True and R._vlm([b], LOOKS_AT_VIEWER).get("looking_at_viewer") is not True:
+            out.append("시선이 카메라로 돌았다")
+        if R.extra_limbs(after) and not R.extra_limbs(b):
+            out.append("팔·손이 늘었다")
+        return out
+    finally:
+        b.unlink(missing_ok=True)
+
+
 FACE = ("<image2> is {name}'s face. In <image1>, redraw only {name}'s face and hair so it is clearly the same person as <image2>: the same face "
         "shape, eyes, eyebrows, nose, mouth, hairline and hairstyle, the same age ({age}). Keep {name}'s expression ({acting}), head angle, gaze, "
         "pose, hands, clothes and everything else in <image1> exactly the same: the other people, the place, the light, the framing and the art style.")
@@ -145,6 +166,12 @@ def fix_face(c, cache, series: Path, ep: Path, folder: str, p: dict, who: str, s
         d1 = face_distance(series, who, dst, pick)
         log(f"  {p['id']}: {who} 얼굴 맞추기 {t + 1}회 거리 {d0:.3f} → {d1 if d1 is None else round(d1, 3)}")
         if d1 is not None and d1 < best[0]:
+            # 거리만 보고 남기면 안 된다: 정면 참고 그림을 따라 시선이 카메라로 돌거나(p061·p471·p325·p007) 손이 하나 더 생겼다(p495)
+            # (2026-10-20 사용자 "어디 보고 말함", "손이 두 개임") → 원본에 없던 정면 응시·남는 팔다리가 생기면 버린다
+            bad = _new_flaws(orig, dst)
+            if bad:
+                log(f"  {p['id']}: 얼굴은 가까워졌지만 {bad} → 버림")
+                continue
             best = (d1, dst.read_bytes())
     dst.write_bytes(best[1])
     if best[0] < d0 and folder == "panels_hf_vast":
