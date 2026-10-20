@@ -417,10 +417,12 @@ def for_panel(series, chars, model: str, edit: bool = False) -> list:
     hit = [(w, loras[k]) for w in (chars or []) for k in (f"{w}@{str(model).lower()}", w) if ok(k)]
     seen = set()
     hit = [(w, e) for w, e in hit if not (w in seen or seen.add(w))]
-    # 앞 컷을 참조로 넣는 편집(잇기)에서는 참조가 얼굴을 끌어서 그리기 강도(0.55)로는 거의 듣지 않는다: edit_strength(없으면 0.8)
-    # (2026-10-20 조사: 참조와 함께 쓰는 정체성 LoRA 권장 0.7~1.0)
+    # 앞 컷을 참조로 넣는 편집(잇기)에는 기본으로 붙이지 않는다(칸에 edit_strength 를 적은 인물만). 조사는 0.7~1.0 을 권했지만
+    # D+18 재민으로 재 보니 얼굴 거리가 LoRA 끔 0.049 → 0.7 에서 0.061, 0.9 는 그림이 잡티로 망가졌다(2026-10-20)
+    if edit:
+        hit = [(w, e) for w, e in hit if float(e.get("edit_strength") or 0) > 0]
     out = [{"who": w, "file": e["file"], "trigger": e.get("trigger") or "",
-            "strength": float(e.get("edit_strength", 0.8)) if edit else
+            "strength": float(e["edit_strength"]) if edit else
             float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
     sk = next((k for k in (f"{STYLE}@{str(model).lower()}", STYLE) if ok(k)), None)
     if sk:  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)

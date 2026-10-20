@@ -207,7 +207,7 @@ def _shot_class(p: dict) -> str:
 CONT_MADE: set = set()  # 이번 실행에서 앞 컷에서 이어 그린 컷: 거기서 또 잇지 않는다(이어 쓰기가 쌓이면 두 번째부터 그림이 거칠어졌다, 2026-10-20 D+18 p017)
 
 
-def continuity(series, ep: Path, out: Path, p: dict, mid: str):
+def continuity(series, ep: Path, out: Path, p: dict, mid: str, closeups: bool = False):
     """같은 장면 앞 컷을 이용할지(2026-10-20 보조 도구 시험 → 사용자 "진행"). (방식, 기준 그림, 기준 컷) 또는 None.
     next_scene: 바로 앞 컷이 같은 장소·같은 한 사람·같은 비율의 클로즈업 → 그 컷에서 잇는다(얼굴·옷·배경·그림체 유지, Next-Scene LoRA).
     layout_lock: 같은 장소가 이어지는 앞 컷(여덟 컷 안) 중 같은 인물 묶음·같은 샷 종류(넓은·미디엄) → 그 컷의 선으로 사람 자리·테이블 배치 고정.
@@ -237,10 +237,22 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str):
         fs = [f for f in (out / f"{q}.png", ep / "panels_hf" / f"{q}.png") if f.exists()]
         return max(fs, key=lambda f: f.stat().st_mtime) if fs else None
 
+    def solo_close(f) -> bool:
+        """그림이 실제로 한 사람 클로즈업인가(얼굴 하나, 얼굴 높이가 그림의 18% 이상). 컷 설명은 클로즈업인데 그림은 세 사람 어깨 너머
+        컷인 기준 컷(D+18 p008)에서 이으니 다음 컷도 그 세 사람 구도로 나왔다(2026-10-20): 잇기는 기준 그림의 구도를 따라간다"""
+        try:
+            from PIL import Image as _Im
+            from face_detect import detect
+            im = _Im.open(f).convert("RGB")
+            faces = [b for b in detect(im) if (b[3] - b[1]) / im.height > 0.06]  # 뒤쪽의 아주 작은 얼굴은 셈하지 않는다
+            return len(faces) == 1 and (faces[0][3] - faces[0][1]) / im.height >= 0.18
+        except Exception:  # noqa: BLE001
+            return False
+
     chars, sc = p.get("chars") or [], _shot_class(p)
     if time_cut(p["id"]):  # 이 컷이 새 장면의 첫 컷
         return None
-    if "next_scene" in own and len(chars) == 1 and sc == "close":
+    if closeups and "next_scene" in own and len(chars) == 1 and sc == "close":
         # 별 모양: 같은 장면 안에서 그 사람의 가장 가까운 '보통으로 그린' 클로즈업에서 각각 잇는다(사슬로 이으면 두 번째부터 거칠어졌다.
         # 조사: 기준 컷 하나에서 각각 파생하는 쪽이 낫다). 주고받는 대화(A·B·A·B)면 A 는 앞의 A 클로즈업에서
         for j in range(k - 1, max(-1, k - 7), -1):
@@ -248,7 +260,7 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str):
             if q.get("location") != p.get("location") or not same_outfit(q):
                 break
             if ((q.get("chars") or []) == chars and _shot_class(q) == "close" and q.get("aspect") == p.get("aspect")
-                    and img(q["id"]) and q["id"] not in CONT_MADE):
+                    and img(q["id"]) and q["id"] not in CONT_MADE and solo_close(img(q["id"]))):
                 return "next_scene", img(q["id"]), q["id"]
             if time_cut(q["id"]):
                 break
@@ -472,7 +484,10 @@ def main():
     ap.add_argument("--refine", action="store_true", help="2차 다듬기(잠재 확대 + 낮은 강도로 한 번 더): 얼굴·선이 또렷해지지만 컷당 시간이 약 1.5배")
     ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
     ap.add_argument("--no-lora", action="store_true", help="학습한 인물 LoRA(series.json loras)를 이번엔 붙이지 않는다(견줘 보기)")
-    ap.add_argument("--no-continuity", action="store_true", help="같은 장면 앞 컷 이용(클로즈업 잇기·배치 고정, continuity)을 끈다")
+    ap.add_argument("--no-continuity", action="store_true", help="같은 장면 앞 컷 이용(배치 고정·클로즈업 잇기)을 모두 끈다")
+    ap.add_argument("--continue-closeups", action="store_true",
+                    help="같은 사람 연속 클로즈업을 앞 컷에서 잇기(Next-Scene)도 쓴다. 기본은 배치 고정만: 잇기는 2026-10-20 시험에서 성공(D+18 p015)과 "
+                         "실패(이어 쓰면 거친 결 p017, 얼굴 얼룩 외출 p356)가 섞였다")
     args = ap.parse_args()
     global NO_LORA
     NO_LORA = args.no_lora
@@ -516,7 +531,7 @@ def main():
         dst = out / f"{p['id']}.png"
         log = lambda m: print(m, flush=True)  # noqa: E731
 
-        cont = None if args.no_continuity or text_only else continuity(series, out.parent, out, p, mid)
+        cont = None if args.no_continuity or text_only else continuity(series, out.parent, out, p, mid, closeups=args.continue_closeups)
         if cont:
             print(f"{p['id']}: {'앞 컷에서 잇기' if cont[0] == 'next_scene' else '배치 고정'} ← {cont[2]}", flush=True)
 

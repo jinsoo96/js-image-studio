@@ -1109,7 +1109,7 @@ VAST_MAX = 80
 
 @mcp.tool()
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
-              check: bool = True, model: str = "", refine: bool = False, continuity: bool = True) -> str:
+              check: bool = True, model: str = "", refine: bool = False, continuity: bool = True, continue_closeups: bool = False) -> str:
     """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
     그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
@@ -1117,8 +1117,9 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
-    continuity=True(기본)면 같은 장면 앞 컷을 쓴다: 같은 한 사람이 이어지는 클로즈업은 앞 컷에서 잇고(얼굴·옷·배경·그림체 유지), 같은 인물 묶음의
-    넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다(2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 어느 앞 컷을 썼는지 작업 로그에 남는다.
+    continuity=True(기본)면 같은 장면의 앞 컷을 쓴다: 같은 인물 묶음의 넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다
+    (2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 장소가 바뀌거나 시간 자막('수요일')·옷이 바뀐 컷에서는 쓰지 않는다. 어느 앞 컷을 썼는지 작업 로그에 남는다.
+    continue_closeups=True 면 같은 사람 연속 클로즈업을 앞 컷에서 잇기도 쓴다(얼굴·배경은 잘 이어지나 얼굴 얼룩·옷 바뀜이 섞여 기본은 끔).
     그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
     ep = _episode(series, episode)
     sd = _series(series)
@@ -1147,7 +1148,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--fix"] if fix else []
     cmd += ["--check"] if check else []
     cmd += ["--refine"] if refine else []
-    cmd += [] if continuity else ["--no-continuity"]
+    cmd += ([] if continuity else ["--no-continuity"]) + (["--continue-closeups"] if continue_closeups else [])
     job = _start_job("vast_draw", ep, [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}])
     per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0)
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
