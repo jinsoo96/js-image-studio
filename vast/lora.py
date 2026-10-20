@@ -415,7 +415,9 @@ def for_panel(series, chars, model: str) -> list:
             "strength": float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
     if ok(STYLE):  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)
         e = loras[STYLE]
-        out.insert(0, {"who": STYLE, "file": e["file"], "trigger": e.get("trigger") or "", "strength": float(e.get("strength", 0.8))})
+        # 인물 LoRA 와 겹치면 multi 강도: D+18 그림체 0.8 + 재민 0.55 를 겹치자 그림이 초록·보라 얼룩으로 깨졌다(2026-10-20 p003·p008·p025, 0.45 는 멀쩡)
+        st = e.get("multi", e.get("strength", 0.8)) if out else e.get("strength", 0.8)
+        out.insert(0, {"who": STYLE, "file": e["file"], "trigger": e.get("trigger") or "", "strength": float(st)})
     return out
 
 
