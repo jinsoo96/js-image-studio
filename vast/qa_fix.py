@@ -51,6 +51,10 @@ def quick_check(series: Path, ep: Path, img: Path, pid: str, only: set) -> tuple
         if d.get("doubled"):
             probs.add("인원")
             notes.append("인원: 같은 사람이 둘이거나 얼굴이 겹쳤다(" + d.get("why", "")[:120] + ")")
+    seen = R.absent_cast(series, ep, pid, img)  # 먼저 떠난 사람·아직 안 온 사람(2026-10-20 p006 박 과장)
+    if seen:
+        probs.add("인원")
+        notes.append("인원: 이 순간 없어야 할 인물이 보인다(" + "; ".join(f"{x['name']}: {x.get('where', '')}" for x in seen) + ")")
     return probs, " ".join(notes)
 
 

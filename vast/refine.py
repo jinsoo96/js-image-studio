@@ -210,6 +210,44 @@ def scene_present(ep_dir: Path, pid: str) -> list:
     return sorted(present - set(spec[pid].get("chars") or []))
 
 
+# 중립으로 묻는다: '이 사람은 이 컷에 없어야 한다'고 먼저 말하면 판정 모델이 그 말을 사실로 받아 한가운데 앉은 사람도 '없다'고 했다(2026-10-20 p104)
+ABSENT_ASK = """Image 2 shows one person ({looks}). Is that same person also drawn somewhere in image 1, background included (same face, hair, glasses and build)?
+Answer JSON only: {{"present": true|false, "where": "short description by clothes and position in image 1, empty if not present"}}"""
+
+
+def absent_cast(series, ep_dir: Path, pid: str, img_path: Path | None = None) -> list:
+    """이 컷 인물 목록(chars)에 없는데 같은 장소의 다른 컷에 나오는 이름 있는 인물이 그림에 있나. [{"name", "where"}] (못 물으면 []).
+    (2026-10-20 사용자 "빡빡이 인사하고 갔는데 왜 또 옆에 있어": 장면 기준판에서 잘라 낸 컷에 먼저 떠난 박 과장(p006)·카운터의 다방 주인(p464)·
+     수요일에야 오는 은영(월요일 p226)이 들어갔다. '글에 없는 사람' 검사(find_extras)는 이름 있는 인물을 사무실 직원·손님으로 보고 넘겼다)"""
+    spec = {p["id"]: p for p in json.loads((Path(ep_dir) / "panels.json").read_text(encoding="utf-8"))}
+    p = spec.get(pid) or {}
+    loc = p.get("location")
+    if not loc or loc == "none":
+        return []
+    same = [q for q in spec.values() if q.get("location") == loc]
+    others = sorted({c for q in same for c in q.get("chars") or []} - set(p.get("chars") or []))
+    if not others:
+        return []
+    wear = {}
+    for q in same:
+        for c, o in (q.get("outfit") or {}).items():
+            wear.setdefault(c, o)
+    from hf_panel import names
+    nm = names(Path(series))
+    img = img_path or Path(ep_dir) / "panels_hf" / f"{pid}.png"
+    out = []
+    # 글 설명만 주고 물으면 그림 보는 모델(사내 Qwen3-VL-8B)이 한가운데 선 박 과장도 '없다'고 했다 → 그 인물의 상반신 참고 그림을 같이 보여 주고 한 명씩
+    for c in others:
+        ref = Path(series) / "assets" / "vast_refs" / f"{c}_bust.png"
+        if not ref.exists():
+            continue
+        name = re.sub(r"\s*\(.*?\)", "", nm.get(c, c))
+        r = _vlm([img, ref], ABSENT_ASK.format(looks=_looks(series, {"chars": [c], "outfit": wear})))
+        if r.get("present") is True:
+            out.append({"name": name, "where": str(r.get("where") or "")})
+    return out
+
+
 CHECKS = ROOT / "skills" / "staging-review" / "checks.json"
 
 
@@ -343,6 +381,10 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
             probs.add("빈자리")
             notes.append("장면에 있는 사람이 사라진 것처럼 자리가 비어 보인다(" + ", ".join(map(str, vanished))
                          + "): 더 가까이 잡아 빈자리가 안 보이게 하거나 그 사람의 일부를 화면 끝에")
+    seen = absent_cast(series, ep_dir, pid, img_path)
+    if seen:
+        probs.add("인원")
+        notes.append("인원: 이 순간 없어야 할 인물이 보인다(" + "; ".join(f"{x['name']}: {x.get('where', '')}" for x in seen) + ")")
     board = json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8")) if (ep_dir / "storyboard.json").exists() else {}
     bp = next((x for x in (board.get("panels") or []) if x.get("id") == pid), {})
     from hf_panel import names as _nm
@@ -464,11 +506,16 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
 
 def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
     """글에 없는 사람(중복·낯선 사람)이 남으면 한 명씩 위치·옷으로 짚어 지우고, 글에 없는 사람이 없어질 때까지 최대 3번(맞으면 True,
-    아니면 원본으로 되돌리고 False). '글에 적힌 사람보다 많은가'는 find_extras 가 컷의 글을 읽고 판단한다(사람 수를 글의 숫자 낱말로 세지 않는다)."""
-    series = Path(dst).parents[3]
+    아니면 원본으로 되돌리고 False). '글에 적힌 사람보다 많은가'는 find_extras 가 컷의 글을 읽고 판단한다(사람 수를 글의 숫자 낱말로 세지 않는다).
+    이 순간 없어야 할 이름 있는 인물(absent_cast: 먼저 떠난 사람 등)도 같이 지운다."""
+    series, ep_dir = Path(dst).parents[3], Path(dst).parents[1]
     before = dst.read_bytes()
+
+    def left():
+        return find_extras(dst, series, p) + [f"{x['name']} ({x.get('where', '')})" for x in absent_cast(series, ep_dir, p["id"], dst)]
+
     for k in range(3):
-        extra = find_extras(dst, series, p)
+        extra = left()
         if not extra:
             log(f"  {p['id']}: 글에 없는 사람 없음 → 통과")
             return True
@@ -479,7 +526,7 @@ def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
         hist = c.wait(c.queue(g), 600)
         c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
         log(f"  {p['id']}: 남는 사람 콕 집어 지움({k + 1}회): {extra[0]}")
-    if not find_extras(dst, series, p):
+    if not left():
         log(f"  {p['id']}: 글에 없는 사람 없음 → 통과")
         return True
     dst.write_bytes(before)

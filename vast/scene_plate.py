@@ -121,7 +121,9 @@ def seat_plan(series: Path, ep: Path, run: dict, view: str, loc_img: Image.Image
          "Use LEFT and RIGHT exactly as seen in this image and keep them consistent with the place line (if the windows are on the right, the window side "
          "is the RIGHT side). "
          f"Split the people into groups of at most {GROUP}: people next to each other in the same row or on the same side of a table form a group; "
-         "never mix the two sides of a table in one group; seated groups first, standing people last. For each group give where (for example: in the "
+         "never mix the two sides of a table in one group; seated groups first, standing people last. People who eat, drink or talk together sit at "
+         "ONE shared table: name that same table in each of their groups' where and only the side differs (for example: at the nearest table, on its "
+         "LEFT side / at the nearest table, on its RIGHT side). For each group give where (for example: in the "
          "chairs on the RIGHT (window) side of the table), pose (seated or standing), facing (for example: turned toward the projector screen at the far end), "
          "and for each person a slot inside the group (for example: farthest from the camera, nearest the screen / in the middle / nearest the camera). "
          "Also give focus: one sentence saying where everyone looks at the start of the scene, in terms of this image (for example: the six seated people "
@@ -325,6 +327,44 @@ def _doubled(img_path: Path, series: Path, who: list) -> dict:
         return {"doubled": False, "why": "check failed"}
 
 
+def plate_without(c, cache, series: Path, plate_path: Path, boxes: dict, keep: set, log=print) -> Path:
+    """기준판에서 이 컷 인물(keep) 밖의 사람을 편집으로 지운 판(인물 조합마다 한 번 만들어 scenes/ 에 둔다).
+    (2026-10-20 사용자 "빡빡이 인사하고 갔는데 왜 또 옆에 있어": 기준판에는 장면 내내 모든 사람이 있어, 먼저 떠난 박 과장(p006·p104·p007)·
+     카운터의 다방 주인(p464·p466·p470)이 잘라 낸 컷마다 따라 들어갔다. 흐리게만 하면 흐린 모양에 이 컷 인물 얼굴을 입혀 같은 사람이 둘이 됐고
+     (p341·p343), 빈 장소 그림으로 덮으면 겹친 몸이 남아 머리 없는 몸이 됐다)"""
+    gone = sorted(w for w in boxes if w not in keep)
+    if not gone:
+        return plate_path
+    out = plate_path.with_name(f"{plate_path.stem}__minus_{'_'.join(gone)}.png")
+    if out.exists():
+        return out
+
+    def who_at(w):
+        b = boxes[w]["body"]
+        cx = (b[0] + b[2]) / 2
+        side = "on the left" if cx < 380 else "on the right" if cx > 620 else "in the middle"
+        return f"{_person(series, w)['name']} ({_person(series, w)['who'][:70]}) {side}"
+
+    stay = [w for w in boxes if w in keep]
+    # 지울 사람만 적으면 생김새가 비슷한 사람까지 지웠다(다방 주인을 지우라니 은영도 지움) → 남길 사람도 자리와 함께 적고, 지운 뒤 인원을 센다
+    prompt = (f"Remove only these people from <image1>: {'; '.join(who_at(w) for w in gone)}. Fill the space where they were with what is behind them "
+              f"(the wall, the counter, the empty seat or floor). Keep these {len(stay)} people exactly as they are, in their places: "
+              f"{'; '.join(who_at(w) for w in stay)}. Keep the place, the furniture, the light and the camera exactly the same. No one added.")
+    for t in range(3):
+        _edit(c, cache, series, plate_path, [], prompt, 5151 + t, out)
+        try:
+            n = _ask(Image.open(out), "Count the people in this image (every visible person, background included). Answer only JSON: {\"count\": N}", 200).get("count")
+        except Exception:  # noqa: BLE001
+            n = None
+        if n == len(stay):
+            log(f"  기준판에서 지움 {gone} → {out.name}")
+            return out
+        log(f"  기준판에서 지우기 {t + 1}회: 남은 인원 {n} (바라는 {len(stay)})")
+    out.unlink(missing_ok=True)
+    log(f"  기준판에서 {gone} 를 못 지움 → 원래 기준판으로(컷 검사 absent_cast 가 잡는다)")
+    return plate_path
+
+
 def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=None) -> list:
     """묶음의 컷(인물이 있는 것)을 기준판에서 잘라 다시 그린다. 컷의 view 에 맞는 기준판(front · reverse)이 없으면 그 컷은 건너뛴다."""
     from hf_panel import names
@@ -344,9 +384,9 @@ def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=No
             log(f"{p['id']}: {view} 기준판 없음, 건너뜀")
             continue
         meta = json.loads(stem.with_suffix(".json").read_text(encoding="utf-8"))
-        plate = Image.open(stem.with_suffix(".png")).convert("RGB")
         who = p["chars"]
         boxes = meta.get("boxes") or {}
+        plate = Image.open(plate_without(c, cache, series, stem.with_suffix(".png"), boxes, set(who), log)).convert("RGB")
         shot = p.get("shot") or ""
         aspect = p.get("aspect") or "16:9"
         l, t, cw, ch = crop_box(plate, boxes, who, shot, aspect)
@@ -381,21 +421,10 @@ def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=No
         refs = [vr / f"{w}_bust.png" for w in who]
 
         def draw_gen(seed):
-            src = plate
-            if len(who) == 1 and "close" in shot:
-                # 혼자 나오는 클로즈업: 배경 참고 속 다른 사람 자리를 흐리게 지운다. 글이 '화면 밖의 그녀를 본다'고 하면 참고 그림에 찍힌 그 사람까지
-                # 그려 둘 다에 이 사람 얼굴을 입혔다(2026-10-20 p224·p341 상수가 둘)
-                from PIL import ImageDraw, ImageFilter
-                W, H = plate.size
-                mask = Image.new("L", plate.size, 0)
-                md = ImageDraw.Draw(mask)
-                for w2, b2 in boxes.items():
-                    if w2 not in who:
-                        x1, y1, x2, y2 = b2["body"]
-                        md.rectangle([x1 * W / 1000, y1 * H / 1000, x2 * W / 1000, y2 * H / 1000], fill=255)
-                src = Image.composite(plate.filter(ImageFilter.GaussianBlur(28)), plate, mask.filter(ImageFilter.GaussianBlur(10)))
+            # 배경 참고(plate)에는 이 컷 인물만 남아 있다(without_others). 글이 '화면 밖의 그녀를 본다'고 하면 참고 그림에 찍힌 그 사람까지
+            # 그려 둘 다에 이 사람 얼굴을 입혔다(2026-10-20 p224·p341 상수가 둘)
             lg2, tg2, cwg2, chg2 = crop_box(plate, boxes, who, "medium shot", aspect)
-            src.crop((int(lg2), int(tg2), int(lg2 + cwg2), int(tg2 + chg2))).resize((tw, th), Image.LANCZOS).save(cf)
+            plate.crop((int(lg2), int(tg2), int(lg2 + cwg2), int(tg2 + chg2))).resize((tw, th), Image.LANCZOS).save(cf)
             names = [upload(c, cf, cache)] + [upload(c, r, cache) for r in refs]
             g = graph(gen_prompt, names, tw, th, seed, 8, 1024, turbo=True, series=series, chars=who)
             h = c.wait(c.queue(g), timeout=900)
