@@ -1033,11 +1033,11 @@
     "Node name for S&R": "ZImageFunControlnet"
    },
    "widgets_values": [
-    0.55,
+    0.7,
     0.0,
-    0.55
+    0.6
    ],
-   "title": "배치 고정 (강도 0.55 · 끝 0.55: 0.6 이상은 자세까지 따라간다)"
+   "title": "배치 고정 (강도 0.7 · 끝 0.6: 0.55 이하는 두 사람 좌우가 바뀌었다)"
   }
  ],
  "links": [
@@ -1362,8 +1362,8 @@
    },
    "style": "webtoon",
    "control": {
-    "strength": 0.55,
-    "end": 0.55
+    "strength": 0.7,
+    "end": 0.6
    }
   }
  },

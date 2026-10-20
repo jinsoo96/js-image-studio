@@ -200,6 +200,9 @@ def _shot_class(p: dict) -> str:
     return "insert" if any(w in s for w in ("insert", "detail", "top view")) else "close" if "close" in s else "wide" if "wide" in s else "medium"
 
 
+CONT_MADE: set = set()  # 이번 실행에서 앞 컷에서 이어 그린 컷: 거기서 또 잇지 않는다(이어 쓰기가 쌓이면 두 번째부터 그림이 거칠어졌다, 2026-10-20 D+18 p017)
+
+
 def continuity(series, ep: Path, out: Path, p: dict, mid: str):
     """같은 장면 앞 컷을 이용할지(2026-10-20 보조 도구 시험 → 사용자 "진행"). (방식, 기준 그림, 기준 컷) 또는 None.
     next_scene: 바로 앞 컷이 같은 장소·같은 한 사람·같은 비율의 클로즈업 → 그 컷에서 잇는다(얼굴·옷·배경·그림체 유지, Next-Scene LoRA).
@@ -225,7 +228,7 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str):
     if "next_scene" in own and len(chars) == 1 and sc == "close" and k > 0:
         q = spec[ids[k - 1]]
         if (q.get("location") == p.get("location") and (q.get("chars") or []) == chars and _shot_class(q) == "close"
-                and q.get("aspect") == p.get("aspect") and img(q["id"])):
+                and q.get("aspect") == p.get("aspect") and img(q["id"]) and q["id"] not in CONT_MADE):
             return "next_scene", img(q["id"]), q["id"]
     if "layout_lock" in own and len(chars) >= 2 and sc in ("wide", "medium"):
         for j in range(k - 1, max(-1, k - 9), -1):
@@ -510,9 +513,15 @@ def main():
                          + f"Keep {nm}'s face, hair and clothes, the place and the light exactly as in <image1>; change only the expression, gaze, "
                            "head angle and hands as described." + (f" <image2> is {nm}'s face (identity only)." if face.exists() else "")
                          + " Korean webtoon panel, no text, no speech bubbles.")
-                g = graph(pr_ns, [upload(c, cont[1], cache)] + ([upload(c, face, cache)] if face.exists() else []), 0, 0, sd, 25, args.ref_res,
+                # 앞 컷을 반 픽셀 흐리게 넣는다(Next-Scene 작성자 권장: 이어 쓸 때 날카로운 결이 쌓이지 않게)
+                from PIL import Image as _Im, ImageFilter as _Fl
+                soft = out / "_cont" / f"{p['id']}_from_{cont[2]}.png"
+                soft.parent.mkdir(exist_ok=True)
+                _Im.open(cont[1]).convert("RGB").filter(_Fl.GaussianBlur(0.5)).save(soft)
+                g = graph(pr_ns, [upload(c, soft, cache)] + ([upload(c, face, cache)] if face.exists() else []), 0, 0, sd, 25, args.ref_res,
                           turbo=False, edit=True, series=series, role="next_scene")
                 hist = c.wait(c.queue(g), timeout=1800)
+                CONT_MADE.add(p["id"])
             elif first and cont[0] == "layout_lock":
                 hist = c.wait(c.queue(graph(pr, names, w, h, sd, steps, args.ref_res, args.turbo, series=series, refine=args.refine,
                                             chars=p.get("chars"), role="layout_lock", control=upload(c, cont[1], cache))), timeout=1800)

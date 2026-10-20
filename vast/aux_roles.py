@@ -2,7 +2,7 @@
 (2026-10-20 사용자 "진행" — 보조 도구 시험(worklogs/2026-10-20-moss-qwen-aux.md)에서 쓸 만했던 셋을 판 역할로)
 
   webtoon_layout_lock_uc   (role layout_lock) 그리기 + Fun ControlNet: 같은 장면 앞 컷의 선(Canny)으로 사람 자리·테이블 배치를 고정.
-                           시험: 강도 0.6 은 배치를 지켰고 0.4·없이는 두 사람 좌우가 바뀌었다. 0.6 은 자세까지 따라가 연기가 약해져 0.55.
+                           시험: 0.6 은 배치를 지켰고 0.4·없이는 좌우가 바뀌었다. 0.55 로 낮췄더니 터보 8스텝에서 또 바뀌어(외출 p016) 0.7 · 끝 0.6.
   webtoon_next_scene_uc    (role next_scene)  편집 + Next-Scene LoRA 0.8: 같은 사람이 이어 나오는 클로즈업을 앞 컷에서 잇는다(얼굴·옷·배경·그림체 유지).
   webtoon_asset_sheet_uc   (role asset_sheet) 편집 + 캐릭터 시트 LoRA 1.0: 서 있는 전신 → 얼굴 + 앞·뒤·옆·3/4 전신 시트(터보 끔 25스텝, 작성자 권장).
 
@@ -77,9 +77,9 @@ def layout_lock(base: str) -> dict:
                  [("image", "IMAGE")], [("IMAGE", "IMAGE")], title="기준 컷을 캔버스 크기로 (도구가 맞춘다)")
     canny = _add(ui, "Canny", (-400, 1480), {"low_threshold": 0.15, "high_threshold": 0.35}, [("image", "IMAGE")], [("IMAGE", "IMAGE")], title="선 따기")
     patch = _add(ui, "ModelPatchLoader", (-400, 1620), {"name": CONTROLNET}, [], [("MODEL_PATCH", "MODEL_PATCH")])
-    cn = _add(ui, "ZImageFunControlnet", (-400, 1720), {"strength": 0.55, "start_percent": 0.0, "end_percent": 0.55},
+    cn = _add(ui, "ZImageFunControlnet", (-400, 1720), {"strength": 0.7, "start_percent": 0.0, "end_percent": 0.6},
               [("model", "MODEL"), ("model_patch", "MODEL_PATCH"), ("vae", "VAE"), ("image", "IMAGE")], [("MODEL", "MODEL")],
-              title="배치 고정 (강도 0.55 · 끝 0.55: 0.6 이상은 자세까지 따라간다)")
+              title="배치 고정 (강도 0.7 · 끝 0.6: 0.55 이하는 두 사람 좌우가 바뀌었다)")
     _link(ui, img, 0, scale, "image")
     _link(ui, scale, 0, canny, "image")
     _link(ui, patch, 0, cn, "model_patch")
@@ -88,7 +88,7 @@ def layout_lock(base: str) -> dict:
     _insert_before_cache(ui, cn)
     meta = dict((ui.get("extra") or {}).get("webtoon") or {})
     meta.update(model="uc", role="layout_lock", label="같은 장면 배치 고정(Fun ControlNet canny, 앞 컷의 선으로 사람 자리·테이블 배치)",
-                control={"strength": 0.55, "end": 0.55})
+                control={"strength": 0.7, "end": 0.6})
     meta.pop("name", None)
     ui.setdefault("extra", {})["webtoon"] = meta
     return ui
