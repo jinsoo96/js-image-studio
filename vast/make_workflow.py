@@ -322,7 +322,7 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     g.link(vae, 0, dec, "vae")
     g.link(dec, 0, save, "images")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"name": "anima", "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)", "refs": False,
+    wf["extra"]["webtoon"] = {"name": "anima", "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)", "refs": False, "style": "anime",
                               "cfg": {"turbo": 1.0, "full": 4.0}, "steps": {"turbo": 8, "full": 30}}
     return wf
 
@@ -384,7 +384,8 @@ def build_moss(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix
     wf = g.dump()
     wf["extra"]["webtoon"] = {"name": "moss", "label": "MOSS-Image UC (OpenMOSS 5B + 무검열 LoRA, 글만 받음, 긴 글·그림 속 글자에 강함)",
                               "use_for": "글로 장면을 길게 적는 컷, 그림 속 글자(간판·화면)가 필요한 컷. 참고 그림을 못 받아 인물 얼굴 일관성은 Qwen UC 보다 약하다",
-                              "refs": False, "cfg": {"turbo": 1.0, "full": 2.5}, "steps": {"turbo": 8, "full": 25},
+                              "refs": False, "style": "realistic", "strengths": ["text_in_image", "long_prompt"],  # vast/router.py 가 판을 고를 때 읽는다
+                              "cfg": {"turbo": 1.0, "full": 2.5}, "steps": {"turbo": 8, "full": 25},
                               "sampler": {"turbo": "euler", "full": "er_sde"}, "max_pixels": 2200000}
     return wf
 

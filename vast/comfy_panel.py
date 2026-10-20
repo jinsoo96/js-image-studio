@@ -388,8 +388,7 @@ def main():
     args = ap.parse_args()
     global NO_LORA
     NO_LORA = args.no_lora
-    if args.model:  # saved_workflow.pick 이 환경변수를 먼저 본다(이 작업만)
-        os.environ["WEBTOON_MODEL"] = args.model.strip().lower()
+    forced = (args.model or "").strip().lower() or None  # 이번 작업에 지정한 판. 없으면 컷마다 router 가 고른다
     series = Path(args.series_dir)
     panels = json.loads(Path(args.panels_json).read_text(encoding="utf-8"))
     only = set(args.only.split(",")) if args.only else None
@@ -403,14 +402,17 @@ def main():
     if miss:
         sys.exit(f"서버에 모델이 없다: {miss} (vast/comfy_client.py downloads 로 받는 중인지 확인)")
     cache, failed = {}, []
-    text_only = not gen_takes_refs(series)  # 이 작품의 판이 글만 받으면(Anima) 장소·인물을 글로
-    if text_only:
-        print("이 작품의 생성 판은 글만 받는다(참고 그림 없이 그림, 편집은 UC)", flush=True)
+    from router import route
     for p in panels:
         if only and p["id"] not in only:
             continue
         if p.get("reuse") or not p.get("action"):
             continue
+        # 컷마다 판을 고른다(vast/router.py: 지정 → 작품 그림체·그림체 LoRA → 인물 컷은 참고 그림을 받는 판). saved_workflow.pick 이 환경변수를 먼저 본다
+        mid, why = route(series, p, forced)
+        os.environ["WEBTOON_MODEL"] = mid
+        text_only = not gen_takes_refs(series)  # 고른 판이 글만 받으면(Anima·MOSS) 장소·인물을 글로, 편집은 참고 그림을 받는 판
+        print(f"{p['id']}: 판 {mid} ({why})", flush=True)
         prompt, refs = qwen_refs(series, p, expr=args.expr and not text_only, text_only=text_only)
         if any(not r.exists() for r in refs):
             print(f"{p['id']}: 참고 그림 없음 {[str(r) for r in refs if not r.exists()]}")

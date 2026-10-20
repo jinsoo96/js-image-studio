@@ -60,7 +60,7 @@
 - 확인: 같은 시드로 저장 워크플로우 판과 코드 판을 그려 생성·편집 모두 픽셀이 같았다.
 
 ## 2단 다듬기(2026-10-16)
-1단만으로는 남는 사람(같은 인물 둘, 낯선 사람, 뒤쪽 작은 사람)이 남는 컷이 있었다. `--fix`(MCP `vast_draw`·`vast_episode` 는 기본으로 켬)면 그린 직후:
+1단만으로는 남는 사람(같은 인물 둘, 낯선 사람, 뒤쪽 작은 사람)이 남는 컷이 있었다. `--fix`(MCP `vast_draw`·`make_episode` 는 기본으로 켬)면 그린 직후:
 1. 그림을 보는 사내 Qwen(qwen3.8-27b)에게 "컷 설명에 없는 사람"을 옷·자리로 한 줄씩 묻는다(없으면 끝, 멀쩡한 컷은 GPU 를 안 씀)
 2. 그 문장으로 짧은 지우기 지시를 만들어 Qwen 편집(1단 그림 = `<image1>`)으로 그 사람만 지운다(약 11~20초)
 3. 한 번 더 세어 보고 남았으면 한 번 더(최대 2번). 1단 원본은 `_stage1\`
@@ -103,7 +103,7 @@ DiT bf16 + 글 인코더 int8 이면 둘 다 32GB VRAM 에 같이 올라간다. 
 - 시드에 따라 인물이 하나 더 나오거나 머리 잔상이 낀다 → 그린 뒤 인원을 세고 시드만 바꿔 다시.
 - 비슷하게 생긴 여자 멤버 여럿이 한 컷에 나오면 1단에서 사람이 늘어난다(무대 뒤 p063 멤버 3인 소파가 시드를 바꿔도 5~7명). `--fix` 2단 다듬기로 3명이 됐다. 남녀·나이가 뚜렷이 다른 3인(무대 뒤 p091 카페, D+18 p003)은 맞게 나왔다.
 - `--expr` 표정 칸엔 시트 기본 옷이 같이 들어 있어 옷이 따라올 수 있다(p091 태식이 흰 티 대신 후드티, review_panels 가 잡음).
-- agent app 의 Qwen 에이전트도 쓸 수 있다: MCP 도구 `vast_status`·`vast_draw`·`vast_make_assets`·`vast_adopt`·`vast_episode`(`mcp\README.md`). 한 화를 PDF 까지는 `vast_episode` 하나로(본편은 그대로, `<회차>_vast` 폴더).
+- agent app 의 Qwen 에이전트도 쓸 수 있다: MCP 도구 `comfy_server`·`vast_draw`·`vast_make_assets`·`vast_adopt`·`make_episode`·부분 고치기(`edit_panel`·`derive_panel`·`fix_faces`)(`mcp\README.md`). 한 화를 PDF 까지는 `make_episode` 하나로.
 - 옷 시트를 못 쓴다 → 옷은 글(`outfit`)로만.
 - 한 화 통째: D+18 2화 v2 를 `ep002_v2_vast` 로 그려 PDF·epub·예고편까지 냈다(2026-10-16, `exports\2026-10-16\*_vast판.*`). 새 컷 31개 중 4개가 걸려 다시 그렸다(LESSONS 16). 재사용 컷 35개는 힉스필드 그림 그대로라 한 화 안에 두 엔진 그림이 섞여 있다.
 
@@ -126,4 +126,4 @@ agent platform 캔버스에는 ComfyUI 노드가 있고, 관리자 이미지 생
 
 **MOSS-Image UC 판**(같은 날): 서버 ComfyUI 를 0.37 → 0.42.1 로 올리고(워크플로우 백업 `state/workflow_backups/20261019-230604_before_0.42.1`) `webtoon_vertical_moss`(`make_workflow.py moss`): moss_image_sft_bf16 + qwen3.5_9b_int8_convrot(moss_image) + flux2-vae_small + UC LoRA + 8스텝 DMD 터보 LoRA. UC LoRA(axiomofmind)는 PEFT 키라 ComfyUI 가 못 알아봐(키 504개 안 붙음) 서버에서 ComfyUI 키로 바꾼 `moss-image-uncensored-lora-comfy` 를 쓴다. 글만 받는 판. 터보 LoRA 는 이름에 turbo 가 없어 노드 제목(터보)으로 알아보고, 판 데이터 sampler 로 터보 euler · 일반 er_sde.
 
-**서버 관리**: `vast/comfy_admin.py`(MCP comfy_server · fetch_model · model_downloads): 상태 · 버전 목록 · 전환(백업 → Manager → supervisor 재시작) · 재시작 · 서버 프로세스 로그(인스턴스 Jupyter 파일 API, 재시작 전 죽은 이유는 comfyui.log.old) · 모델 받기(Model Manager, 이름 지정). 0.42.1 에서 UC 학습은 막아 둠(dynamic VRAM 켬 → 역전파 중 CUDA illegal memory access 로 프로세스 종료, 끔 → 메모리 부족 + VRAM 남김). 실행 인자는 기본값으로 되돌렸다 (끈 설정은 인스턴스 /workspace/.env.disabled_dynamic_vram_off).
+**서버 관리**: `vast/comfy_admin.py`(MCP comfy_server(받는 중인 모델은 action downloads) · fetch_model): 상태 · 버전 목록 · 전환(백업 → Manager → supervisor 재시작) · 재시작 · 서버 프로세스 로그(인스턴스 Jupyter 파일 API, 재시작 전 죽은 이유는 comfyui.log.old) · 모델 받기(Model Manager, 이름 지정). 0.42.1 에서 UC 학습은 막아 둠(dynamic VRAM 켬 → 역전파 중 CUDA illegal memory access 로 프로세스 종료, 끔 → 메모리 부족 + VRAM 남김). 실행 인자는 기본값으로 되돌렸다 (끈 설정은 인스턴스 /workspace/.env.disabled_dynamic_vram_off).

@@ -13,7 +13,7 @@
 | `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
 | `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
 | `estimate_draw` | 그릴 컷과 예상 크레딧 | 0 |
-| `draw_panels` · `redraw_panels` | 힉스필드 작화(작업). `confirm_credits` 가 예상 비용 이상이어야 돈다, 한 번에 40컷. 다시 그리기는 원본을 `_rejected` 로 | 장당 1.25 |
+| `draw_panels` | 힉스필드 작화(작업). `confirm_credits` 가 예상 비용 이상이어야 돈다, 한 번에 40컷. 이미 그린 컷을 주면 다시 그리고 원본은 `_rejected` 로 | 장당 1.25 |
 | `compose` · `export` | 합성·PDF·기계 점검 / 예고편·epub·exports 복사(작업) | 0 |
 | `job_status` | 작업 상태와 로그 끝(작업 기록은 `state\mcp_jobs\`) | 0 |
 
@@ -73,12 +73,13 @@ agent app 의 MCP 목록은 PC 마다 따로고(서버 동기화 없음), 서버
 ## vast 도구(크레딧 0, 회사 공용 GPU, 2026-10-15)
 | 도구 | 하는 일 |
 |---|---|
-| `vast_status` | 인스턴스·남은 VRAM·서버 큐·Qwen 모델이 있는지 |
+| `comfy_server` | 서버 상태(인스턴스·VRAM·큐·모델 파일) · 받는 중인 모델 · 버전 전환 · 재시작 · 로그 · 상류 수정 붙이기 |
+| `edit_panel` · `derive_panel` · `fix_faces` | 그린 컷의 일부만 고치기(편집 워크플로우): 지시 편집 · 잘 된 옆 컷에서 잘라 다시 · 얼굴을 기준 얼굴로(거리 재서 가까워질 때만) |
+| `panel_versions` · `revert_panel` · `compare_panel` | 예전 판 보기·되돌리기 · 고치기 전/후 그림 |
 | `vast_draw` | 같은 panels.json 을 vast ComfyUI(Qwen Image 2.1)로 그림 → `panels_hf_vast\`. turbo·expr 기본, aspect 로 세로, seed 로 다시. 한 번에 80컷까지 |
 | `vast_make_assets` | 시트에서 참고 그림 자르기 + 베이스 몸·센 표정 12가지 |
 | `new_series` · `add_to_series` · `redo_candidate` | 새 작품 열기(작품 설정 한 장 → `series\<slug>-hf`, `tools\new_series.py`) · 인물·장소 더하기 · 마음에 안 드는 시안 다시 그리기 |
 | `make_episode` | **한 화를 한 번에**(어느 작품이든): 콘티 준비 → 에셋 점검(새 장소·인물은 시안 후 멈춤, `accept_new`) → vast 그리기 → 합성·점검 → 내보내기. 본편 그림이 있는 컷은 안 건드림 |
-| `vast_episode` | 본편은 그대로 두고 `<회차>_vast` 폴더를 만들어 vast 컷으로 그리기 → 말풍선 합성 → PDF → 점검까지 한 번에. 내보내기는 `export(작품, "<회차>_vast")`(이름 끝 _vast판) |
 | `vast_adopt` | 사용자가 고른 vast 컷을 본편(panels_hf)으로, 원본은 `_rejected\*_before_vast.png` |
 
 `contact_sheet`·`review_panels` 에 `folder="vast"` 를 주면 vast 그림을 본다. 인스턴스를 켜고 끄는 도구는 두지 않는다. 에이전트 프롬프트(`AGENT_PROMPT.md`) v1.4 에 vast 쓰는 때와 순서를 넣었다("vast 로", "크레딧 없이" 라고 하면 vast_draw).

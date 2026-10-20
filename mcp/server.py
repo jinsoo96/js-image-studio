@@ -9,7 +9,7 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
-- 크레딧을 쓰는 도구(draw_panels·redraw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
+- 크레딧을 쓰는 도구(draw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
 - vast_* 도구는 회사 공용 vast.ai GPU 로 크레딧 없이 그린다. 그리는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다 set_model, 한 번만 바꿀 땐 vast_draw 의 model. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
@@ -378,12 +378,6 @@ def status() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
-def credits() -> str:
-    """힉스필드 남은 크레딧(개인 결제 계정)."""
-    c = _credits()
-    return f"남은 크레딧 {c}" if c is not None else "크레딧 확인 실패(힉스필드 CLI 로그인·위치를 확인)"
-
 
 @mcp.tool()
 def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
@@ -555,7 +549,7 @@ def review_panels(series: str, episode: str, ids: str = "", scene: str = "", fol
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
     folder="vast" 면 vast 로 그린 컷을 본다(vast 판은 다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
-    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 사용자에게 보여 주고 동의를 받은 뒤 고칠 점을 build_panels.py 에 반영해 redraw_panels."""
+    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel·derive_panel·fix_faces 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw."""
     ep = _episode(series, episode)
     sd = _series(series)
     sub = _folder(folder)
@@ -928,11 +922,12 @@ def draw_models(series: str = "") -> str:
 
 @mcp.tool()
 def set_model(series: str, model: str) -> str:
-    """작품의 그리는 판을 바꾼다(series.json model). 쓸 수 있는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다: draw_models() 가 지금 목록과 각 판의
+    """작품의 바탕 판을 고정한다(series.json model). 보통은 부를 필요가 없다: 비워 두면(또는 "auto") 컷마다 자동으로 고른다(vast_draw 설명). 사용자가 '이 작품은 Anima 로'처럼 판을 정했을 때만 쓴다. 쓸 수 있는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다: draw_models() 가 지금 목록과 각 판의
     모델·참고 그림을 받는지·모델 파일이 서버에 다 있는지를 준다. 이미 그린 컷은 그대로다: 판을 바꾼 뒤 새로 그리는 컷부터 바뀐다(한 화 안에서 섞으면 그림체가 달라진다)."""
-    err = _check_model(model)
-    if err:
-        return err
+    if model.strip().lower() != "auto":
+        err = _check_model(model)
+        if err:
+            return err
     m = model.strip().lower()
     d = _series(series)
     f = d / "series.json"
@@ -1086,34 +1081,22 @@ def _draw(series: str, episode: str, ids: list, confirm_credits: float, kind: st
 
 
 @mcp.tool()
-def draw_panels(series: str, episode: str, ids: str, confirm_credits: float) -> str:
-    """컷을 힉스필드로 그린다(크레딧 사용). ids: 쉼표로 컷 번호(빈 값이면 아직 없는 컷 전부).
+def draw_panels(series: str, episode: str, ids: str, confirm_credits: float, reason: str = "") -> str:
+    """컷을 힉스필드로 그린다(크레딧 사용). ids: 쉼표로 컷 번호(빈 값이면 아직 없는 컷 전부). 이미 그림이 있는 컷을 주면 다시 그린다:
+    지금 그림은 panels_hf/_rejected/ 로 옮긴다(reason 에 이유). 다시 그리기 전에 그 컷 설명을 고친다(set_panels → prepare_episode).
     confirm_credits 는 estimate_draw 의 예상 크레딧 이상이어야 돈다(사용자 확인을 받은 값). 끝나면 합성용 폴더에도 놓는다."""
     ep = _episode(series, episode)
     want = _pids(ep, ids) or [p["id"] for p in _panels_json(ep) if not (ep / "panels_hf" / f"{p['id']}.png").exists()]
-    return _draw(series, episode, want, confirm_credits, "draw")
+    if want and confirm_credits >= len(want) * COST_PER_PANEL:
+        rej = ep / "panels_hf" / "_rejected"
+        stamp = time.strftime("%m%d%H%M")
+        for i in want:
+            f = ep / "panels_hf" / f"{i}.png"
+            if f.exists():
+                rej.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(f), str(rej / f"{i}_{stamp}.png"))
+    return _draw(series, episode, want, confirm_credits, "draw", note=reason)
 
-
-@mcp.tool()
-def redraw_panels(series: str, episode: str, ids: str, reason: str, confirm_credits: float) -> str:
-    """검수에서 걸린 컷을 다시 그린다(크레딧 사용). 지금 그림은 panels_hf/_rejected/ 로 옮기고 새로 그린다.
-    먼저 build_panels.py 의 그 컷 설명(행동·연기·카메라)을 고치고 prepare_episode 를 돌린 뒤 부른다. reason 에 걸린 이유를 적는다."""
-    ep = _episode(series, episode)
-    want = _pids(ep, ids)
-    if not want:
-        return "다시 그릴 컷 번호를 준다"
-    cost = len(want) * COST_PER_PANEL
-    if confirm_credits < cost:
-        return f"확인 값이 모자라다: 예상 {cost:.2f} 크레딧. 사용자 확인 뒤 confirm_credits={cost:.2f}"
-    _ensure_idle(ep)
-    rej = ep / "panels_hf" / "_rejected"
-    rej.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%m%d%H%M")
-    for i in want:
-        f = ep / "panels_hf" / f"{i}.png"
-        if f.exists():
-            shutil.move(str(f), str(rej / f"{i}_{stamp}.png"))
-    return _draw(series, episode, want, confirm_credits, "redraw", note=reason)
 
 
 # ── vast.ai 공용 GPU(크레딧 0) ───────────────────────────────
@@ -1123,16 +1106,12 @@ VAST = ROOT / "vast"
 VAST_MAX = 80
 
 
-@mcp.tool()
-def vast_status() -> str:
-    """vast.ai 공용 GPU 상태: 인스턴스·남은 VRAM·서버 큐(이 작업실 것 포함)·그리는 판마다 모델 파일이 서버에 받아져 있는지. 크레딧 안 씀."""
-    return _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)
-
 
 @mcp.tool()
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
               check: bool = True, model: str = "", refine: bool = False) -> str:
-    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 작품의 판(set_model), 판 이름(draw_models 목록)을 주면 이 작업만 그 판으로. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
+    그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
@@ -1262,15 +1241,21 @@ def set_lora(series: str, character: str, strength: float = -1, on: bool = True,
 @mcp.tool()
 def comfy_server(action: str = "status", version: str = "", lines: int = 60, old: bool = False, force: bool = False) -> str:
     """vast ComfyUI 서버 관리(공용 서버). action:
-    status(버전·실행 인자·VRAM·큐) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
+    status(버전·실행 인자·VRAM·큐, vast 인스턴스, 판마다 모델 파일이 있나) · downloads(fetch_model 로 받는 중인 모델) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
     · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고, 덧댄 수정을 걷어 내고, ComfyUI-Manager 로 바꾼 뒤
     수정을 다시 붙이고 재시작해 상태를 돌려준다) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654).
     restart·switch 는 큐에 작업이 있으면 하지 않는다(force=True 로만). 새 모델(예: 새 판)에 더 높은 ComfyUI 가 필요하면 versions → switch → draw_models 로 확인."""
     sys.path.insert(0, str(VAST))
     import comfy_admin as A
     try:
-        if action == "status":
-            return json.dumps(A.status(), ensure_ascii=False)
+        if action == "status":  # 서버(버전·인자) + vast 인스턴스(남은 VRAM·큐·판마다 모델 파일이 서버에 있나)
+            return json.dumps({"server": A.status(), "vast": _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)}, ensure_ascii=False)
+        if action == "downloads":  # 서버가 받고 있거나 받은 모델 파일(fetch_model 뒤 진행률)
+            from comfy_client import Comfy
+            tasks = Comfy().req("/model-manager/download/task").get("data", [])
+            return json.dumps({"downloads": [{"name": t.get("fullname"), "status": t.get("status"), "progress": round(t.get("progress") or 0),
+                                              "size_gb": round((t.get("totalSize") or 0) / 1e9, 2), "error": t.get("error") or ""} for t in tasks]},
+                              ensure_ascii=False)
         if action == "versions":
             return json.dumps(A.versions(), ensure_ascii=False)
         if action == "logs":
@@ -1288,14 +1273,14 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
             return json.dumps(A.switch(version, force), ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         return _fail("comfy_server_failed", given={"action": action, "version": version}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return _fail("unknown_action", given=action, candidates=["status", "versions", "logs", "restart", "switch", "patch"])
+    return _fail("unknown_action", given=action, candidates=["status", "downloads", "versions", "logs", "restart", "switch", "patch"])
 
 
 @mcp.tool()
 def fetch_model(url: str, folder: str, name: str = "") -> str:
     """Hugging Face 파일을 vast ComfyUI 의 models/<folder>/ 에 받는다(서버의 Model Manager 가 받는다, 이미 있으면 건너뜀).
     url = https://huggingface.co/<저장소>/resolve/main/<경로>. folder = diffusion_models · text_encoders · vae · loras 등. name 을 주면 그 이름으로 저장
-    (로라 저장소들이 lora.safetensors 처럼 같은 이름을 쓴다). 진행은 model_downloads(). 받은 뒤 그 모델로 판을 만들려면 서버에 webtoon_vertical_<판> 워크플로우를 저장한다."""
+    (로라 저장소들이 lora.safetensors 처럼 같은 이름을 쓴다). 진행은 comfy_server('downloads'). 받은 뒤 그 모델로 판을 만들려면 서버에 webtoon_vertical_<판> 워크플로우를 저장한다."""
     sys.path.insert(0, str(VAST))
     from comfy_client import Comfy
     if "huggingface.co/" not in url or "/resolve/" not in url:
@@ -1304,17 +1289,8 @@ def fetch_model(url: str, folder: str, name: str = "") -> str:
         r = Comfy().fetch_model(folder, url, name)
     except Exception as e:  # noqa: BLE001
         return _fail("fetch_failed", given={"url": url, "folder": folder, "name": name}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return json.dumps({"folder": folder, "name": name or url.rsplit("/", 1)[-1], "task": r, "next": "model_downloads()"}, ensure_ascii=False)
+    return json.dumps({"folder": folder, "name": name or url.rsplit("/", 1)[-1], "task": r, "next": "comfy_server('downloads')"}, ensure_ascii=False)
 
-
-@mcp.tool()
-def model_downloads() -> str:
-    """서버가 받고 있거나 받은 모델 파일 목록(이름 · 상태 · 진행률 · 크기 · 오류)."""
-    sys.path.insert(0, str(VAST))
-    from comfy_client import Comfy
-    tasks = Comfy().req("/model-manager/download/task").get("data", [])
-    return json.dumps({"downloads": [{"name": t.get("fullname"), "status": t.get("status"), "progress": round(t.get("progress") or 0),
-                                      "size_gb": round((t.get("totalSize") or 0) / 1e9, 2), "error": t.get("error") or ""} for t in tasks]}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1438,33 +1414,7 @@ def compare_panel(series: str, episode: str, panel: str) -> list:
             McpImage(data=buf.getvalue(), format="jpeg")]
 
 
-@mcp.tool()
-def workflows(series: str = "") -> str:
-    """vast ComfyUI 서버의 웹툰 워크플로우를 판(uc·moss·anima·noctq …)과 역할별로: vertical(컷 그리기, vast_draw) · edit(부분 고치기, edit_panel·
-    derive_panel·fix_faces 와 그리기 뒤 자동 고치기) · asset_base·asset_expression(인물 에셋, vast_make_assets) · candidate_location·candidate_sheet
-    (새 장소·인물 시안) · lora_dataset·train_lora(LoRA 학습, lora_train). refs = 참고 그림을 받는 판인지. series 를 주면 그 작품이 쓰는 판을 표시.
-    화면에서 워크플로우를 고치면 도구가 그대로 따른다."""
-    m = _draw_models(refresh=True)
-    from saved_workflow import load_ui, pick
-    cur = pick(_series(series))[0] if series else None
-    out = {}
-    for name, v in m.items():
-        try:
-            meta = ((load_ui(v["gen"]).get("extra") or {}).get("webtoon") or {})
-        except Exception:  # noqa: BLE001
-            meta = {}
-        out[name] = {"in_use": name == cur, "draw": v.get("gen"), "edit": v.get("edit"), "roles": v.get("roles"),
-                     "refs": meta.get("refs", True), "steps": meta.get("steps"), "note": meta.get("note") or meta.get("desc")}
-    return json.dumps(out, ensure_ascii=False)
 
-
-VAST_COPY = ("import shutil,sys; from pathlib import Path; s=Path(sys.argv[1]); d=Path(sys.argv[2]); ids=sys.argv[3].split(',')\n"
-             "(d/'panels_hf').mkdir(parents=True,exist_ok=True); n=0\n"
-             "for i in ids:\n"
-             "    f=s/'panels_hf_vast'/(i+'.png')\n"
-             "    if f.exists(): shutil.copy2(f, d/'panels_hf'/(i+'.png')); n+=1\n"
-             "    else: print('vast 그림 없음', i)\n"
-             "print('vast 컷', n, '/', len(ids), '장을 vast 판 회차로 복사')")
 
 
 @mcp.tool()
@@ -1495,42 +1445,6 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
             f"기다리지 말고 지금 사용자에게 작업 번호 {job} 와 예상 시간을 알리고 답을 끝낸다. "
             f"사용자가 '다 됐어?' 하면 job_status('{job}', tail_lines=60) 한 번(새 에셋이 필요하면 '확인 필요'로 멈춰 있다).")
 
-
-@mcp.tool()
-def vast_episode(series: str, episode: str, redraw: bool = False, turbo: bool = True, expr: bool = True, fix: bool = True, check: bool = True) -> str:
-    """vast 컷으로 회차 하나를 1·2화처럼 엮는다(크레딧 0): 본편은 그대로 두고 <회차>_vast 폴더(콘티·대사·재사용 컷은 본편 그대로)를 만들어
-    vast 그림이 없는 컷을 그리고 → 그 회차의 새 컷 자리에 vast 그림을 넣고 → 말풍선 합성·PDF·기계 점검까지. redraw=True 면 새 컷을 전부 다시 그린다.
-    끝나면 job_status 로 '막는 경고 0' 을 확인하고, export(series, '<회차>_vast') 로 PDF·epub 을 exports 로(이름 끝 _vast판, 본편을 덮지 않음).
-    재사용 컷(앞 화 그림을 그대로 쓰는 컷)은 본편 그림 그대로다."""
-    src = _episode(series, episode)
-    if src.name.endswith("_vast"):
-        return "본편 회차 이름을 준다(예: ep002_v2). _vast 폴더는 이 도구가 만든다"
-    sd = _series(series)
-    pj = [p["id"] for p in _panels_json(src)]
-    if not pj:
-        return "panels.json 에 새로 그릴 컷이 없다(prepare_episode 를 먼저)"
-    if len(pj) > VAST_MAX * 2:
-        return f"새 컷이 {len(pj)}개라 너무 많다. 나눠서 vast_draw 한 뒤 다시 부른다"
-    _ensure_idle(src)
-    dst = src.parent / f"{src.name}_vast"
-    if not dst.exists():  # 콘티·대사·컷 설명·재사용·합성 컷은 본편에서. 본편의 그린 컷·결과물·시험 폴더는 빼고
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("out", "review", "panels_hf", "panels_hf_*", "_rejected", "__pycache__",
-                                                                  "render_run.log", "render_status.json"))
-    todo = pj if redraw else [i for i in pj if not (src / "panels_hf_vast" / f"{i}.png").exists()]
-    steps = []
-    if todo:
-        cmd = [PY, str(VAST / "comfy_panel.py"), str(sd), str(src / "panels.json"), "--episode", src.name, "--only", ",".join(todo), "--variant", "vast"]
-        cmd += (["--turbo"] if turbo else []) + (["--expr"] if expr else []) + (["--fix"] if fix else []) + (["--check"] if check else [])
-        steps.append({"label": f"vast {len(todo)}컷 그리기(크레딧 0)", "cmd": cmd, "allow_fail": True})
-    steps += [{"label": "vast 컷을 vast 판 회차로", "cmd": [PY, "-c", VAST_COPY, str(src), str(dst), ",".join(pj)]},
-              {"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(dst)]},
-              {"label": "합성·PDF", "cmd": [PY, str(TOOLS / "run_episode.py"), str(dst)]},
-              {"label": "기계 점검", "cmd": [PY, str(TOOLS / "qa_gate.py"), str(dst)], "allow_fail": True},
-              {"label": "말풍선 점검", "cmd": [PY, str(TOOLS / "check_bubbles.py"), str(dst)], "allow_fail": True}]
-    job = _start_job("vast_episode", src, steps)
-    per = (30 if turbo else 120) + (40 if check else 0)
-    return (f"작업 시작 {job}: {dst.name} 만들기, 새로 그릴 컷 {len(todo)}/{len(pj)}(약 {len(todo) * per // 60}분) + 합성 1~3분, 크레딧 0. "
-            f"job_status('{job}') → 끝나면 export(series, '{dst.name}')")
 
 
 # ── 합성·내보내기 ─────────────────────────────────────────────
