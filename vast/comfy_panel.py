@@ -59,12 +59,12 @@ def strip_people(text: str) -> str:
 _SAVED_WARNED = False
 
 
-def lora_for(series, chars, model=None) -> list:
+def lora_for(series, chars, model=None, edit=False) -> list:
     """이 컷 인물들의 학습한 LoRA(series.json loras, 지금 그리는 판으로 학습한 것만). 모듈을 못 부르면 없음."""
     try:
         from lora import for_panel
         from saved_workflow import pick
-        return for_panel(series, chars, model or pick(series)[0])
+        return for_panel(series, chars, model or pick(series)[0], edit)
     except Exception:  # noqa: BLE001
         return []
 
@@ -94,7 +94,11 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
         # 인물 LoRA 는 컷 생성에만(고치기·에셋·시안은 그대로). 그 판으로 학습한 것만 붙는다(lora.for_panel)
         # 그림체 LoRA 는 사람 없는 컷에도 붙어서 chars 가 없어도 묻는다
         draw_role = role in (None, "layout_lock")  # 배치 고정도 컷 그리기라 인물·그림체 LoRA 를 붙인다
-        lz = lora_for(series, chars, mid) if not edit and draw_role and not NO_LORA else None
+        # 앞 컷에서 잇기(편집 경로)도 컷 그리기다: 같은 모델이라 그리기로 학습한 인물 LoRA 가 그대로 붙는다(2026-10-20 조사, 빠져 있던 연결)
+        if role == "next_scene" and chars and not NO_LORA:
+            lz = [x for x in lora_for(series, chars, mid, edit=True) if x["who"] != "_style"]
+        else:
+            lz = lora_for(series, chars, mid) if not edit and draw_role and not NO_LORA else None
         g = fill(to_api(ui, turbo=turbo, refine=bool(refine), loras=lz), prompt, ref_names, w, h, seed, steps, ref_res)
         if control:  # 배치 기준 컷(올린 이름): 선 따기(Canny) 앞의 크기 맞추기·불러오기 노드에 넣는다(노드 번호가 아니라 연결로 찾는다)
             cny = next(k for k, v in g.items() if v["class_type"] == "Canny")
@@ -236,11 +240,18 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str):
     chars, sc = p.get("chars") or [], _shot_class(p)
     if time_cut(p["id"]):  # 이 컷이 새 장면의 첫 컷
         return None
-    if "next_scene" in own and len(chars) == 1 and sc == "close" and k > 0:
-        q = spec[ids[k - 1]]
-        if (q.get("location") == p.get("location") and (q.get("chars") or []) == chars and _shot_class(q) == "close"
-                and q.get("aspect") == p.get("aspect") and same_outfit(q) and img(q["id"]) and q["id"] not in CONT_MADE):
-            return "next_scene", img(q["id"]), q["id"]
+    if "next_scene" in own and len(chars) == 1 and sc == "close":
+        # 별 모양: 같은 장면 안에서 그 사람의 가장 가까운 '보통으로 그린' 클로즈업에서 각각 잇는다(사슬로 이으면 두 번째부터 거칠어졌다.
+        # 조사: 기준 컷 하나에서 각각 파생하는 쪽이 낫다). 주고받는 대화(A·B·A·B)면 A 는 앞의 A 클로즈업에서
+        for j in range(k - 1, max(-1, k - 7), -1):
+            q = spec[ids[j]]
+            if q.get("location") != p.get("location") or not same_outfit(q):
+                break
+            if ((q.get("chars") or []) == chars and _shot_class(q) == "close" and q.get("aspect") == p.get("aspect")
+                    and img(q["id"]) and q["id"] not in CONT_MADE):
+                return "next_scene", img(q["id"]), q["id"]
+            if time_cut(q["id"]):
+                break
     if "layout_lock" in own and len(chars) >= 2 and sc in ("wide", "medium"):
         for j in range(k - 1, max(-1, k - 9), -1):
             q = spec[ids[j]]
@@ -521,8 +532,11 @@ def main():
                 cid = p["chars"][0]
                 face = series / "assets" / "vast_refs" / f"{cid}_bust.png"
                 nm = re.sub(r"\s*\(.*?\)", "", _names(series).get(cid, cid))
+                wear = (p.get("outfit") or {}).get(cid)
+                # 옷은 지시문 positive 에 다시 적는다: CFG 1 이라 네거티브는 안 듣고, 적지 않으면 민소매가 긴소매로 바뀌었다(D+18 p015)
                 pr_ns = (f"Next Scene: the same moment continues in the same place, a new panel of {nm}. {p['action']} "
                          + (f"Acting: {p['acting']}. " if p.get("acting") else "")
+                         + (f"{nm} wears exactly the same clothes as in <image1>: {wear}. " if wear else "")
                          + f"Keep {nm}'s face, hair and clothes, the place and the light exactly as in <image1>; change only the expression, gaze, "
                            "head angle and hands as described." + (f" <image2> is {nm}'s face (identity only)." if face.exists() else "")
                          + " Korean webtoon panel, no text, no speech bubbles.")
@@ -531,8 +545,8 @@ def main():
                 soft = out / "_cont" / f"{p['id']}_from_{cont[2]}.png"
                 soft.parent.mkdir(exist_ok=True)
                 _Im.open(cont[1]).convert("RGB").filter(_Fl.GaussianBlur(0.5)).save(soft)
-                g = graph(pr_ns, [upload(c, soft, cache)] + ([upload(c, face, cache)] if face.exists() else []), 0, 0, sd, 25, args.ref_res,
-                          turbo=False, edit=True, series=series, role="next_scene")
+                g = graph(pr_ns, [upload(c, soft, cache)] + ([upload(c, face, cache)] if face.exists() else []), 0, 0, sd, 28, args.ref_res,
+                          turbo=False, edit=True, series=series, role="next_scene", chars=p.get("chars"))
                 hist = c.wait(c.queue(g), timeout=1800)
                 CONT_MADE.add(p["id"])
             elif first and cont[0] == "layout_lock":

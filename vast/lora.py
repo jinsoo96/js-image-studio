@@ -405,7 +405,7 @@ def set_entry(series: Path, who: str, entry: dict) -> dict:
     return cur
 
 
-def for_panel(series, chars, model: str) -> list:
+def for_panel(series, chars, model: str, edit: bool = False) -> list:
     """이 컷에 붙일 LoRA [{who, file, strength, trigger}]: 컷에 나오는 인물 중 켜진(on) LoRA 가 있고 그 LoRA 의 판이 지금 그리는 판인 것.
     다른 판(예: UC 로 학습한 것을 Anima 로 그릴 때)에는 붙이지 않는다. 두 명 이상이면 각 항목의 multi 강도(없으면 strength)."""
     if not series:
@@ -417,8 +417,11 @@ def for_panel(series, chars, model: str) -> list:
     hit = [(w, loras[k]) for w in (chars or []) for k in (f"{w}@{str(model).lower()}", w) if ok(k)]
     seen = set()
     hit = [(w, e) for w, e in hit if not (w in seen or seen.add(w))]
+    # 앞 컷을 참조로 넣는 편집(잇기)에서는 참조가 얼굴을 끌어서 그리기 강도(0.55)로는 거의 듣지 않는다: edit_strength(없으면 0.8)
+    # (2026-10-20 조사: 참조와 함께 쓰는 정체성 LoRA 권장 0.7~1.0)
     out = [{"who": w, "file": e["file"], "trigger": e.get("trigger") or "",
-            "strength": float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
+            "strength": float(e.get("edit_strength", 0.8)) if edit else
+            float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
     sk = next((k for k in (f"{STYLE}@{str(model).lower()}", STYLE) if ok(k)), None)
     if sk:  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)
         e = loras[sk]
