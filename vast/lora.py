@@ -332,7 +332,8 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         raise SystemExit(f"학습을 막아 둠: {tmeta['disabled']}")
     lmodel = tmeta.get("model") or name
     tg = trigger(series, who)
-    dataset = f"webtoon/{tg}"
+    # 판마다 잠재·글 꼴이 달라(Qwen VAE·qwen3vl ↔ Flux2 128채널·Qwen3.5) 학습 데이터를 따로 둔다. 기본 판(uc)은 예전 이름 그대로
+    dataset = f"webtoon/{tg}" if lmodel == "uc" else f"webtoon/{tg}_{lmodel}"
     t0 = time.time()
     info = json.loads((series / "lora" / who / "data.json").read_text(encoding="utf-8")) if reuse_data else None
     if not reuse_data:
@@ -373,7 +374,9 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
              "steps": t["steps"], "rank": t["rank"], "lr": t["learning_rate"], "offloading": bool(t.get("offloading")), "images": info["count"],
              "train_s": train_s, "s_per_step": round(train_s / max(1, t["steps"]), 2), "at": time.strftime("%Y-%m-%d %H:%M")}
     if register:  # 시험 학습(--no-register)은 작품에 등록하지 않는다
-        set_entry(series, who, entry)
+        # 같은 인물을 다른 판으로 학습하면 '<인물>@<판>' 칸에 둔다(UC 로 학습한 것을 덮지 않게, for_panel 이 그리는 판에 맞는 칸을 고른다)
+        old = registry(series).get(who) or {}
+        set_entry(series, who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}", entry)
     log(f"학습 끝 전체 {secs // 60}분 {secs % 60}초(학습 {train_s}초, 스텝당 {entry['s_per_step']}초) → {pick_file}"
         + (f" (lora/loras.json {who}, 강도 0.8)" if register else " (등록 안 함)"))
     return entry
@@ -410,11 +413,15 @@ def for_panel(series, chars, model: str) -> list:
     loras = registry(Path(series))
     ok = lambda w: (isinstance(loras.get(w), dict) and loras[w].get("on", True) and loras[w].get("file")  # noqa: E731
                     and str(loras[w].get("model") or "").lower() == str(model).lower())
-    hit = [(w, loras[w]) for w in (chars or []) if ok(w)]
+    # 그리는 판으로 학습한 칸: '<인물>@<판>'(다른 판으로도 학습한 인물) → '<인물>'
+    hit = [(w, loras[k]) for w in (chars or []) for k in (f"{w}@{str(model).lower()}", w) if ok(k)]
+    seen = set()
+    hit = [(w, e) for w, e in hit if not (w in seen or seen.add(w))]
     out = [{"who": w, "file": e["file"], "trigger": e.get("trigger") or "",
             "strength": float(e.get("multi", e.get("strength", 0.8)) if len(hit) > 1 else e.get("strength", 0.8))} for w, e in hit]
-    if ok(STYLE):  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)
-        e = loras[STYLE]
+    sk = next((k for k in (f"{STYLE}@{str(model).lower()}", STYLE) if ok(k)), None)
+    if sk:  # 그림체 LoRA 는 사람 없는 컷까지 모든 컷에(맨 앞)
+        e = loras[sk]
         # 인물 LoRA 와 겹치면 multi 강도: D+18 그림체 0.8 + 재민 0.55 를 겹치자 그림이 초록·보라 얼룩으로 깨졌다(2026-10-20 p003·p008·p025, 0.45 는 멀쩡)
         st = e.get("multi", e.get("strength", 0.8)) if out else e.get("strength", 0.8)
         out.insert(0, {"who": STYLE, "file": e["file"], "trigger": e.get("trigger") or "", "strength": float(st)})

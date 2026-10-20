@@ -417,14 +417,27 @@ input/ 아래 폴더 하나에 그림과 같은 이름의 캡션 .txt(001.png + 
 # 덧댄 뒤 기본 실행 인자(dynamic VRAM 켬)로 학습 스텝당 약 2초. 수정이 빠지면 다시 죽으니 버전을 바꾸면 comfy_server(action="patch") 로 확인
 TRAIN_DISABLED = ""
 
+# 판마다 학습에 쓰는 모델 파일(① 글 인코더·VAE, ② 확산 모델과 그 위에 먼저 얹는 LoRA). MOSS 는 2026-10-20 조사로 정했다(worklogs/2026-10-20-moss-qwen-aux):
+# 잠재 꼴이 Flux2(128채널·1/16)라 Qwen 데이터를 쓸 수 없고, Qwen 전용 앞부분 캐시는 빼고, 그리는 판과 같게 UC LoRA 위에서 학습한다.
+# ModelSamplingAuraFlow shift 1.5: 기본 shift 5 로는 σ<0.5(얼굴·세부를 정하는 낮은 노이즈) 스텝이 1/6 뿐이라 닮음이 덜 배운다는 보고가 있다.
+# ModelSamplingSD3 를 넣으면 시간값에 ×1000 이 두 번 걸려 망가진다(ComfyUI #17119)
+TRAIN_MODELS = {
+    "uc": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": UNET, "pre_loras": [], "qwen_cache": True, "shift": None, "bypass": True,
+           "label": "Qwen Image 2.1 UC"},
+    "moss": {"clip": ("qwen3.5_9b_int8_convrot.safetensors", "moss_image"), "vae": "flux2-vae_small.safetensors", "unet": "moss_image_sft_bf16.safetensors",
+             "pre_loras": [("moss-image-uncensored-lora-comfy.safetensors", 1.0, "UC LoRA (그리는 판과 같게 그 위에서 학습)")], "qwen_cache": False,
+             "shift": 1.5, "bypass": False, "label": "MOSS-Image SFT + UC"},
+}
+
 
 def build_lora_dataset(folder="3d", model="uc"):
     """① 학습 데이터 워크플로우(화면 형식): 폴더(그림+캡션) → MakeTrainingDataset(VAE·글 인코더) → SaveTrainingDataset."""
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 360), [DATASET_GUIDE], title="사용법")
     g.group("1. 인코더", 0, 0, 380, 260, "#3f789e")
-    clip = g.node("CLIPLoader", (20, 50), (340, 106), [CLIP, "qwen_image", "default"], outputs=[("CLIP", "CLIP")])
-    vae = g.node("VAELoader", (20, 180), (340, 58), [VAE], outputs=[("VAE", "VAE")])
+    tm = TRAIN_MODELS[model]
+    clip = g.node("CLIPLoader", (20, 50), (340, 106), [tm["clip"][0], tm["clip"][1], "default"], outputs=[("CLIP", "CLIP")])
+    vae = g.node("VAELoader", (20, 180), (340, 58), [tm["vae"]], outputs=[("VAE", "VAE")])
     g.group("2. 데이터", 400, 0, 760, 260, "#a1309b")
     data = g.node("LoadImageTextDataSetFromFolder", (420, 50), (340, 82), [folder], outputs=[("images", "IMAGE"), ("texts", "STRING")],
                   title="데이터 폴더 (input/ 아래, 그림 + 같은 이름 .txt)")
@@ -439,7 +452,7 @@ def build_lora_dataset(folder="3d", model="uc"):
     g.link(make, 0, save, "latents")
     g.link(make, 1, save, "conditioning")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"model": model, "role": "lora_dataset", "label": "인물 LoRA 학습 데이터 만들기(①, 학습은 webtoon_train_lora_uc)"}
+    wf["extra"]["webtoon"] = {"model": model, "role": "lora_dataset", "label": f"인물 LoRA 학습 데이터 만들기(①, {tm['label']}, 학습은 webtoon_train_lora_{model})"}
     return wf
 
 
@@ -453,7 +466,8 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
           "loss_function": "MSE", "seed": 0, "training_dtype": "bf16", "lora_dtype": "bf16", "quantized_backward": False, "algorithm": "LoRA",
           # checkpoint_depth 2 = 트랜스포머 블록 하나하나. 1 은 모델 전체를 한 덩어리로 감싸(nodes_train.find_modules_at_depth 가 루트에서 1 을 센다)
           # 절약이 없어 같은 31GB 초과였다
-          "gradient_checkpointing": True, "checkpoint_depth": 2, "offloading": False, "existing_lora": "[None]", "bucket_mode": True, "bypass_mode": True}
+          "gradient_checkpointing": True, "checkpoint_depth": 2, "offloading": False, "existing_lora": "[None]", "bucket_mode": True,
+          "bypass_mode": TRAIN_MODELS[model]["bypass"]}  # bypass 는 fp8(UC) 가중치에만. MOSS 는 bf16 이라 끈다
     names = _widget_names(_node_spec("TrainLoraNode"))
     miss = [n for n in names if n and n not in tv]
     if miss:
@@ -461,11 +475,19 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 700), [TRAIN_GUIDE], title="사용법")
     g.group("1. 모델 · 학습 데이터", 0, 0, 380, 470, "#3f789e")
-    unet = g.node("UNETLoader", (20, 50), (340, 82), [UNET, "default"], outputs=[("MODEL", "MODEL")])
-    # 앞부분(글·참고 그림) K/V 캐시를 끈다. 그리기 속도용으로 기본이 켜짐(auto)인데, 학습은 스텝마다 그림 크기·캡션이 바뀌어 캐시 키 길이가 달라
-    # "size of tensor a (540676) must match … b (344068)" 로 멈췄다(2026-10-19 1024 시험, qwen_image21.select_prefix_cache)
-    nocache = g.node("QwenImage21Cache", (20, 160), (340, 82), ["off", "default"], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
-                     title="앞부분 캐시 끔 (학습은 스텝마다 크기가 바뀐다)")
+    tm = TRAIN_MODELS[model]
+    unet = g.node("UNETLoader", (20, 50), (340, 82), [tm["unet"], "default"], outputs=[("MODEL", "MODEL")])
+    chain = [unet]
+    for k, (lf, st, title) in enumerate(tm["pre_loras"]):
+        chain.append(g.node("LoraLoaderModelOnly", (20, 140 + 30 * k), (340, 82), [lf, st], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")], title=title))
+    if tm["shift"] is not None:
+        chain.append(g.node("ModelSamplingAuraFlow", (20, 170), (340, 58), [tm["shift"]], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
+                            title="낮은 노이즈 몫 늘리기 (얼굴·세부를 더 배운다)"))
+    if tm["qwen_cache"]:
+        # 앞부분(글·참고 그림) K/V 캐시를 끈다. 그리기 속도용으로 기본이 켜짐(auto)인데, 학습은 스텝마다 그림 크기·캡션이 바뀌어 캐시 키 길이가 달라
+        # "size of tensor a (540676) must match … b (344068)" 로 멈췄다(2026-10-19 1024 시험, qwen_image21.select_prefix_cache)
+        chain.append(g.node("QwenImage21Cache", (20, 160), (340, 82), ["off", "default"], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
+                            title="앞부분 캐시 끔 (학습은 스텝마다 크기가 바뀐다)"))
     data = g.node("LoadTrainingDataset", (20, 270), (340, 82), [dataset], outputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
                   title="학습 데이터 (① 이 datasets/ 에 저장한 것)")
     bucket = g.node("ResolutionBucket", (20, 380), (340, 60), [], inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
@@ -479,14 +501,15 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
     # SaveLoRA 의 steps(파일 이름에 들어가는 스텝 수)는 도구가 학습 스텝과 같은 값으로 채운다
     g.link(data, 0, bucket, "latents")
     g.link(data, 1, bucket, "conditioning")
-    g.link(unet, 0, nocache, "model")
-    g.link(nocache, 0, train, "model")
+    for x, y in zip(chain, chain[1:]):
+        g.link(x, 0, y, "model")
+    g.link(chain[-1], 0, train, "model")
     g.link(bucket, 0, train, "latents")
     g.link(bucket, 1, train, "positive")
     g.link(train, 0, save, "lora")
     g.link(train, 1, loss, "loss")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": "인물 LoRA 학습(②, Qwen Image 2.1 UC, 서버 기본 학습 노드)"}
+    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": f"인물 LoRA 학습(②, {tm['label']}, 서버 기본 학습 노드)"}
     if TRAIN_DISABLED:
         wf["extra"]["webtoon"]["disabled"] = TRAIN_DISABLED
     return wf
@@ -497,7 +520,8 @@ def main():
         return library("--force" in sys.argv)
     if sys.argv[1:2] == ["train"]:  # 인물 LoRA 학습 워크플로우 둘(① 데이터 ② 학습, 2026-10-19 사용자 "로라 쓰는 거 필요해, 노드 만들어서 워크플로우 구성해서, UC 기반")
         c = Comfy()
-        for name, wf in (("webtoon_lora_dataset_uc.json", build_lora_dataset()), ("webtoon_train_lora_uc.json", build_train())):
+        mdl = sys.argv[2] if len(sys.argv) > 2 else "uc"  # make_workflow.py train moss → MOSS 판 학습 워크플로우 둘
+        for name, wf in ((f"webtoon_lora_dataset_{mdl}.json", build_lora_dataset(model=mdl)), (f"webtoon_train_lora_{mdl}.json", build_train(model=mdl))):
             c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
             (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
             print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))

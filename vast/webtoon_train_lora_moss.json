@@ -1,0 +1,490 @@
+{
+ "id": "205f5e64-48d6-4d57-9e5c-0877af7824cc",
+ "revision": 0,
+ "last_node_id": 9,
+ "last_link_id": 9,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "MarkdownNote",
+   "pos": [
+    -470,
+    0
+   ],
+   "size": [
+    420,
+    700
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "# 인물 LoRA 학습 (Qwen Image 2.1 UC) — 2단계 중 ②\n서버 ComfyUI 기본 노드만 쓴다(확장 설치 없음). 작업실 도구 `vast/lora.py train <작품> <인물>`(MCP lora_train)이 ① → 모델 내리기 → ② 순서로 돌린다.\n\n① `webtoon_lora_dataset_uc`: input/ 폴더(그림 + 같은 이름 캡션 .txt) → VAE·글 인코더로 학습 데이터(잠재·글) → datasets/webtoon/<trigger> 에 저장\n② 이 워크플로우: 저장된 학습 데이터 → 해상도 버킷 → TrainLoraNode(UC 모델, 앞부분 캐시 끔) → SaveLoRA · 손실 그래프\n\n한 워크플로우로 이으면 ①에서 올린 글 인코더(약 9GB)가 VRAM 에 남은 채 학습이 돌아 메모리가 모자랐다(2026-10-19, 28.8GB 에서 멈춤). 나누면 학습만 다시 돌릴 때 ①을 건너뛴다.\n\n**값**(이 노드 값이 도구의 기본): rank 16 · lr 0.0001 · AdamW · LoRA 는 bf16 · 기울기 체크포인트 깊이 2(블록마다, 1 은 모델 통째라 절약이 없다) · 해상도 버킷(그림 크기가 제각각이라).\n모델이 fp8 이라 bypass_mode(가중치를 고치지 않고 LoRA 를 옆에 붙여 학습), 계산은 bf16. quantized_backward(fp8 역전파)는 켜지 않는다: 켜면 ComfyUI 가 학습 중 재시작됐다.\n\n**결과**: output/loras/webtoon/<trigger>_<스텝>_steps_00001_.safetensors (LoRA 목록에 webtoon/… 로 보인다) · 손실 그래프 output/webtoon_studio/.\n그릴 때는 생성 워크플로우의 '인물 LoRA' 노드에 도구가 넣고 켠다(작품의 lora/loras.json)."
+   ],
+   "title": "사용법"
+  },
+  {
+   "id": 2,
+   "type": "UNETLoader",
+   "pos": [
+    20,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "moss_image_sft_bf16.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    20,
+    140
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "moss-image-uncensored-lora-comfy.safetensors",
+    1.0
+   ],
+   "title": "UC LoRA (그리는 판과 같게 그 위에서 학습)"
+  },
+  {
+   "id": 4,
+   "type": "ModelSamplingAuraFlow",
+   "pos": [
+    20,
+    170
+   ],
+   "size": [
+    340,
+    58
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelSamplingAuraFlow"
+   },
+   "widgets_values": [
+    1.5
+   ],
+   "title": "낮은 노이즈 몫 늘리기 (얼굴·세부를 더 배운다)"
+  },
+  {
+   "id": 5,
+   "type": "LoadTrainingDataset",
+   "pos": [
+    20,
+    270
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "latents",
+     "type": "LATENT",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "links": [
+      2
+     ],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadTrainingDataset"
+   },
+   "widgets_values": [
+    "webtoon/dataset"
+   ],
+   "title": "학습 데이터 (① 이 datasets/ 에 저장한 것)"
+  },
+  {
+   "id": 6,
+   "type": "ResolutionBucket",
+   "pos": [
+    20,
+    380
+   ],
+   "size": [
+    340,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "latents",
+     "type": "LATENT",
+     "link": 1
+    },
+    {
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "latents",
+     "type": "LATENT",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "links": [
+      7
+     ],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ResolutionBucket"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 7,
+   "type": "TrainLoraNode",
+   "pos": [
+    420,
+    50
+   ],
+   "size": [
+    360,
+    560
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 5
+    },
+    {
+     "name": "latents",
+     "type": "LATENT",
+     "link": 6
+    },
+    {
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "name": "lora",
+     "type": "LORA_MODEL",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "loss_map",
+     "type": "LOSS_MAP",
+     "links": [
+      9
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "steps",
+     "type": "INT",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "TrainLoraNode"
+   },
+   "widgets_values": [
+    1,
+    1,
+    1500,
+    0.0001,
+    16,
+    "AdamW",
+    "MSE",
+    0,
+    "bf16",
+    "bf16",
+    false,
+    "LoRA",
+    true,
+    2,
+    false,
+    "[None]",
+    true,
+    false
+   ]
+  },
+  {
+   "id": 8,
+   "type": "SaveLoRA",
+   "pos": [
+    800,
+    50
+   ],
+   "size": [
+    340,
+    82
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "lora",
+     "type": "LORA_MODEL",
+     "link": 8
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveLoRA"
+   },
+   "widgets_values": [
+    "loras/webtoon/lora",
+    1500
+   ]
+  },
+  {
+   "id": 9,
+   "type": "LossGraphNode",
+   "pos": [
+    800,
+    170
+   ],
+   "size": [
+    340,
+    300
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "loss",
+     "type": "LOSS_MAP",
+     "link": 9
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "LossGraphNode"
+   },
+   "widgets_values": [
+    "webtoon_studio/lora_loss"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   5,
+   0,
+   6,
+   0,
+   "LATENT"
+  ],
+  [
+   2,
+   5,
+   1,
+   6,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   3,
+   2,
+   0,
+   3,
+   0,
+   "MODEL"
+  ],
+  [
+   4,
+   3,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   5,
+   4,
+   0,
+   7,
+   0,
+   "MODEL"
+  ],
+  [
+   6,
+   6,
+   0,
+   7,
+   1,
+   "LATENT"
+  ],
+  [
+   7,
+   6,
+   1,
+   7,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   8,
+   7,
+   0,
+   8,
+   0,
+   "LORA_MODEL"
+  ],
+  [
+   9,
+   7,
+   1,
+   9,
+   0,
+   "LOSS_MAP"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1. 모델 · 학습 데이터",
+   "bounding": [
+    0,
+    0,
+    380,
+    470
+   ],
+   "color": "#3f789e",
+   "font_size": 22,
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2. 학습",
+   "bounding": [
+    400,
+    0,
+    760,
+    620
+   ],
+   "color": "#b58b2a",
+   "font_size": 22,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.75,
+   "offset": [
+    40,
+    40
+   ]
+  },
+  "webtoon": {
+   "model": "moss",
+   "role": "train_lora",
+   "label": "인물 LoRA 학습(②, MOSS-Image SFT + UC, 서버 기본 학습 노드)"
+  }
+ },
+ "version": 0.4
+}
