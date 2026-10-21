@@ -17,6 +17,7 @@ WebtoonTrainLora 는 기본 TrainLoraNode 에 alpha=rank·블록 안 Linear 만�
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -47,7 +48,14 @@ STYLE = "_style"  # 작품 그림체 LoRA 의 칸 이름(loras.json). 인물이 
 def registry(series: Path) -> dict:
     """작품에 등록된 인물 LoRA {인물: {file, trigger, model, strength, on, …}}. series/<작품>/lora/loras.json(작품 설정 파일 꼴이 작품마다 달라서
     — 새 작품은 series.json, D+18·무대 뒤는 cast.json·characters.json — LoRA 목록은 따로 둔다)."""
-    return _read(series / "lora" / "loras.json")
+    reg = _read(series / "lora" / "loras.json")
+    # 시험용 덮어쓰기(lora_eval.py): 파일은 그대로 두고 이 프로세스에서만 칸을 바꿔 본다. 파일을 고쳤다 되돌리던 때
+    # 시험을 중간에 멈추자 되돌리기가 안 돌아 재민 LoRA 가 꺼진 채 남았다(2026-10-21)
+    ov = os.environ.get("WEBTOON_LORA_OVERRIDE")
+    if ov:
+        for k, v in json.loads(ov).items():
+            reg[k] = {**(reg.get(k) or {}), **v}
+    return reg
 
 
 def _plain(tags: str) -> str:
@@ -428,7 +436,7 @@ def training_block(series: Path) -> str:
 def set_entry(series: Path, who: str, entry: dict) -> dict:
     """lora/loras.json 의 <인물> 을 고친다(없던 키는 더하고, 준 키만 바꾼다)."""
     f = series / "lora" / "loras.json"
-    reg = registry(series)
+    reg = _read(f)  # registry() 는 시험용 덮어쓰기가 섞이니 파일 그대로
     cur = reg.get(who) or {}
     cur.update({k: v for k, v in entry.items() if v is not None})
     reg[who] = cur

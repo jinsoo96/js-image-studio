@@ -4,7 +4,8 @@
 
     .venv/Scripts/python vast/lora_eval.py <작품 폴더> [style|<인물>] [--strengths 1.0] [--panels 4] [--seed 77] [--files a,b] [--full]
 그림체(style)는 샷 종류가 다른 컷 넷(클로즈업 · 둘 이상 미디엄 · 사람 없는 배경 · 와이드), 인물은 그 인물이 혼자 나오는 컷을 고른다.
-그리는 동안 loras.json 을 바꿨다가(그림체를 볼 때는 인물 LoRA 를 끈다) 끝나면 처음 내용으로 되돌린다.
+loras.json 은 고치지 않는다: 칸마다 WEBTOON_LORA_OVERRIDE 로 그리는 프로세스에서만 바꾼다(그림체를 볼 때는 인물 LoRA 를 끈다).
+서버에서 학습이 돌고 있으면 끝날 때까지 기다렸다 그린다(학습 구간 사이에 한 장씩 끼어 한 장에 26분씩 걸렸다, 2026-10-21).
 결과: exports/<날짜>/비교/<작품>_<누구>_LoRA_중간파일.jpg. 고른 파일은 lora.py set <작품> <누구> --file <파일> 로 등록한다.
 """
 import argparse
@@ -58,6 +59,23 @@ def held_out(series: Path, who: str, count: int) -> list:
     return out
 
 
+def wait_training(log=print) -> None:
+    """서버 큐에 학습(…TrainLora…) 작업이 돌거나 기다리는 동안 기다린다."""
+    sys.path.insert(0, str(ROOT / "vast"))
+    from comfy_client import Comfy
+    c, said = Comfy(), False
+    while True:
+        q = c.req("/queue") or {}
+        busy = [x for x in (q.get("queue_running") or []) + (q.get("queue_pending") or [])
+                if any("TrainLora" in v.get("class_type", "") for v in x[2].values())]
+        if not busy:
+            return
+        if not said:
+            log("서버에서 학습이 돌고 있어 끝날 때까지 기다린다", flush=True)
+            said = True
+        time.sleep(30)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("series")
@@ -79,28 +97,20 @@ def main():
     picks = held_out(series, who, a.panels)
     if not picks:
         sys.exit("학습에 안 쓴 본편 컷이 없다")
-    reg_file = series / "lora" / "loras.json"
-    saved = reg_file.read_text(encoding="utf-8")
     cols = [("off", None, 0.0)] + [(f"ev_{Path(f).stem.split('_steps_')[0].split('_')[-1]}_{s:g}", f, s) for f in files for s in strengths]
     by_ep = {}
     for ep, p in picks:
         by_ep.setdefault(ep, []).append(p["id"])
     print("컷:", {ep: ids for ep, ids in by_ep.items()}, "· 칸:", [c[0] for c in cols], flush=True)
-    try:
-        for var, f, s in cols:
-            reg = json.loads(saved)
-            for k, e in reg.items():
-                if isinstance(e, dict) and who == lora.STYLE and k != who:
-                    e["on"] = False  # 그림체만 본다
-            e = reg.setdefault(who, {})
-            e.update({"on": f is not None, **({"file": f, "strength": s, "multi": s} if f else {})})
-            reg_file.write_text(json.dumps(reg, ensure_ascii=False, indent=1), encoding="utf-8")
-            for ep, ids in by_ep.items():
-                cmd = [sys.executable, str(ROOT / "vast/comfy_panel.py"), str(series), str(series / "episodes" / ep / "panels.json"), "--episode", ep,
-                       "--only", ",".join(ids), "--variant", var, "--seed", str(a.seed), "--no-continuity"] + ([] if a.full else ["--turbo"])
-                subprocess.run(cmd, cwd=ROOT, env={**os.environ, "PYTHONUTF8": "1"}, check=False)
-    finally:
-        reg_file.write_text(saved, encoding="utf-8")
+    wait_training()
+    for var, f, s in cols:
+        ov = {k: {"on": False} for k, e in lora.registry(series).items() if isinstance(e, dict) and who == lora.STYLE and k != who}  # 그림체만 본다
+        ov[who] = {"on": f is not None, **({"file": f, "strength": s, "multi": s} if f else {})}
+        env = {**os.environ, "PYTHONUTF8": "1", "WEBTOON_LORA_OVERRIDE": json.dumps(ov, ensure_ascii=False)}
+        for ep, ids in by_ep.items():
+            cmd = [sys.executable, str(ROOT / "vast/comfy_panel.py"), str(series), str(series / "episodes" / ep / "panels.json"), "--episode", ep,
+                   "--only", ",".join(ids), "--variant", var, "--seed", str(a.seed), "--no-continuity"] + ([] if a.full else ["--turbo"])
+            subprocess.run(cmd, cwd=ROOT, env=env, check=False)
     font = ImageFont.truetype("C:/Windows/Fonts/malgunbd.ttf", 16)
     W = 320
     heads = [("정답(학습에 안 쓴 원본)", "hf")] + [("LoRA 끔" if f is None else f"{var.split('_')[1]}스텝 · {s:g}", var) for var, f, s in cols]
