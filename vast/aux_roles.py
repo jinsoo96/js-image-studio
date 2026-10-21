@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
-from saved_workflow import _node_spec, _widget_names, load_ui, models  # noqa: E402
+from saved_workflow import _node_spec, _widget_names, load_ui, models, save_ui  # noqa: E402
 
 CONTROLNET = "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
 NEXT_SCENE = "qwen21_next_scene_step2500.safetensors"
@@ -128,8 +128,7 @@ def main():
     if sys.argv[1:2] == ["restyle"]:
         ui = restyle_edit(m["edit"])
         name = "webtoon_restyle_uc.json"
-        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, ui)
         return print("서버 저장", name, "노드", len(ui["nodes"]), "· uc 역할:", models(refresh=True)["uc"]["own_roles"])
     for name, ui in (("webtoon_layout_lock_uc.json", layout_lock(m["gen"])),
                      ("webtoon_next_scene_uc.json", lora_edit(m["edit"], NEXT_SCENE, 0.8, "next_scene",
@@ -140,8 +139,7 @@ def main():
                      ("webtoon_head_swap_uc.json", lora_edit(m["edit"], HEAD_SWAP, 1.0, "head_swap",
                                                               "얼굴 바꾸기 BFS head swap 1.0 (<image1> 컷 · <image2> 얼굴, 25스텝)", 25,
                                                               loader="LoraLoaderBypassModelOnly"))):
-        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, ui)
         print("서버 저장", name, "노드", len(ui["nodes"]))
     roles = models(refresh=True)["uc"]["own_roles"]
     print("uc 역할:", roles)

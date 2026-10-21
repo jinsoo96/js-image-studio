@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
+from saved_workflow import save_ui  # noqa: E402
 from comfy_panel import CLIP, SIZES, TURBO, UNET, VAE, upload  # noqa: E402
 
 HF = "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main"
@@ -264,11 +265,10 @@ def library(force=False):
     for name, wf in wfs.items():
         if name in notes:  # 생성 워크플로우의 사용법 칸을 시안 설명으로 바꾼다
             wf["nodes"][0]["widgets_values"] = [notes[name]]
-        if name in have and not force:
+        if ("mcp_use_" + name in have or name in have) and not force:
             print("있음(건너뜀)", name)
             continue
-        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, wf)
         print("서버 저장", name, "노드", len(wf["nodes"]))
     print("지금 목록:", c.req("/api/userdata?dir=workflows"))
 
@@ -432,7 +432,7 @@ def set_turbo_sigmas(sig: str = QWEN21_TURBO_SIGMAS) -> list:
     그리기 도구가 이 값으로 첫 샘플러를 바꿔 그린다(saved_workflow._custom_sigmas). 바꾼 이름 목록."""
     c = Comfy()
     done = []
-    for name in [n for n in c.req("/api/userdata?dir=workflows") if isinstance(n, str) and re.fullmatch(r"webtoon_.+\.json", n)]:
+    for name in [n for n in c.req("/api/userdata?dir=workflows") if isinstance(n, str) and re.fullmatch(r"(mcp_use_)?webtoon_.+\.json", n)]:
         ui = json.loads(c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe=""), raw=True))
         if not any(n.get("type", "").startswith("LoraLoader") and "qwen_image_2.1_turbo" in str((n.get("widgets_values") or [""])[0])
                    for n in ui.get("nodes", [])):
@@ -609,8 +609,7 @@ def main():
     if sys.argv[1:2] == ["restyle"]:  # make_workflow.py restyle → Restyle 학습 데이터 워크플로우(편집 마무리 워크플로우는 aux_roles.py restyle)
         wf = build_restyle_dataset()
         name = "webtoon_restyle_dataset_uc.json"
-        Comfy().req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, wf)
         return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if sys.argv[1:2] == ["sigmas"]:  # make_workflow.py sigmas [off] → 터보 워크플로우에 공식 시그마를 적는다(off 면 뺀다)
         return print("터보 시그마", "뺌" if sys.argv[2:3] == ["off"] else "적음", set_turbo_sigmas("" if sys.argv[2:3] == ["off"] else QWEN21_TURBO_SIGMAS))
@@ -623,26 +622,23 @@ def main():
         if "draw" not in TRAIN_MODELS[mdl]:  # 다른 판에 붙이는 학습(uc_base)은 그 판의 학습 데이터 워크플로우를 같이 쓴다
             pairs.insert(0, (f"webtoon_lora_dataset_{mdl}.json", build_lora_dataset(model=mdl)))
         for name, wf in pairs:
-            c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
-            (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+            name = save_ui(name, wf)
             print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
         return
     if sys.argv[1:2] == ["moss"]:  # MOSS-Image UC 판(2026-10-19 사용자 "MOSS-IMAGE 도 vast ComfyUI 워크플로우로, UC 로 최적화")
         wf = build_moss()
         c = Comfy()
         name = "webtoon_vertical_moss.json"
-        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, wf)
         return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if sys.argv[1:2] == ["anima"]:  # Anima 판 생성 워크플로우를 서버에 저장(2026-10-19 사용자 "anima 버전 하나 만들어주라")
         wf = build_anima()
         c = Comfy()
         name = "webtoon_vertical_anima.json"
-        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
-        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        name = save_ui(name, wf)
         return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--name", default="webtoon_vertical_qwen21_uc.json")
+    ap.add_argument("--name", default="mcp_use_webtoon_vertical_qwen21_uc.json")
     ap.add_argument("--prompt-file", required=True)
     ap.add_argument("--ref", action="append", default=[], help="참고 그림(순서대로 <image1>…), 서버 input/ 에 올린다")
     ap.add_argument("--aspect", default="2:3")

@@ -24,7 +24,10 @@ from comfy_client import Comfy
 #   · sigmas {turbo, full}: "1.0, 0.97, …, 0" 처럼 적으면 첫 샘플러(KSampler)를 그 시그마로 그린다(SamplerCustomAdvanced + ManualSigmas, _custom_sigmas)
 # 고치기 워크플로우는 판의 edit → webtoon_edit_<이름>.json → 기본 판의 것 순서로 찾는다.
 # 서버에 닿지 않으면 마지막으로 읽은 목록, 그것도 없으면 OFFLINE 의 이름만(그리기는 서버가 있어야 하니 그때는 어차피 실패한다).
-OFFLINE = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json")}
+# MCP 도구가 실제로 쓰는 서버 워크플로우는 이름 앞에 mcp_use_ 를 붙인다(2026-10-21 사용자 "vast 의 진짜 MCP 에 쓰는 워크플로우들은 앞에 mcp_use 를").
+# 서버 목록에서 사람이 손으로 만든 것·남의 것(image_anima_base_v1 등)과 바로 갈린다. 찾을 땐 옛 이름(webtoon_*)도 읽고, 같은 판·역할이 둘이면 mcp_use_ 쪽.
+MCP_PREFIX = "mcp_use_"
+OFFLINE = {"uc": (MCP_PREFIX + "webtoon_vertical_qwen21_uc.json", MCP_PREFIX + "webtoon_edit_qwen21_uc.json")}
 # 시험용으로 워크플로우의 sigmas 를 덮는다: off(워크플로우 KSampler 그대로) · lq(스케줄러만 linear_quadratic) · 숫자 목록(그 값으로)
 SIGMAS_ENV = os.environ.get("WEBTOON_SIGMAS", "").strip()
 # 터보 LoRA 도 옆길로(시험용, 1 이면). 기본은 워크플로우대로 섞기(LoraLoaderModelOnly): 학습한 LoRA 는 옆길이 깨끗했지만 터보는 아직 견주지 않았다
@@ -44,7 +47,8 @@ def models(refresh: bool = False) -> dict:
         from concurrent.futures import ThreadPoolExecutor
         c = _c()
         names = [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
-        files = sorted(n for n in names if re.fullmatch(r"webtoon_.+\.json", n))
+        # 옛 이름을 먼저, mcp_use_ 를 나중에 읽어 같은 판·역할이면 mcp_use_ 가 덮는다
+        files = sorted((n for n in names if re.fullmatch(r"(mcp_use_)?webtoon_.+\.json", n)), key=lambda n: (n.startswith(MCP_PREFIX), n))
         folders = ("diffusion_models", "loras", "text_encoders", "vae")
         with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(agent app 호출 한도 60초)
             futs = {f: ex.submit(lambda f=f: set(c.req(f"/models/{f}") or [])) for f in folders}
@@ -62,10 +66,14 @@ def models(refresh: bool = False) -> dict:
         return {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}
                 for k, (g, e) in OFFLINE.items()}
     by = {}
-    for fn, ui in loaded.items():
+    for fn in files:
+        if fn not in loaded:
+            continue
+        ui = loaded[fn]
+        base = fn[len(MCP_PREFIX):] if fn.startswith(MCP_PREFIX) else fn
         meta = (ui.get("extra") or {}).get("webtoon") or {}
-        role = meta.get("role") or ("vertical" if fn.startswith("webtoon_vertical_") else None)
-        mid = str(meta.get("model") or meta.get("name") or (fn[len("webtoon_vertical_"):-len(".json")] if fn.startswith("webtoon_vertical_") else "")).lower()
+        role = meta.get("role") or ("vertical" if base.startswith("webtoon_vertical_") else None)
+        mid = str(meta.get("model") or meta.get("name") or (base[len("webtoon_vertical_"):-len(".json")] if base.startswith("webtoon_vertical_") else "")).lower()
         if role and mid:
             d = by.setdefault(mid, {"roles": {}, "meta": {}, "ui": None})
             d["roles"][role] = fn
@@ -197,6 +205,21 @@ def _widget_names(spec: dict) -> list:
 # 멀쩡했다(2026-10-21 p008). 학습도 bypass_mode 로 했다. 환경변수 WEBTOON_LORA_BYPASS=0 이면 예전처럼 섞는다
 LORA_BYPASS = os.environ.get("WEBTOON_LORA_BYPASS", "1") != "0"
 LORA_SLOT = "인물 LoRA"  # 생성 워크플로우에서 그 컷 인물의 LoRA 를 넣는 노드의 제목 머리(vast/lora.py slots 가 단다)
+
+
+def saved_name(name: str) -> str:
+    """서버에 저장할 이름(앞에 mcp_use_)."""
+    return name if name.startswith(MCP_PREFIX) else MCP_PREFIX + name
+
+
+def save_ui(name: str, ui: dict, c=None) -> str:
+    """MCP 도구가 쓰는 워크플로우를 서버 workflows/mcp_use_<이름> 과 vast/ 사본에 저장하고 저장한 이름을 돌려준다."""
+    name = saved_name(name)
+    (c or _c()).req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
+    (Path(__file__).resolve().parent / name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
+    global _models_at
+    _models_at = 0.0  # 다음 models() 가 다시 읽게
+    return name
 
 
 def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:

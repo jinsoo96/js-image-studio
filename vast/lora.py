@@ -486,7 +486,7 @@ def for_panel(series, chars, model: str, edit: bool = False) -> list:
 def add_slots(wf_name: str, count: int = 2) -> dict:
     """생성 워크플로우(UI)에 '인물 LoRA 1·2' 노드를 모델 로더 바로 뒤에 단다(우회 상태). 도구가 그 컷 인물의 LoRA 를 넣고 켠다.
     모델 로더의 MODEL 을 받던 노드들은 마지막 인물 LoRA 노드에서 받게 바꾼다. 이미 있으면 그대로 둔다."""
-    from saved_workflow import load_ui
+    from saved_workflow import load_ui, save_ui
     c = Comfy()
     ui = load_ui(wf_name)
     if any(str(n.get("title", "")).startswith(SLOT) for n in ui["nodes"]):
@@ -513,8 +513,7 @@ def add_slots(wf_name: str, count: int = 2) -> dict:
         lk[1] = prev["id"]
         prev["outputs"][0]["links"].append(lk[0])
     ui["last_node_id"], ui["last_link_id"] = nid, lid
-    c.req("/api/userdata/" + urllib.parse.quote("workflows/" + wf_name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
-    (ROOT / "vast" / wf_name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
+    wf_name = save_ui(wf_name, ui)
     return {"workflow": wf_name, "added": len(made)}
 
 

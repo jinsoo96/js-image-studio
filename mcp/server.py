@@ -905,7 +905,7 @@ def _check_model(name: str):
 
 @mcp.tool()
 def draw_models(series: str = "") -> str:
-    """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
+    """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(mcp_use_webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
     목록이 따라 바뀐다. 판마다: label(설명) · use_for(어디에 맞는지·한계, 판을 고를 때 읽는다) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) ·
     roles(생성·고치기·에셋·시안 역할마다 쓰는 워크플로우, own_roles 밖은 기본 판의 것) · refine(2차 다듬기를 지원하나) · models(쓰는 모델 파일) · ready(모델 파일이 서버에 다 있나) · default.
     series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
@@ -1249,8 +1249,8 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
 @mcp.tool()
 def restyle(series: str, action: str = "status", episode: str = "", panels: str = "", source: str = "panels_hf_vast", steps: int = 1500) -> str:
     """짝 데이터 Restyle(UC 만): 'Qwen UC 가 그린 결 → 그 작품 정본 결' 을 배우는 편집 LoRA 로 컷을 그 작품 그림체로 마무리한다.
-    서버 워크플로우를 쓴다: 짝 = 생성(webtoon_vertical_qwen21_uc), 데이터 = webtoon_restyle_dataset_uc, 학습 = webtoon_train_lora_uc_base,
-    마무리 = webtoon_restyle_uc(편집 + Restyle LoRA). action=status 는 바로 답한다(짝 수·학습한 파일·중간 파일·평가 그림), 나머지는 작업으로 돈다.
+    서버 워크플로우를 쓴다: 짝 = 생성(mcp_use_webtoon_vertical_qwen21_uc), 데이터 = mcp_use_webtoon_restyle_dataset_uc, 학습 = mcp_use_webtoon_train_lora_uc_base,
+    마무리 = mcp_use_webtoon_restyle_uc(편집 + Restyle LoRA). action=status 는 바로 답한다(짝 수·학습한 파일·중간 파일·평가 그림), 나머지는 작업으로 돈다.
     action: pairs(정본 컷을 같은 구도로 Qwen UC 가 다시 그린 짝 만들기) → dataset(짝을 편집 조건 학습 데이터로) → train(공식 bf16 + UC 위 학습, steps)
     → eval(학습에 안 쓴 정본 컷: 정답 | 1단 Qwen UC | 2단 Restyle, exports/<날짜>/비교/<작품>_Restyle_평가.jpg)
     → apply(episode 의 panels(쉼표) 를 source 폴더 그림에서 마무리, 결과 panels_hf_restyle/). 학습한 것은 loras.json '_restyle@base'."""
