@@ -71,6 +71,12 @@ def lora_for(series, chars, model=None, edit=False) -> list:
 
 NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
 
+# 클로즈업의 장소 참고 그림 문장. 예전 문장("배경 색·조명만, 흐린 작은 부분만, 방 전체를 그리지 말 것")은 배경을 빈 베이지 벽으로 비웠다
+# (2026-10-21 D+18 정본과 견줌: 정본 클로즈업은 뒤에 흐린 밤 사무실·술집 불빛이 꽉 찬다)
+CLOSEUP_PLACE_OLD = ("<image{n}> is the place, for the background colors and lighting only: this is a close-up, so only a small, "
+                     "softly blurred part of it shows behind the person. Do not draw the whole room.")
+CLOSEUP_PLACE = CLOSEUP_PLACE_OLD
+
 
 def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None, control=None):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
@@ -371,8 +377,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
                 lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s {what}.")
     if loc and close:
         refs.append(loc)
-        lines.append(f"<image{len(refs)}> is the place, for the background colors and lighting only: this is a close-up, so only a small, "
-                     "softly blurred part of it shows behind the person. Do not draw the whole room.")
+        lines.append(CLOSEUP_PLACE.format(n=len(refs)))
     chars = p.get("chars", [])
     n = len(chars)
     if n and refs:

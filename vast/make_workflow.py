@@ -460,6 +460,12 @@ TRAIN_MODELS = {
     "uc_base": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": "qwen_image_2.1_bf16.safetensors",
                 "pre_loras": [("qwen-image-2.1-uncensored-lora.safetensors", 1.0, "UC LoRA (그리는 UC 판과 같은 바탕)")], "qwen_cache": True,
                 "shift": None, "bypass": False, "label": "Qwen Image 2.1 공식 bf16 + UC LoRA", "draw": "uc", "role": "train_lora_base"},
+    # 위 + SimpleTuner 학습 보조 LoRA v3(학습 때만 1.0 으로 얹고 그릴 땐 끈다, 2.1 학습 중 질감이 무너지는 것을 막는다, Qwen Research 라이선스)
+    "uc_assist": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": "qwen_image_2.1_bf16.safetensors",
+                  "pre_loras": [("qwen-image-2.1-uncensored-lora.safetensors", 1.0, "UC LoRA (그리는 UC 판과 같은 바탕)"),
+                                ("qwen21_training_assistant_v3.safetensors", 1.0, "학습 보조 LoRA v3 (학습 때만, 그릴 땐 끔)")],
+                  "qwen_cache": True, "shift": None, "bypass": False, "label": "Qwen Image 2.1 공식 bf16 + UC LoRA + 학습 보조 v3",
+                  "draw": "uc", "role": "train_lora_assist"},
     "moss": {"clip": ("qwen3.5_9b_int8_convrot.safetensors", "moss_image"), "vae": "flux2-vae_small.safetensors", "unet": "moss_image_sft_bf16.safetensors",
              "pre_loras": [("moss-image-uncensored-lora-comfy.safetensors", 1.0, "UC LoRA (그리는 판과 같게 그 위에서 학습)")], "qwen_cache": False,
              "shift": 1.5, "bypass": False, "label": "MOSS-Image SFT + UC"},

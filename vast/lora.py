@@ -215,9 +215,10 @@ def _style_panels(series: Path, limit: int) -> list:
     return out
 
 
-def build_style_data(series: Path, panels: int = 36, res: int = 1024) -> dict:
+def build_style_data(series: Path, panels: int = 36, res: int = 1024, trigger_only: float = 0.0) -> dict:
     """그림체 LoRA 데이터: 본편 컷(_style_panels) + 캡션 'trigger, a Korean webtoon panel. 컷 내용.'
-    캡션에는 무엇이 그려졌는지(사람·옷·장소·연기)만 적고 그림체 말은 넣지 않는다: 글로 적지 않은 것(선·색·빛·얼굴 그리는 법)이 trigger 에 묻는다."""
+    캡션에는 무엇이 그려졌는지(사람·옷·장소·연기)만 적고 그림체 말은 넣지 않는다: 글로 적지 않은 것(선·색·빛·얼굴 그리는 법)이 trigger 에 묻는다.
+    trigger_only: 이 비율만큼은 캡션을 trigger 만(조사 2026-10-21: 화풍 LoRA 는 전체 캡션 반·trigger 만 반이 그림체를 trigger 에 더 묶는다)."""
     from comfy_panel import panel_text
     tg = trigger(series, STYLE)
     out = series / "lora" / STYLE / "data"
@@ -228,6 +229,8 @@ def build_style_data(series: Path, panels: int = 36, res: int = 1024) -> dict:
     for k, (src, p) in enumerate(_style_panels(series, panels), 1):
         im = _fit(Image.open(src), res)
         cap = f"{tg}, a Korean webtoon panel. {re.sub(r'\s*SPACE \(identical.*$', '', panel_text(p), flags=re.S)}"
+        if trigger_only and (k * trigger_only) % 1 < trigger_only:  # 고르게 섞이게(0.5 면 한 장 걸러)
+            cap = f"{tg}, a Korean webtoon panel."
         im.save(out / f"{k:03d}.png")
         (out / f"{k:03d}.txt").write_text(cap, encoding="utf-8")
         kept.append({"file": f"{k:03d}.png", "from": str(src.relative_to(series)).replace("\\", "/"), "size": list(im.size), "caption": cap})
@@ -334,7 +337,8 @@ TRAIN_CLASSES = ("WebtoonTrainLora", "TrainLoraNode")  # 앞: 우리 노드(vast
 
 
 def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 12, res: int = 1024, log=print, register: bool = True,
-          reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500, role: str = "train_lora") -> dict:
+          reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500, role: str = "train_lora",
+          trigger_only: float = 0.0) -> dict:
     """데이터 만들기 → 올리기 → ① 학습 데이터 워크플로우(역할 lora_dataset) → 모델 내리기 → ② 학습 워크플로우(역할 train_lora) → lora/loras.json 등록.
     워크플로우는 작품의 판에서(없으면 기본 판의 것), ② 의 판(extra.webtoon.model)이 이 LoRA 를 붙일 수 있는 판이다.
     reuse_data: 서버에 이미 만든 학습 데이터(datasets/webtoon/<trigger>)로 ② 만 다시(스텝·rank 만 바꿔 볼 때).
@@ -359,7 +363,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     t0 = time.time()
     info = json.loads((series / "lora" / who / "data.json").read_text(encoding="utf-8")) if reuse_data else None
     if not reuse_data:
-        info = build_data(series, who, panels, res)
+        info = build_style_data(series, panels, res, trigger_only) if who == STYLE else build_data(series, who, panels, res)
         log(f"데이터 {info['count']}장(뺀 것 {len(info['skipped'])}) → 서버에 올림")
         folder = upload_data(c, series, who)
         ui_data = load_ui(wf_data)
@@ -388,7 +392,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         n = min(size, total - done)
         # 이어 학습: 앞 파일을 existing_lora 로(노드가 파일 이름의 '_<스텝>_steps_' 로 앞 스텝 수를 읽는다), 시드를 바꿔 같은 노이즈를 되풀이하지 않게
         _set(api, tcls, steps=n, existing_lora=prev, seed=seed0 + len(ckpts))
-        _set(api, "SaveLoRA", prefix=f"loras/webtoon/{tg}{'' if role == 'train_lora' else '_base'}", steps=done + n)
+        _set(api, "SaveLoRA", prefix=f"loras/webtoon/{tg}{'' if role == 'train_lora' else '_' + role.replace('train_lora_', '')}", steps=done + n)
         before = set(c.req("/models/loras") or [])
         try:
             hist = _run(c, api, ui_train, 6 * 3600)
@@ -417,8 +421,8 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         # 같은 인물을 다른 판으로 학습하면 '<인물>@<판>' 칸에 둔다(UC 로 학습한 것을 덮지 않게, for_panel 이 그리는 판에 맞는 칸을 고른다)
         old = registry(series).get(who) or {}
         key = who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}"
-        if role != "train_lora":  # 다른 바탕에서 학습한 것은 견줄 때까지 따로('<누구>@base', 그리기는 이 칸을 보지 않는다)
-            key = f"{who}@base"
+        if role != "train_lora":  # 다른 바탕에서 학습한 것은 견줄 때까지 따로('<누구>@base' · '@assist', 그리기는 이 칸을 보지 않는다)
+            key = f"{who}@{role.replace('train_lora_', '') or 'base'}"
         set_entry(series, key, entry)
     log(f"학습 끝 전체 {secs // 60}분 {secs % 60}초(학습 {train_s}초, 스텝당 {entry['s_per_step']}초) → {pick_file}"
         + ((f" (lora/loras.json {who}, 강도 0.8)" if len(ckpts) == 1 else f" (lora/loras.json {who} 에 꺼 둠: lora_eval.py 로 중간 파일 {len(ckpts)}개를 견줘 고를 것)")
@@ -533,6 +537,8 @@ def main():
     ap.add_argument("--set", action="append", default=[], metavar="칸=값", help="train: 이번만 학습 노드 칸을 바꾼다(예 training_dtype=bf16)")
     ap.add_argument("--chunk", type=int, default=500, help="train: 이 스텝마다 저장하고 이어 학습(0 이면 한 번에)")
     ap.add_argument("--base", action="store_true", help="train: 공식 bf16 원본 + UC LoRA 위에서 학습(역할 train_lora_base)")
+    ap.add_argument("--role", help="train: 학습 워크플로우 역할을 직접(예 train_lora_assist: bf16 + UC LoRA + 학습 보조 LoRA)")
+    ap.add_argument("--trigger-only", type=float, default=0.0, help="data·train(그림체): 캡션을 trigger 만 쓰는 비율(예 0.5)")
     ap.add_argument("--force", action="store_true", help="train: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험)")
     ap.add_argument("--no-register", action="store_true", help="train: 학습만 하고 작품에 등록하지 않는다(시간·메모리 시험)")
     a = ap.parse_args()
@@ -557,7 +563,7 @@ def main():
             k, v = kv.split("=", 1)
             ov[k] = {"true": True, "false": False}.get(v.lower(), int(v) if v.isdigit() else float(v) if re.fullmatch(r"[\d.e-]+", v) else v)
         train(series, a.who, a.steps, a.rank, a.lr, a.panels, a.res, register=not a.no_register, reuse_data=a.reuse_data, overrides=ov, force=a.force, chunk=a.chunk,
-              role="train_lora_base" if a.base else "train_lora")
+              role=a.role or ("train_lora_base" if a.base else "train_lora"), trigger_only=a.trigger_only)
     elif a.cmd == "set":
         print(set_entry(series, a.who, {"file": a.file, "strength": a.strength, "on": False if a.off else True}))
 
