@@ -415,6 +415,13 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     if limbs:
         probs.add("몸")
         notes.append("팔·손이 남는다: " + "; ".join(limbs))
+    # 손 세기는 검출기로(tools/hand_check.py): 8B 판정은 셋째 손·같은 쪽 손 둘을 놓쳤다(2026-10-21 외출 p302·p428·p468)
+    p0 = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
+    from hand_check import check as hand_check
+    hc = hand_check(img_path, p0.get("chars"))
+    if hc["strong"]:
+        probs.add("몸")
+    notes += hc["strong"] + hc["review"]
     p = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
     sc = ep_dir / "panels_spec.json"
     layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("scene") or p.get("location") or "", "") if sc.exists() else "")

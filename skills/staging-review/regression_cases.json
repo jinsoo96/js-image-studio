@@ -160,6 +160,46 @@
    "bad": "panels_hf/_rejected/p452_20261020-144536.png",
    "check": "checks:gaze,facing,gaze_each,facts",
    "user": "둘이 만나는 짤인데 어디 보냐 둘이"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p302",
+   "bad": "panels_hf/_rejected/p302_20261021-192949.png",
+   "check": "limbs+checks:facts",
+   "user": "손이 두 개로 보이는 경우가 종종 보인다(2026-10-21 외출 1화, 눈 검수로 찾음): 화면 앞 두 손 사이에 반투명한 셋째 손"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p354",
+   "bad": "panels_hf/_rejected/p354_20261021-193010.png",
+   "check": "checks:count_each,facts",
+   "user": "손이 두 개로 보이는 경우가 종종 보인다(2026-10-21 외출 1화, 눈 검수로 찾음): 와인을 덜어 주는데 잔이 셋"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p428",
+   "bad": "panels_hf/_rejected/p428_20261021-193032.png",
+   "check": "limbs+checks:facts",
+   "user": "손이 두 개로 보이는 경우가 종종 보인다(2026-10-21 외출 1화, 눈 검수로 찾음): 타자 치는 손이 둘 다 오른쪽에서 들어온 오른손"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p468",
+   "bad": "panels_hf/_rejected/p468_20261021-193054.png",
+   "check": "limbs+checks:facts",
+   "user": "손이 두 개로 보이는 경우가 종종 보인다(2026-10-21 외출 1화, 눈 검수로 찾음): 젓가락 쥔 손과 음식 집는 손이 같은 쪽 손 둘"
+  },
+  {
+   "series": "oechul-hf",
+   "episode": "ep001",
+   "panel": "p469",
+   "bad": "panels_hf/_rejected/p469_20261021-193115.png",
+   "check": "checks:unheld,facts",
+   "user": "손이 두 개로 보이는 경우가 종종 보인다(2026-10-21 외출 1화, 눈 검수로 찾음): 쥔 손 없이 가슴께에 떠 있는 젓가락"
   }
  ]
 }

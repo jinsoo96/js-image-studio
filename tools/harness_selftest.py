@@ -49,8 +49,10 @@ def run_check(case: dict, img: Path) -> list:
         from scene_plate import _doubled
         d = _doubled(img, series, p.get("chars") or [])
         return [d.get("why", "doubled")] if d.get("doubled") else []
-    if kind == "limbs":
-        return R.extra_limbs(img)
+    if kind == "limbs":  # 그림 보는 모델 질문 + 손 검출기 규칙(tools/hand_check.py: 손이 사람 수의 두 배 초과 · 얼굴 없이 손 둘 이상)
+        from hand_check import check as hand_check
+        hc = hand_check(img, p.get("chars"))
+        return R.extra_limbs(img) + hc["strong"] + hc["review"]
     if kind == "continuity":
         prev = ep / "panels_hf" / f"{arg}.png"
         return R.continuity_pair(prev, img, p, spec.get(arg), names(series))

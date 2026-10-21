@@ -89,6 +89,11 @@ def main():
     else:
         for x in episode_sheets(ep, out):
             print(x)
+        # 손만 나오는 컷·손이 많은 컷을 손 상자와 함께 크게 따로 모은다(16컷 시트 크기론 같은 쪽 손 둘을 놓친다, 2026-10-21 외출 p428·p468)
+        from hand_check import scan
+        r = scan(ep)
+        if r["sheet"]:
+            print(r["sheet"])
 
 
 if __name__ == "__main__":

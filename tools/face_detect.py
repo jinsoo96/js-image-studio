@@ -12,22 +12,23 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "models" / "detect" / "anime_face_v1.4_s"
+# 손: deepghs/anime_hand_detection hand_detect_v1.0_s(같은 YOLOv8 ONNX 꼴, OpenRAIL). tools/hand_check.py 가 쓴다
+HAND_DIR = ROOT / "models" / "detect" / "anime_hand_v1.0_s"
 SIZE = 640
-_session = None
+_sessions = {}
 
 
-def _sess():
-    global _session
-    if _session is None:
+def _sess(model_dir: Path = MODEL_DIR):
+    if model_dir not in _sessions:
         import onnxruntime as ort
-        _session = ort.InferenceSession(str(MODEL_DIR / "model.onnx"), providers=["CPUExecutionProvider"])
-    return _session
+        _sessions[model_dir] = ort.InferenceSession(str(model_dir / "model.onnx"), providers=["CPUExecutionProvider"])
+    return _sessions[model_dir]
 
 
-def detect(img, threshold=None, iou=0.5):
-    """[(x0, y0, x1, y1, score)] 원본 좌표, 점수 높은 순."""
+def detect(img, threshold=None, iou=0.5, model_dir: Path = MODEL_DIR):
+    """[(x0, y0, x1, y1, score)] 원본 좌표, 점수 높은 순. model_dir 를 HAND_DIR 로 주면 손."""
     if threshold is None:
-        threshold = json.loads((MODEL_DIR / "threshold.json").read_text())["threshold"]
+        threshold = json.loads((model_dir / "threshold.json").read_text())["threshold"]
     img = img.convert("RGB")
     W, H = img.size
     s = SIZE / max(W, H)
@@ -36,7 +37,8 @@ def detect(img, threshold=None, iou=0.5):
     px, py = (SIZE - nw) // 2, (SIZE - nh) // 2
     canvas.paste(img.resize((nw, nh), Image.BILINEAR), (px, py))
     x = (np.asarray(canvas, dtype=np.float32) / 255.0).transpose(2, 0, 1)[None]
-    out = _sess().run(None, {_sess().get_inputs()[0].name: x})[0][0]
+    sess = _sess(model_dir)
+    out = sess.run(None, {sess.get_inputs()[0].name: x})[0][0]
     if out.shape[0] < out.shape[1]:  # (5, N) -> (N, 5)
         out = out.T
     out = out[out[:, 4] >= threshold]
