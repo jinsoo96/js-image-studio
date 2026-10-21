@@ -58,7 +58,7 @@ def _env_no_lora(series: Path):
     os.environ["WEBTOON_LORA_OVERRIDE"] = json.dumps({k: {"on": False} for k in lora.registry(series)})
 
 
-def pairs(series: Path, strength: float = 0.6, res: int = 1024, log=print) -> dict:
+def pairs(series: Path, strength: float = 0.6, res: int = 1024, log=print, limit: int = 0) -> dict:
     """정본마다 같은 크기로 줄인 정본(out/NNN.png + 캡션)과, 그 정본을 Qwen UC 로 strength 만큼 다시 그린 판(in/NNN.png).
     다시 그릴 때 그 컷의 글·참고 그림(얼굴·장소)을 그대로 쓰고 LoRA 는 모두 끈다: 구도는 정본, 결은 지금 우리 Qwen UC."""
     _env_no_lora(series)
@@ -68,6 +68,8 @@ def pairs(series: Path, strength: float = 0.6, res: int = 1024, log=print) -> di
     for sub in ("in", "out"):
         (d / sub).mkdir(parents=True, exist_ok=True)
     train, held = _held_and_train(series)
+    if limit:  # 시험용: 앞에서 몇 쌍만(같은 이름·시드라 본 작업이 그대로 다시 쓴다)
+        train = train[:limit]
     c, cache = Comfy(), {}
     word = _style_word(series)
     items = []
@@ -112,8 +114,9 @@ def dataset(series: Path, log=print) -> str:
     d = _dir(series)
     slug = series.name.replace("-", "")
     fin, fout = f"restyle_{slug}_in", f"restyle_{slug}_out"
-    up = [(f, fin, "image/png") for f in sorted((d / "in").glob("*.png"))] + \
-         [(f, fout, "text/plain" if f.suffix == ".txt" else "image/png") for f in sorted((d / "out").iterdir())]
+    have = {f.stem for f in (d / "in").glob("*.png")}  # 입력이 있는 짝만(짝 만들기가 중간이면 목표만 있는 것은 뺀다)
+    up = [(f, fin, "image/png") for f in sorted((d / "in").glob("*.png"))]
+    up += [(f, fout, "text/plain" if f.suffix == ".txt" else "image/png") for f in sorted((d / "out").iterdir()) if f.stem in have]
     with ThreadPoolExecutor(6) as ex:
         list(ex.map(lambda a: c.upload_image(a[0], a[0].name, subfolder=a[1], ctype=a[2]), up))
     name = f"webtoon/{slug}_restyle"
@@ -251,10 +254,11 @@ def main():
     ap.add_argument("--file", default="")
     ap.add_argument("--files", default="")
     ap.add_argument("--variant", default="restyle")
+    ap.add_argument("--limit", type=int, default=0, help="pairs: 앞에서 몇 쌍만(시험)")
     a = ap.parse_args()
     series = (ROOT / "series" / a.series).resolve() if not Path(a.series).exists() else Path(a.series).resolve()
     if a.cmd == "pairs":
-        print(json.dumps({k: v for k, v in pairs(series, a.strength).items() if k != "items"}, ensure_ascii=False)[:400])
+        print(json.dumps({k: v for k, v in pairs(series, a.strength, limit=a.limit).items() if k != "items"}, ensure_ascii=False)[:400])
     elif a.cmd == "dataset":
         print(dataset(series))
     elif a.cmd == "train":

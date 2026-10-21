@@ -75,7 +75,10 @@ NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
 # (2026-10-21 D+18 정본과 견줌: 정본 클로즈업은 뒤에 흐린 밤 사무실·술집 불빛이 꽉 찬다)
 CLOSEUP_PLACE_OLD = ("<image{n}> is the place, for the background colors and lighting only: this is a close-up, so only a small, "
                      "softly blurred part of it shows behind the person. Do not draw the whole room.")
-CLOSEUP_PLACE = CLOSEUP_PLACE_OLD
+# 새 문장: 같은 시드 5컷 중 4컷이 빈 벽 대신 흐린 장소(밤 사무실·술집 불빛·창밖 야경)로 차서 정본에 가까워졌다
+# (2026-10-21 exports/2026-10-21/비교/D+18_클로즈업배경_예전vs새문장.jpg, 얼굴이 화면을 꽉 채운 p097 만 그대로)
+CLOSEUP_PLACE = ("<image{n}> is the place. This is a close-up, and behind the person this place fills the whole background, softly out of focus, "
+                 "with its real colors, lights and depth (blurred shapes and lights of the room or street). Never leave a blank or plain wall behind the person.")
 
 
 def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None, control=None):
