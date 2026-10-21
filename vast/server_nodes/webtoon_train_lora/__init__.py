@@ -13,6 +13,8 @@
      process_latent_in 을 거치지만, 묶음 잠재는 TrainSampler 로 바로 간다 → Qwen(Wan21 잠재 평균·분산)에서 첫 손실이 10 안팎이고
      LoRA 가 그 차이를 메우도록 배워, 강도 1 에서 그림이 보라·초록으로 무너졌다(2026-10-21 D+18, 그전 인물 LoRA 를 겹칠 때의 얼룩도 같은 원인).
      → 묶음 잠재를 학습 전에 process_latent_in. 상류 nodes_train 이 정규화를 하게 되면(소스에 process_latent_in) 건너뛴다.
+  5. 편집 조건(참고 그림 reference_latents)이 든 학습 데이터에서 process_cond_list 가 목록 속 텐서를 목록처럼 순회해
+     0차원 텐서에서 'iteration over a 0-d tensor' 로 멈춘다(2026-10-21 무대 뒤 Restyle 짝 학습) → 텐서는 잎으로 두는 판으로 바꿔 끼운다.
 """
 import inspect
 import logging
@@ -95,6 +97,31 @@ def _filtered_setup(bypass: bool, blocks_only: bool, alpha_mode: str, init: str 
     return setup
 
 
+def _safe_process_cond_list(d, prefix=""):
+    """nodes_train.process_cond_list 와 같되 텐서는 순회하지 않고 잎으로 둔다(목록 속 0차원 텐서에서 멈추던 것)."""
+    if isinstance(d, torch.Tensor):
+        return d
+    if hasattr(d, "__iter__") and not hasattr(d, "items") and not isinstance(d, (str, bytes)):
+        for index, item in enumerate(d):
+            _safe_process_cond_list(item, f"{prefix}.{index}")
+        return d
+    if hasattr(d, "items"):
+        for k, v in list(d.items()):
+            if isinstance(v, dict):
+                _safe_process_cond_list(v, f"{prefix}.{k}")
+            elif isinstance(v, torch.Tensor):
+                d[k] = v.clone()
+            elif isinstance(v, NT.CONDList):
+                v.cond = [t.detach() if isinstance(t, torch.Tensor) else t for t in v.cond]
+            elif isinstance(v, NT.CONDRegular):
+                if isinstance(v.cond, torch.Tensor):
+                    v.cond = v.cond.detach()
+            elif isinstance(v, (list, tuple)):
+                for index, item in enumerate(v):
+                    _safe_process_cond_list(item, f"{prefix}.{k}.{index}")
+    return d
+
+
 def _velocity_fwd_bwd(orig):
     def fwd_bwd(self, model_wrap, batch_sigmas, batch_noise, batch_latent, cond, indicies, extra_args, dataset_size, bwd=True):
         ms = model_wrap.inner_model.model_sampling
@@ -141,7 +168,9 @@ class WebtoonTrainLora(io.ComfyNode):
             kw["latents"] = [{**d, "samples": proc(d["samples"])} for d in kw["latents"]]
             logging.info(f"[WebtoonTrainLora] 묶음 잠재 {len(kw['latents'])}개를 모델 기준으로 정규화(process_latent_in)")
         saved = (NT._setup_lora_adapters, NT._setup_lora_adapters_bypass, NT.TrainSampler.fwd_bwd)
+        saved_pcl = NT.process_cond_list
         try:
+            NT.process_cond_list = _safe_process_cond_list
             NT._setup_lora_adapters = _filtered_setup(False, blocks_only, alpha_mode, init)
             NT._setup_lora_adapters_bypass = _filtered_setup(True, blocks_only, alpha_mode, init)
             if loss_mode == "velocity":
@@ -149,6 +178,7 @@ class WebtoonTrainLora(io.ComfyNode):
             return NT.TrainLoraNode.execute(**kw)
         finally:
             NT._setup_lora_adapters, NT._setup_lora_adapters_bypass, NT.TrainSampler.fwd_bwd = saved
+            NT.process_cond_list = saved_pcl
 
 
 class WebtoonTrainExtension(ComfyExtension):
