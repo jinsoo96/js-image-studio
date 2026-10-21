@@ -161,10 +161,13 @@ def dataset(series: Path, log=print, name: str = "") -> str:
     return name
 
 
-def train(series: Path, steps: int = 1500, rank: int = 32, lr: float = 1e-4, chunk: int = 500, log=print) -> dict:
+def train(series: Path, steps: int = 1500, rank: int = 32, lr: float = 1e-4, chunk: int = 500, log=print, role: str = "train_lora") -> dict:
+    """기본은 UC fp8 원본 위(역할 train_lora, 옆길). 공식 bf16 원본 위(train_lora_base)는 참고 그림만큼 길어진 입력에서 메모리가 빠듯해
+    ComfyUI 가 CUDA 'invalid argument' 로 통째로 죽었다(2026-10-21, 같은 bf16 이라도 짧은 입력의 그림체 학습은 3000스텝 무사)."""
     info = json.loads((_dir(series) / "data.json").read_text(encoding="utf-8"))
-    lora.set_entry(series, f"{WHO}@base", {"trigger": f"{series.name.replace('-', '')}restyle"})
-    return lora.train(series, WHO, steps, rank, lr, log=log, register=True, chunk=chunk, role="train_lora_base",
+    key = WHO if role == "train_lora" else f"{WHO}@{role.replace('train_lora_', '')}"
+    lora.set_entry(series, key, {"trigger": f"{series.name.replace('-', '')}restyle", "model": "uc"})
+    return lora.train(series, WHO, steps, rank, lr, log=log, register=True, chunk=chunk, role=role,
                       dataset=f"webtoon/{series.name.replace('-', '')}_restyle", count=info["count"])
 
 
@@ -177,7 +180,7 @@ def apply(series: Path, episode: str, ids: list, src_folder: str = "panels_hf_va
     from comfy_client import Comfy
     from saved_workflow import fill, load_ui, models, to_api
     reg = lora.registry(series)
-    e = reg.get(f"{WHO}@base") or {}
+    e = reg.get(WHO) or reg.get(f"{WHO}@base") or {}
     file = file or e.get("file")
     if not file:
         raise SystemExit("Restyle LoRA 가 없다(restyle.py train)")
@@ -219,7 +222,7 @@ def evaluate(series: Path, files: list | None = None, log=print) -> Path:
     import comfy_panel as CP
     from comfy_client import Comfy
     info = json.loads((_dir(series) / "data.json").read_text(encoding="utf-8"))
-    e = lora.registry(series).get(f"{WHO}@base") or {}
+    e = lora.registry(series).get(WHO) or lora.registry(series).get(f"{WHO}@base") or {}
     files = files or [ck["file"] for ck in e.get("checkpoints", [])] or [e.get("file")]
     c, cache = Comfy(), {}
     by = {}
@@ -277,7 +280,7 @@ def status(series: Path) -> dict:
     """짝·학습·평가 상태(GPU 안 씀)."""
     d = _dir(series)
     info = json.loads((d / "data.json").read_text(encoding="utf-8")) if (d / "data.json").exists() else {}
-    e = lora.registry(series).get(f"{WHO}@base") or {}
+    e = lora.registry(series).get(WHO) or lora.registry(series).get(f"{WHO}@base") or {}
     ev = ROOT / "exports"
     sheets = sorted(ev.glob(f"*/비교/{series.name}_Restyle_평가.jpg"))
     return {"series": series.name, "style_word": _style_word(series),

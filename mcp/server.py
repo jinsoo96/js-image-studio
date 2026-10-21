@@ -1158,7 +1158,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     if restyle:
         sys.path.insert(0, str(VAST))
         import lora as L
-        if not (L.registry(sd).get("_restyle@base") or {}).get("file"):
+        if not ((L.registry(sd).get("_restyle") or L.registry(sd).get("_restyle@base") or {}).get("file")):
             return _fail("no_restyle_lora", given=sd.name, reason="이 작품의 Restyle LoRA 가 없다: restyle(series, action='pairs'→'dataset'→'train') 먼저")
         steps.append({"label": "Restyle 마무리", "cmd": [PY, str(VAST / "restyle.py"), "apply", str(sd), ep.name, ",".join(want),
                                                        "--src", "panels_hf_vast", "--variant", "vast_restyle"]})
@@ -1253,7 +1253,7 @@ def restyle(series: str, action: str = "status", episode: str = "", panels: str 
     마무리 = mcp_use_webtoon_restyle_uc(편집 + Restyle LoRA). action=status 는 바로 답한다(짝 수·학습한 파일·중간 파일·평가 그림), 나머지는 작업으로 돈다.
     action: pairs(정본 컷을 같은 구도로 Qwen UC 가 다시 그린 짝 만들기) → dataset(짝을 편집 조건 학습 데이터로) → train(공식 bf16 + UC 위 학습, steps)
     → eval(학습에 안 쓴 정본 컷: 정답 | 1단 Qwen UC | 2단 Restyle, exports/<날짜>/비교/<작품>_Restyle_평가.jpg)
-    → apply(episode 의 panels(쉼표) 를 source 폴더 그림에서 마무리, 결과 panels_hf_restyle/). 학습한 것은 loras.json '_restyle@base'."""
+    → apply(episode 의 panels(쉼표) 를 source 폴더 그림에서 마무리, 결과 panels_hf_restyle/). 학습한 것은 loras.json '_restyle'(UC fp8 위)."""
     sd = _series(series)
     if action not in ("status", "pairs", "dataset", "train", "eval", "apply"):
         return _fail("unknown_action", given=action, candidates=["status", "pairs", "dataset", "train", "eval", "apply"])

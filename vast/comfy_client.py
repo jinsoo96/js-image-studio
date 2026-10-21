@@ -168,11 +168,17 @@ class Comfy:
             return False
 
     def wait(self, pid: str, timeout=900) -> dict:
-        t0 = time.time()
+        t0, last_check, missing = time.time(), time.time(), 0
         while time.time() - t0 < timeout:
             h = self.req(f"/history/{pid}")
             if h and pid in h and (h[pid].get("outputs") or h[pid].get("status", {}).get("completed") is not None):
                 return h[pid]
+            # 30초마다 큐에도 기록에도 없는지 본다: 서버가 죽었다 다시 뜨면 작업이 사라지는데 6시간을 기다렸다(2026-10-21 무대 뒤 Restyle 학습)
+            if time.time() - last_check > 30:
+                last_check = time.time()
+                missing = 0 if self._queued(pid) else missing + 1
+                if missing >= 2:
+                    raise RuntimeError(f"작업 {pid[:8]} 이 서버 큐·기록에서 사라졌다(ComfyUI 가 죽었다 다시 떴을 수 있다: comfy_admin.py logs 의 old 로그)")
             time.sleep(2)
         raise TimeoutError(pid)
 
