@@ -334,11 +334,12 @@ TRAIN_CLASSES = ("WebtoonTrainLora", "TrainLoraNode")  # 앞: 우리 노드(vast
 
 
 def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 12, res: int = 1024, log=print, register: bool = True,
-          reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500) -> dict:
+          reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500, role: str = "train_lora") -> dict:
     """데이터 만들기 → 올리기 → ① 학습 데이터 워크플로우(역할 lora_dataset) → 모델 내리기 → ② 학습 워크플로우(역할 train_lora) → lora/loras.json 등록.
     워크플로우는 작품의 판에서(없으면 기본 판의 것), ② 의 판(extra.webtoon.model)이 이 LoRA 를 붙일 수 있는 판이다.
     reuse_data: 서버에 이미 만든 학습 데이터(datasets/webtoon/<trigger>)로 ② 만 다시(스텝·rank 만 바꿔 볼 때).
     overrides: 이번만 학습 노드 칸을 바꾼다(예: {"training_dtype": "bf16"}). force: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험).
+    role: 학습 워크플로우 역할. train_lora_base 면 공식 bf16 원본 + UC LoRA 위에서 학습(make_workflow.py train uc_base).
     chunk: 이 스텝마다 끊어 저장하고 그 파일(existing_lora)에서 시드를 바꿔 이어 학습한다. 중간 파일이 entry["checkpoints"] 에 남아
     너무 배운 것(그림이 데이터 컷을 베끼거나 얼룩)과 덜 배운 것을 비교해 고른다(lora_eval.py). 0 이면 한 번에.
     """
@@ -346,7 +347,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     c = Comfy()
     m = models(refresh=True)
     name = pick(series)[0]
-    wf_data, wf_train = _role_wf(m, name, "lora_dataset"), _role_wf(m, name, "train_lora")
+    wf_data, wf_train = _role_wf(m, name, "lora_dataset"), _role_wf(m, name, role)
     ui_train = load_ui(wf_train)
     tmeta = (ui_train.get("extra") or {}).get("webtoon") or {}
     if tmeta.get("disabled") and not force:  # 학습 워크플로우에 막아 둔 이유가 적혀 있으면 돌리지 않는다(공용 서버를 넘어뜨린 설정, make_workflow.TRAIN_DISABLED)
@@ -387,7 +388,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         n = min(size, total - done)
         # 이어 학습: 앞 파일을 existing_lora 로(노드가 파일 이름의 '_<스텝>_steps_' 로 앞 스텝 수를 읽는다), 시드를 바꿔 같은 노이즈를 되풀이하지 않게
         _set(api, tcls, steps=n, existing_lora=prev, seed=seed0 + len(ckpts))
-        _set(api, "SaveLoRA", prefix=f"loras/webtoon/{tg}", steps=done + n)
+        _set(api, "SaveLoRA", prefix=f"loras/webtoon/{tg}{'' if role == 'train_lora' else '_base'}", steps=done + n)
         before = set(c.req("/models/loras") or [])
         try:
             hist = _run(c, api, ui_train, 6 * 3600)
@@ -410,12 +411,15 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     # 나눠 학습했으면 아직 켜지 않는다: 중간 파일을 lora_eval.py 로 견줘 고른 뒤 lora.py set --file 로 켠다
     entry = {"file": pick_file, "trigger": tg, "model": lmodel, "strength": 0.8, "on": len(ckpts) == 1,
              "steps": total, "rank": t["rank"], "lr": t["learning_rate"], "offloading": bool(t.get("offloading")), "images": info["count"],
-             "node": tcls, **({"checkpoints": ckpts} if len(ckpts) > 1 else {}),
+             "node": tcls, "role": role, **({"checkpoints": ckpts} if len(ckpts) > 1 else {}),
              "train_s": train_s, "s_per_step": round(train_s / max(1, total), 2), "at": time.strftime("%Y-%m-%d %H:%M")}
     if register:  # 시험 학습(--no-register)은 작품에 등록하지 않는다
         # 같은 인물을 다른 판으로 학습하면 '<인물>@<판>' 칸에 둔다(UC 로 학습한 것을 덮지 않게, for_panel 이 그리는 판에 맞는 칸을 고른다)
         old = registry(series).get(who) or {}
-        set_entry(series, who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}", entry)
+        key = who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}"
+        if role != "train_lora":  # 다른 바탕에서 학습한 것은 견줄 때까지 따로('<누구>@base', 그리기는 이 칸을 보지 않는다)
+            key = f"{who}@base"
+        set_entry(series, key, entry)
     log(f"학습 끝 전체 {secs // 60}분 {secs % 60}초(학습 {train_s}초, 스텝당 {entry['s_per_step']}초) → {pick_file}"
         + ((f" (lora/loras.json {who}, 강도 0.8)" if len(ckpts) == 1 else f" (lora/loras.json {who} 에 꺼 둠: lora_eval.py 로 중간 파일 {len(ckpts)}개를 견줘 고를 것)")
            if register else " (등록 안 함)"))
@@ -528,6 +532,7 @@ def main():
     ap.add_argument("--reuse-data", action="store_true", help="train: 서버에 만든 학습 데이터로 학습만 다시")
     ap.add_argument("--set", action="append", default=[], metavar="칸=값", help="train: 이번만 학습 노드 칸을 바꾼다(예 training_dtype=bf16)")
     ap.add_argument("--chunk", type=int, default=500, help="train: 이 스텝마다 저장하고 이어 학습(0 이면 한 번에)")
+    ap.add_argument("--base", action="store_true", help="train: 공식 bf16 원본 + UC LoRA 위에서 학습(역할 train_lora_base)")
     ap.add_argument("--force", action="store_true", help="train: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험)")
     ap.add_argument("--no-register", action="store_true", help="train: 학습만 하고 작품에 등록하지 않는다(시간·메모리 시험)")
     a = ap.parse_args()
@@ -551,7 +556,8 @@ def main():
         for kv in a.set:
             k, v = kv.split("=", 1)
             ov[k] = {"true": True, "false": False}.get(v.lower(), int(v) if v.isdigit() else float(v) if re.fullmatch(r"[\d.e-]+", v) else v)
-        train(series, a.who, a.steps, a.rank, a.lr, a.panels, a.res, register=not a.no_register, reuse_data=a.reuse_data, overrides=ov, force=a.force, chunk=a.chunk)
+        train(series, a.who, a.steps, a.rank, a.lr, a.panels, a.res, register=not a.no_register, reuse_data=a.reuse_data, overrides=ov, force=a.force, chunk=a.chunk,
+              role="train_lora_base" if a.base else "train_lora")
     elif a.cmd == "set":
         print(set_entry(series, a.who, {"file": a.file, "strength": a.strength, "on": False if a.off else True}))
 

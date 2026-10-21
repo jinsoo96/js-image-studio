@@ -84,11 +84,12 @@ def main():
     ap.add_argument("--panels", type=int, default=4)
     ap.add_argument("--seed", type=int, default=77)
     ap.add_argument("--files", help="checkpoints 대신 이 파일들(쉼표)")
+    ap.add_argument("--entry", help="중간 파일 목록을 이 등록 칸에서(예 _style@base: 공식 bf16 원본에서 학습한 것)")
     ap.add_argument("--full", action="store_true", help="터보 없이 40스텝(최종 확인용, 느림)")
     a = ap.parse_args()
     series = Path(a.series).resolve()
     who = lora.STYLE if a.who in ("style", "그림체") else a.who
-    entry = lora.registry(series).get(who) or {}
+    entry = lora.registry(series).get(a.entry or who) or {}
     files = a.files.split(",") if a.files else [c["file"] for c in entry.get("checkpoints") or []] or [entry.get("file")]
     files = [f for f in files if f]
     if not files:
@@ -97,7 +98,8 @@ def main():
     picks = held_out(series, who, a.panels)
     if not picks:
         sys.exit("학습에 안 쓴 본편 컷이 없다")
-    cols = [("off", None, 0.0)] + [(f"ev_{Path(f).stem.split('_steps_')[0].split('_')[-1]}_{s:g}", f, s) for f in files for s in strengths]
+    # 결과 폴더 이름에 파일 앞부분(d18style_500 · d18style_base_500)을 넣어 다른 학습의 같은 스텝과 섞이지 않게
+    cols = [("off", None, 0.0)] + [(f"ev_{Path(f).stem.split('_steps_')[0]}_{s:g}", f, s) for f in files for s in strengths]
     by_ep = {}
     for ep, p in picks:
         by_ep.setdefault(ep, []).append(p["id"])
@@ -113,7 +115,8 @@ def main():
             subprocess.run(cmd, cwd=ROOT, env=env, check=False)
     font = ImageFont.truetype("C:/Windows/Fonts/malgunbd.ttf", 16)
     W = 320
-    heads = [("정답(학습에 안 쓴 원본)", "hf")] + [("LoRA 끔" if f is None else f"{var.split('_')[1]}스텝 · {s:g}", var) for var, f, s in cols]
+    heads = [("정답(학습에 안 쓴 원본)", "hf")] + [("LoRA 끔" if f is None else f"{Path(f).stem.split('_steps_')[0].split('_')[-1]}스텝 · {s:g}", var)
+                                                for var, f, s in cols]
     rows = []
     for ep, p in picks:
         row = []
@@ -132,7 +135,8 @@ def main():
         for k, c in enumerate(r):
             sheet.paste(c, (k * (W + 4), y))
         y += max(c.height for c in r) + 6
-    out = ROOT / "exports" / time.strftime("%Y-%m-%d") / "비교" / f"{series.name}_{a.who}_LoRA_중간파일{'_40스텝' if a.full else ''}.jpg"
+    tag = a.entry.replace("@", "_") if a.entry else a.who
+    out = ROOT / "exports" / time.strftime("%Y-%m-%d") / "비교" / f"{series.name}_{tag}_LoRA_중간파일{'_40스텝' if a.full else ''}.jpg"
     out.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(out, quality=86)
     print(out)

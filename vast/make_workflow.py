@@ -455,6 +455,11 @@ def set_turbo_sigmas(sig: str = QWEN21_TURBO_SIGMAS) -> list:
 TRAIN_MODELS = {
     "uc": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": UNET, "pre_loras": [], "qwen_cache": True, "shift": None, "bypass": True,
            "label": "Qwen Image 2.1 UC"},
+    # 공식 bf16 원본 + UC LoRA 위에서 학습해 UC 판에 붙인다(draw). 조사(2026-10-21): fp8 원본 위 학습은 크게 망가졌다는 보고,
+    # UC 는 공식 가중치 + 33.6MB uncensored LoRA 를 합친 것(제작자 답) → 같은 LoRA 를 먼저 얹고 학습하면 UC 와 같은 바탕
+    "uc_base": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": "qwen_image_2.1_bf16.safetensors",
+                "pre_loras": [("qwen-image-2.1-uncensored-lora.safetensors", 1.0, "UC LoRA (그리는 UC 판과 같은 바탕)")], "qwen_cache": True,
+                "shift": None, "bypass": False, "label": "Qwen Image 2.1 공식 bf16 + UC LoRA", "draw": "uc", "role": "train_lora_base"},
     "moss": {"clip": ("qwen3.5_9b_int8_convrot.safetensors", "moss_image"), "vae": "flux2-vae_small.safetensors", "unet": "moss_image_sft_bf16.safetensors",
              "pre_loras": [("moss-image-uncensored-lora-comfy.safetensors", 1.0, "UC LoRA (그리는 판과 같게 그 위에서 학습)")], "qwen_cache": False,
              "shift": 1.5, "bypass": False, "label": "MOSS-Image SFT + UC"},
@@ -553,7 +558,7 @@ def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=1e-4, model="u
     g.link(train, 0, save, "lora")
     g.link(train, 1, loss, "loss")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": f"LoRA 학습(②, {tm['label']}, {node_cls})"}
+    wf["extra"]["webtoon"] = {"model": tm.get("draw", model), "role": tm.get("role", "train_lora"), "label": f"LoRA 학습(②, {tm['label']}, {node_cls})"}
     if TRAIN_DISABLED:
         wf["extra"]["webtoon"]["disabled"] = TRAIN_DISABLED
     return wf
@@ -567,7 +572,10 @@ def main():
     if sys.argv[1:2] == ["train"]:  # 인물 LoRA 학습 워크플로우 둘(① 데이터 ② 학습, 2026-10-19 사용자 "로라 쓰는 거 필요해, 노드 만들어서 워크플로우 구성해서, UC 기반")
         c = Comfy()
         mdl = sys.argv[2] if len(sys.argv) > 2 else "uc"  # make_workflow.py train moss → MOSS 판 학습 워크플로우 둘
-        for name, wf in ((f"webtoon_lora_dataset_{mdl}.json", build_lora_dataset(model=mdl)), (f"webtoon_train_lora_{mdl}.json", build_train(model=mdl))):
+        pairs = [(f"webtoon_train_lora_{mdl}.json", build_train(model=mdl))]
+        if "draw" not in TRAIN_MODELS[mdl]:  # 다른 판에 붙이는 학습(uc_base)은 그 판의 학습 데이터 워크플로우를 같이 쓴다
+            pairs.insert(0, (f"webtoon_lora_dataset_{mdl}.json", build_lora_dataset(model=mdl)))
+        for name, wf in pairs:
             c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
             (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
             print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
