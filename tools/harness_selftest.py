@@ -60,7 +60,12 @@ def run_check(case: dict, img: Path) -> list:
         sc = ep / "panels_spec.json"
         layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("scene") or p.get("location") or "", "") if sc.exists() else "")
         out = R.run_checks(series, img, p, layout, _speakers(series, ep, p["id"]), only=set(arg.split(",")))
-        return [f"{k}: {x}" for k, v in out.items() for x in v]
+        extra = []
+        if set(arg.split(",")) & {"unheld", "scale", "count_each", "props"}:  # 소품 크기·개수·뜬 것은 검출기 규칙도(tools/hand_check.py)
+            from hand_check import check as hand_check
+            hc = hand_check(img, p.get("chars"))
+            extra = [x for x in hc["strong"] + hc["review"] if not x.startswith(("손이", "얼굴 없이"))]
+        return [f"{k}: {x}" for k, v in out.items() for x in v] + extra
     raise ValueError(f"모르는 검사 {case['check']}")
 
 
