@@ -1,5 +1,5 @@
 {
- "id": "554cf82f-f752-48f9-8b88-172fb24b28ee",
+ "id": "11d6a09f-fbb3-440b-b430-c4e582a19fe2",
  "revision": 0,
  "last_node_id": 8,
  "last_link_id": 8,
@@ -193,14 +193,14 @@
   },
   {
    "id": 6,
-   "type": "TrainLoraNode",
+   "type": "WebtoonTrainLora",
    "pos": [
     420,
     50
    ],
    "size": [
     360,
-    560
+    620
    ],
    "flags": {},
    "order": 5,
@@ -247,19 +247,19 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "TrainLoraNode"
+    "Node name for S&R": "WebtoonTrainLora"
    },
    "widgets_values": [
     1,
     1,
-    1500,
-    0.0001,
+    500,
+    5e-05,
     16,
     "AdamW",
     "MSE",
     0,
     "bf16",
-    "bf16",
+    "fp32",
     false,
     "LoRA",
     true,
@@ -267,7 +267,10 @@
     false,
     "[None]",
     true,
-    true
+    true,
+    "rank",
+    true,
+    "velocity"
    ]
   },
   {
@@ -297,7 +300,7 @@
    },
    "widgets_values": [
     "loras/webtoon/lora",
-    1500
+    500
    ]
   },
   {
@@ -436,7 +439,7 @@
   "webtoon": {
    "model": "uc",
    "role": "train_lora",
-   "label": "인물 LoRA 학습(②, Qwen Image 2.1 UC, 서버 기본 학습 노드)"
+   "label": "LoRA 학습(②, Qwen Image 2.1 UC, WebtoonTrainLora)"
   }
  },
  "version": 0.4

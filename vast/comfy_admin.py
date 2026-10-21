@@ -142,6 +142,28 @@ def _put_text(remote: str, text: str):
                            timeout=60, context=_ctx)
 
 
+NODES_DIR = ROOT / "vast" / "server_nodes"  # 작업실이 서버 custom_nodes 에 올리는 우리 노드(코어 파일은 고치지 않는다)
+
+
+def install_nodes() -> dict:
+    """vast/server_nodes/<이름>/*.py 를 서버 ComfyUI custom_nodes/<이름>/ 에 올린다. 서버 것과 같으면 건너뛴다.
+    새로 올렸으면 changed=True: 재시작해야 노드가 뜬다(2026-10-21 WebtoonTrainLora)."""
+    out, changed = {}, False
+    for d in sorted(x for x in NODES_DIR.iterdir() if x.is_dir()) if NODES_DIR.exists() else []:
+        for f in sorted(d.glob("*.py")):
+            remote = f"workspace/ComfyUI/custom_nodes/{d.name}/{f.name}"
+            text = f.read_text(encoding="utf-8")
+            try:
+                same = read_file(remote) == text
+            except Exception:  # noqa: BLE001  없으면
+                same = False
+            if not same:
+                _put_text(remote, text)
+                changed = True
+            out[f"{d.name}/{f.name}"] = "same" if same else "uploaded"
+    return {"nodes": out, "changed": changed}
+
+
 def patches(apply: bool = True) -> dict:
     """server_patches/*.diff 를 서버 ComfyUI 에: 이미 붙었으면 그대로, 붙일 수 있으면 붙이고, 상류에 들어갔거나 안 맞으면 건너뛴다.
     붙인 뒤에는 재시작해야 반영된다(돌려주는 changed)."""
@@ -198,6 +220,11 @@ def main():
         print(json.dumps(restart("force" in sys.argv), ensure_ascii=False))
     elif cmd == "patch":
         r = patches(apply="check" not in sys.argv)
+        if r["changed"] and "norestart" not in sys.argv:
+            r.update(restart(force="force" in sys.argv))
+        print(json.dumps(r, ensure_ascii=False))
+    elif cmd == "nodes":  # 우리 커스텀 노드(vast/server_nodes) 올리기, 바뀌었으면 재시작
+        r = install_nodes()
         if r["changed"] and "norestart" not in sys.argv:
             r.update(restart(force="force" in sys.argv))
         print(json.dumps(r, ensure_ascii=False))

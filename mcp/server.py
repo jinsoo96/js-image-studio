@@ -1197,21 +1197,23 @@ def loras(series: str = "") -> str:
 
 
 @mcp.tool()
-def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learning_rate: float = 0.0, panels: int = 12) -> str:
-    """인물 LoRA 를 vast 에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로). 학습 데이터는 도구가 만든다: 표정 은행(정면 상반신) + 기본 전신 +
-    그 인물 혼자 나온 잘 된 컷 panels 장(그림 보는 모델이 사람 한 명·얼굴이 보이는 것만 고른다), 캡션 맨 앞에 trigger(작품_인물).
-    서버 워크플로우(역할 train_lora, 화면에서 값을 고칠 수 있다)로 학습하고, 끝나면 작품의 lora/loras.json 에 등록해 그 판으로 그리는 컷에 자동으로 붙는다.
-    steps·rank·learning_rate 가 0 이면 워크플로우 값(기본 1500 · 16 · 0.0001). 시간은 loras() 의 train_s(앞서 학습한 시간)를 참고, 처음이면 1~3시간.
-    학습 중엔 같은 GPU 로 그리기가 느려진다. 끝나면 vast_draw 로 몇 컷 그려 보고 set_lora 로 강도를 맞추거나 끈다."""
+def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learning_rate: float = 0.0, panels: int = 0, chunk: int = 500) -> str:
+    """LoRA 를 vast 에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로),
+    style 이면 그 작품의 그림체 LoRA(본편 컷으로 학습, 사람 없는 컷까지 모든 컷에 붙는다). 학습 데이터는 도구가 만든다:
+    인물은 표정 은행(정면 상반신) + 기본 전신 + 그 인물 혼자 나온 잘 된 컷 panels 장(기본 12), 그림체는 본편 컷 panels 장(기본 100, 샷 종류를 고루, 종류마다 둘은 평가용으로 남김).
+    서버 워크플로우(역할 train_lora, WebtoonTrainLora: alpha=rank · 블록 안 층만 · 속도 손실 · LoRA fp32, 화면에서 값을 고칠 수 있다)로 학습한다.
+    steps 는 전체 스텝(0 이면 인물 1500 · 그림체 3000), rank·learning_rate 가 0 이면 워크플로우 값(16 · 5e-5).
+    chunk 스텝마다 저장하고 이어 학습해 중간 파일이 남는다: 이때는 꺼 둔 채 등록되니 lora_compare 로 견줘 고른 뒤 set_lora(file=…, on=True).
+    chunk=0 이면 한 번에 학습하고 바로 켠다. 시간은 loras() 의 train_s 참고(그림체 100장 3000스텝은 약 2시간). 학습 중엔 같은 GPU 로 그리기가 기다린다."""
     sys.path.insert(0, str(VAST))
     import lora as L
     sd = _series(series)
     who = [c.strip() for c in character.split(",") if c.strip()]
-    who = L.people(sd) if who == ["all"] else who
-    bad = [c for c in who if c not in L.people(sd)]
+    who = L.people(sd) if who == ["all"] else [L.STYLE if c in ("style", "그림체") else c for c in who]
+    bad = [c for c in who if c != L.STYLE and c not in L.people(sd)]
     if bad or not who:
-        return _fail("unknown_character", given=character, candidates=L.people(sd) + ["all"],
-                     reason="설정에 있고 표정 은행(vast_make_assets)이 있는 인물만 학습한다. 여럿은 쉼표로, 전부는 all")
+        return _fail("unknown_character", given=character, candidates=L.people(sd) + ["all", "style"],
+                     reason="설정에 있고 표정 은행(vast_make_assets)이 있는 인물, 또는 style(그림체)만 학습한다. 여럿은 쉼표로, 전부는 all")
     tw = L.training_block(sd)
     if tw:  # 학습 워크플로우 데이터에 막아 둔 이유(extra.webtoon.disabled)가 있으면 작업을 띄우지 않는다
         return _fail("training_disabled", given=character, reason=tw,
@@ -1219,13 +1221,34 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
     _ensure_idle(sd)
     steps_list = []
     for c in who:  # 여럿이면 한 작업 안에서 차례로(공용 GPU 큐를 한 번에 하나만 쓴다)
-        cmd = [PY, str(VAST / "lora.py"), "train", str(sd), c, "--panels", str(panels)]
-        for flag, v in (("--steps", steps), ("--rank", rank), ("--lr", learning_rate)):
+        style = c == L.STYLE
+        cmd = [PY, str(VAST / "lora.py"), "train", str(sd), c, "--panels", str(panels or (100 if style else 12)),
+               "--steps", str(steps or (3000 if style else 1500)), "--chunk", str(chunk)]
+        for flag, v in (("--rank", rank), ("--lr", learning_rate)):
             if v:
                 cmd += [flag, str(v)]
-        steps_list.append({"label": f"인물 LoRA 학습({c})", "cmd": cmd})
+        steps_list.append({"label": f"{'그림체' if style else '인물'} LoRA 학습({c})", "cmd": cmd})
     job = _start_job("lora_train", sd, steps_list)
-    return json.dumps({"job": job, "next": f"job_wait('{job}') 를 되풀이(학습은 오래 걸린다), 끝나면 loras('{sd.name}')"}, ensure_ascii=False)
+    nxt = f"job_wait('{job}') 를 되풀이(학습은 오래 걸린다), 끝나면 " + (f"lora_compare('{sd.name}', …) 로 중간 파일을 견줘 고르고 set_lora" if chunk else f"loras('{sd.name}')")
+    return json.dumps({"job": job, "next": nxt}, ensure_ascii=False)
+
+
+@mcp.tool()
+def lora_compare(series: str, character: str = "style", strengths: str = "1.0", panels: int = 4, files: str = "") -> str:
+    """학습한 LoRA 의 중간 파일들(lora_train 의 chunk 마다 저장된 것, loras() 의 checkpoints)을 같은 시드로 그려 한 장에 놓는다(작업으로 돈다).
+    학습에 쓰지 않은 본편 컷을 골라 정답(원본) | LoRA 끔 | 중간 파일 × strengths(쉼표, 예 0.6,0.8,1.0) 순서. 그림체(style)는 클로즈업·둘 이상·배경·와이드를 고루.
+    files 를 주면(쉼표) 그 파일들만. 결과는 exports/<날짜>/비교/ 의 jpg: 사람이 보고 고른 파일을 set_lora(series, character, file=…, on=True) 로 켠다.
+    너무 배운 파일은 데이터 컷을 베끼거나 얼룩이 지고, 덜 배운 파일은 LoRA 끔과 같아 보인다. 그리는 동안 loras.json 을 잠깐 바꿨다가 되돌린다."""
+    sys.path.insert(0, str(VAST))
+    import lora as L
+    sd = _series(series)
+    who = L.STYLE if character in ("style", "그림체") else character
+    if who not in L.registry(sd):
+        return _fail("no_lora", given=character, registered=sorted(L.registry(sd)), reason="학습한 LoRA 가 없다: lora_train 으로 학습")
+    _ensure_idle(sd)
+    cmd = [PY, str(VAST / "lora_eval.py"), str(sd), character, "--strengths", strengths, "--panels", str(panels)] + (["--files", files] if files else [])
+    job = _start_job("lora_compare", sd, [{"label": f"LoRA 중간 파일 견주기({character})", "cmd": cmd}])
+    return json.dumps({"job": job, "next": f"job_wait('{job}'), 끝나면 로그 마지막 줄의 jpg 를 보고 set_lora"}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1248,7 +1271,8 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
     """vast ComfyUI 서버 관리(공용 서버). action:
     status(버전·실행 인자·VRAM·큐, vast 인스턴스, 판마다 모델 파일이 있나) · downloads(fetch_model 로 받는 중인 모델) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
     · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고, 덧댄 수정을 걷어 내고, ComfyUI-Manager 로 바꾼 뒤
-    수정을 다시 붙이고 재시작해 상태를 돌려준다) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654).
+    수정을 다시 붙이고 재시작해 상태를 돌려준다) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654)
+    · nodes(우리 노드 vast/server_nodes 를 custom_nodes 에 올린다, 예: WebtoonTrainLora. 바뀌었으면 재시작). switch 뒤에는 nodes 도 다시 확인한다.
     restart·switch 는 큐에 작업이 있으면 하지 않는다(force=True 로만). 새 모델(예: 새 판)에 더 높은 ComfyUI 가 필요하면 versions → switch → draw_models 로 확인."""
     sys.path.insert(0, str(VAST))
     import comfy_admin as A
@@ -1267,6 +1291,11 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
             return json.dumps({"log": A.logs(old, max(10, min(lines, 400)))}, ensure_ascii=False)
         if action == "restart":
             return json.dumps(A.restart(force), ensure_ascii=False)
+        if action == "nodes":  # 우리 노드(vast/server_nodes, 예 WebtoonTrainLora)를 custom_nodes 에 올린다. 새로 올렸으면 재시작해야 뜬다
+            r = A.install_nodes()
+            if r["changed"]:
+                r.update(A.restart(force))
+            return json.dumps(r, ensure_ascii=False)
         if action == "patch":  # 상류에 아직 안 들어간 수정(vast/server_patches)을 보고 붙인다. 새로 붙이면 재시작
             r = A.patches(apply=True)
             if r["changed"]:
@@ -1278,7 +1307,7 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
             return json.dumps(A.switch(version, force), ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         return _fail("comfy_server_failed", given={"action": action, "version": version}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return _fail("unknown_action", given=action, candidates=["status", "downloads", "versions", "logs", "restart", "switch", "patch"])
+    return _fail("unknown_action", given=action, candidates=["status", "downloads", "versions", "logs", "restart", "switch", "patch", "nodes"])
 
 
 @mcp.tool()

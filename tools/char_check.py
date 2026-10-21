@@ -54,8 +54,8 @@ def differences(f):
     return metr.run(None, {"input": f.astype(np.float32)})[0]
 
 
-def char_crop(img, pick=None):
-    """얼굴 둘레(머리카락·어깨까지, 얼굴 폭 3배)를 정사각으로. pick = 왼쪽부터 몇 번째 얼굴(없으면 제일 큰 얼굴). 못 찾으면 None."""
+def char_box(img, pick=None, scale: float = 3.0):
+    """얼굴 둘레(머리카락·어깨까지, 얼굴 폭 scale 배) 정사각 상자 (x0, y0, x1, y1). pick = 왼쪽부터 몇 번째 얼굴(없으면 제일 큰 얼굴). 못 찾으면 None."""
     from face_detect import detect
     faces = detect(img)
     if not faces:
@@ -65,10 +65,15 @@ def char_crop(img, pick=None):
         x0, y0, x1, y1, _ = faces[min(pick, len(faces) - 1)]
     else:
         x0, y0, x1, y1, _ = max(faces, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-    cx, cy, s = (x0 + x1) / 2, (y0 + y1) / 2 + (y1 - y0) * 0.35, max(x1 - x0, y1 - y0) * 3.0
+    cx, cy, s = (x0 + x1) / 2, (y0 + y1) / 2 + (y1 - y0) * 0.35, max(x1 - x0, y1 - y0) * scale
     W, H = img.size
-    box = (int(max(0, cx - s / 2)), int(max(0, cy - s / 2)), int(min(W, cx + s / 2)), int(min(H, cy + s / 2)))
-    return img.crop(box)
+    return (int(max(0, cx - s / 2)), int(max(0, cy - s / 2)), int(min(W, cx + s / 2)), int(min(H, cy + s / 2)))
+
+
+def char_crop(img, pick=None):
+    """얼굴 둘레(머리카락·어깨까지, 얼굴 폭 3배)를 정사각으로 자른 그림. 못 찾으면 None."""
+    box = char_box(img, pick)
+    return img.crop(box) if box else None
 
 
 def references(series_name):

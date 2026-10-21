@@ -6,6 +6,7 @@ comfy_panel.py 가 큐에 넣는 그래프와 같은 구성(Qwen Image 2.1 + 참
 """
 import argparse
 import json
+import re
 import sys
 import urllib.parse
 import uuid
@@ -421,6 +422,36 @@ TRAIN_DISABLED = ""
 # 잠재 꼴이 Flux2(128채널·1/16)라 Qwen 데이터를 쓸 수 없고, Qwen 전용 앞부분 캐시는 빼고, 그리는 판과 같게 UC LoRA 위에서 학습한다.
 # ModelSamplingAuraFlow shift 1.5: 기본 shift 5 로는 σ<0.5(얼굴·세부를 정하는 낮은 노이즈) 스텝이 1/6 뿐이라 닮음이 덜 배운다는 보고가 있다.
 # ModelSamplingSD3 를 넣으면 시간값에 ×1000 이 두 번 걸려 망가진다(ComfyUI #17119)
+# 공식 Qwen-Image-2.1 Turbo 8스텝 시그마(comfyui-wiki.com 2026-10-09, huggingface.co/Comfy-Org/Qwen-Image-2.1/discussions/22). 터보 LoRA 도 같은 증류에서 뽑았다.
+# simple 스케줄러로 그리면 노이즈가 덜 걷혀 피부·배경에 잡티가 남았다(2026-10-21 외출 5컷 같은 시드 비교, exports/2026-10-21/비교/외출_터보시그마_비교.jpg)
+QWEN21_TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0"
+
+
+def set_turbo_sigmas(sig: str = QWEN21_TURBO_SIGMAS) -> list:
+    """서버 webtoon_*.json 중 Qwen 2.1 터보 LoRA 노드가 있는 워크플로우의 extra.webtoon.sigmas.turbo 를 sig 로 적는다(빈 글이면 뺀다).
+    그리기 도구가 이 값으로 첫 샘플러를 바꿔 그린다(saved_workflow._custom_sigmas). 바꾼 이름 목록."""
+    c = Comfy()
+    done = []
+    for name in [n for n in c.req("/api/userdata?dir=workflows") if isinstance(n, str) and re.fullmatch(r"webtoon_.+\.json", n)]:
+        ui = json.loads(c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe=""), raw=True))
+        if not any(n.get("type", "").startswith("LoraLoader") and "qwen_image_2.1_turbo" in str((n.get("widgets_values") or [""])[0])
+                   for n in ui.get("nodes", [])):
+            continue
+        meta = ui.setdefault("extra", {}).setdefault("webtoon", {})
+        sg = dict(meta.get("sigmas") or {})
+        if sig:
+            sg["turbo"] = sig
+        else:
+            sg.pop("turbo", None)
+        if sg:
+            meta["sigmas"] = sg
+        else:
+            meta.pop("sigmas", None)
+        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
+        done.append(name)
+    return done
+
+
 TRAIN_MODELS = {
     "uc": {"clip": (CLIP, "qwen_image"), "vae": VAE, "unet": UNET, "pre_loras": [], "qwen_cache": True, "shift": None, "bypass": True,
            "label": "Qwen Image 2.1 UC"},
@@ -456,7 +487,10 @@ def build_lora_dataset(folder="3d", model="uc"):
     return wf
 
 
-def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="uc"):
+TRAIN_NODE = "WebtoonTrainLora"  # 서버 custom_nodes/webtoon_train_lora(vast/server_nodes). 없으면 기본 TrainLoraNode
+
+
+def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=5e-5, model="uc"):
     """② 인물 LoRA 학습 워크플로우(화면 형식): 저장된 학습 데이터 → 해상도 버킷 → TrainLoraNode → SaveLoRA · 손실 그래프.
     TrainLoraNode 위젯 순서는 서버 노드 정의(object_info)에서 읽는다(버전마다 칸이 늘었다)."""
     from saved_workflow import _node_spec, _widget_names
@@ -467,11 +501,21 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
           # checkpoint_depth 2 = 트랜스포머 블록 하나하나. 1 은 모델 전체를 한 덩어리로 감싸(nodes_train.find_modules_at_depth 가 루트에서 1 을 센다)
           # 절약이 없어 같은 31GB 초과였다
           "gradient_checkpointing": True, "checkpoint_depth": 2, "offloading": False, "existing_lora": "[None]", "bucket_mode": True,
-          "bypass_mode": TRAIN_MODELS[model]["bypass"]}  # bypass 는 fp8(UC) 가중치에만. MOSS 는 bf16 이라 끈다
-    names = _widget_names(_node_spec("TrainLoraNode"))
+          "bypass_mode": TRAIN_MODELS[model]["bypass"],  # bypass 는 fp8(UC) 가중치에만. MOSS 는 bf16 이라 끈다
+          # 2026-10-21 조사·시험(worklogs/2026-10-21-uc-optimize.md): 기본 노드는 alpha 1 고정(효과 1/rank)·블록 밖 전역 층과 norm·bias 까지
+          # 학습·x0 손실(낮은 노이즈 무시)이라 그림체가 거의 안 배워지고 얼룩이 났다 → 우리 노드로 alpha=rank·블록 안 Linear 만·속도 손실,
+          # LoRA 가중치는 fp32(bf16 이면 작은 갱신이 반올림에 사라진다), 학습률 5e-5(alpha=rank 기준, 다른 트레이너 1e-4 의 한 단계 아래)
+          "alpha_mode": "rank", "blocks_only": True, "loss_mode": "velocity"}
+    node_cls = TRAIN_NODE if _node_spec(TRAIN_NODE) else "TrainLoraNode"
+    if node_cls == TRAIN_NODE:
+        tv["lora_dtype"] = "fp32"
+    else:
+        lr = 1e-4
+        tv["learning_rate"] = lr
+    names = _widget_names(_node_spec(node_cls))
     miss = [n for n in names if n and n not in tv]
     if miss:
-        sys.exit(f"서버 TrainLoraNode 에 모르는 칸이 있다: {miss}")
+        sys.exit(f"서버 {node_cls} 에 모르는 칸이 있다: {miss}")
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 700), [TRAIN_GUIDE], title="사용법")
     g.group("1. 모델 · 학습 데이터", 0, 0, 380, 470, "#3f789e")
@@ -493,7 +537,7 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
     bucket = g.node("ResolutionBucket", (20, 380), (340, 60), [], inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
                     outputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")])
     g.group("2. 학습", 400, 0, 760, 620, "#b58b2a")
-    train = g.node("TrainLoraNode", (420, 50), (360, 560), [tv[n] for n in names if n],
+    train = g.node(node_cls, (420, 50), (360, 620), [tv[n] for n in names if n],
                    inputs=[("model", "MODEL"), ("latents", "LATENT"), ("positive", "CONDITIONING")],
                    outputs=[("lora", "LORA_MODEL"), ("loss_map", "LOSS_MAP"), ("steps", "INT")])
     save = g.node("SaveLoRA", (800, 50), (340, 82), ["loras/webtoon/lora", steps], inputs=[("lora", "LORA_MODEL")])
@@ -509,13 +553,15 @@ def build_train(dataset="webtoon/dataset", steps=1500, rank=16, lr=1e-4, model="
     g.link(train, 0, save, "lora")
     g.link(train, 1, loss, "loss")
     wf = g.dump()
-    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": f"인물 LoRA 학습(②, {tm['label']}, 서버 기본 학습 노드)"}
+    wf["extra"]["webtoon"] = {"model": model, "role": "train_lora", "label": f"LoRA 학습(②, {tm['label']}, {node_cls})"}
     if TRAIN_DISABLED:
         wf["extra"]["webtoon"]["disabled"] = TRAIN_DISABLED
     return wf
 
 
 def main():
+    if sys.argv[1:2] == ["sigmas"]:  # make_workflow.py sigmas [off] → 터보 워크플로우에 공식 시그마를 적는다(off 면 뺀다)
+        return print("터보 시그마", "뺌" if sys.argv[2:3] == ["off"] else "적음", set_turbo_sigmas("" if sys.argv[2:3] == ["off"] else QWEN21_TURBO_SIGMAS))
     if sys.argv[1:2] == ["library"]:
         return library("--force" in sys.argv)
     if sys.argv[1:2] == ["train"]:  # 인물 LoRA 학습 워크플로우 둘(① 데이터 ② 학습, 2026-10-19 사용자 "로라 쓰는 거 필요해, 노드 만들어서 워크플로우 구성해서, UC 기반")

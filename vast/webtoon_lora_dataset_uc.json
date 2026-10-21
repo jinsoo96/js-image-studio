@@ -1,5 +1,5 @@
 {
- "id": "98804733-5600-43cb-920a-cd8bb4018fe7",
+ "id": "8fe660fd-af8a-47c1-b371-37e3e7dca81b",
  "revision": 0,
  "last_node_id": 6,
  "last_link_id": 6,
@@ -321,7 +321,7 @@
   "webtoon": {
    "model": "uc",
    "role": "lora_dataset",
-   "label": "인물 LoRA 학습 데이터 만들기(①, 학습은 webtoon_train_lora_uc)"
+   "label": "인물 LoRA 학습 데이터 만들기(①, Qwen Image 2.1 UC, 학습은 webtoon_train_lora_uc)"
   }
  },
  "version": 0.4

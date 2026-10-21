@@ -5,6 +5,8 @@
                            시험: 0.6 은 배치를 지켰고 0.4·없이는 좌우가 바뀌었다. 0.55 로 낮췄더니 터보 8스텝에서 또 바뀌어(외출 p016) 0.7 · 끝 0.6.
   webtoon_next_scene_uc    (role next_scene)  편집 + Next-Scene LoRA 0.8: 같은 사람이 이어 나오는 클로즈업을 앞 컷에서 잇는다(얼굴·옷·배경·그림체 유지).
   webtoon_asset_sheet_uc   (role asset_sheet) 편집 + 캐릭터 시트 LoRA 1.0: 서 있는 전신 → 얼굴 + 앞·뒤·옆·3/4 전신 시트(터보 끔 25스텝, 작성자 권장).
+  webtoon_head_swap_uc     (role head_swap)   편집 + BFS head swap LoRA 1.0(옆길): <image1> 컷의 얼굴·머리만 <image2> 인물로, 시선·고개·표정은 컷 그대로
+                           (2026-10-21 조사: 얼굴 고치기가 정면 참고 그림을 따라 시선을 카메라로 돌렸다. BFS 는 시선·고개를 image1 에서 가져오라고 학습됨, MIT).
 
     .venv/Scripts/python vast/aux_roles.py          세 워크플로우를 서버에 저장(vast/ 에도 사본)
 """
@@ -21,6 +23,7 @@ from saved_workflow import _node_spec, _widget_names, load_ui, models  # noqa: E
 CONTROLNET = "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
 NEXT_SCENE = "qwen21_next_scene_step2500.safetensors"
 SHEET = "qwen21_character_sheet_edit_e9.safetensors"
+HEAD_SWAP = "bfs_head_v1.1_qwen_2.1.safetensors"  # huggingface.co/Alissonerdx/BFS-Best-Face-Swap
 
 
 def _widgets(cls: str, vals: dict) -> list:
@@ -94,9 +97,9 @@ def layout_lock(base: str) -> dict:
     return ui
 
 
-def lora_edit(base: str, lora: str, strength: float, role: str, label: str, steps: int) -> dict:
+def lora_edit(base: str, lora: str, strength: float, role: str, label: str, steps: int, loader: str = "LoraLoaderModelOnly") -> dict:
     ui = load_ui(base)
-    lz = _add(ui, "LoraLoaderModelOnly", (-400, 400), {"lora_name": lora, "strength_model": strength}, [("model", "MODEL")], [("MODEL", "MODEL")], title=label)
+    lz = _add(ui, loader, (-400, 400), {"lora_name": lora, "strength_model": strength}, [("model", "MODEL")], [("MODEL", "MODEL")], title=label)
     _insert_before_cache(ui, lz)
     ks = _node(ui, "KSampler")
     names = _widget_names(_node_spec("KSampler"))  # 시드 뒤에 이름 없는 칸(control_after_generate)이 낀다: 자리로 고친다
@@ -115,7 +118,11 @@ def main():
                      ("webtoon_next_scene_uc.json", lora_edit(m["edit"], NEXT_SCENE, 0.8, "next_scene",
                                                                "앞 컷에서 잇기 (Next-Scene LoRA 0.8, 글 앞에 'Next Scene:')", 25)),
                      ("webtoon_asset_sheet_uc.json", lora_edit(m["edit"], SHEET, 1.0, "asset_sheet",
-                                                                "캐릭터 시트 LoRA (서 있는 전신 → 얼굴 + 앞·뒤·옆·3/4 전신, 25스텝)", 25))):
+                                                                "캐릭터 시트 LoRA (서 있는 전신 → 얼굴 + 앞·뒤·옆·3/4 전신, 25스텝)", 25)),
+                     # 옆길(bypass): fp8 가중치에 섞으면 학습한 LoRA 가 얼룩졌다(2026-10-21). 얼굴 편집은 터보 말고 25스텝(조사: 4~8스텝은 정체성 유지가 약함)
+                     ("webtoon_head_swap_uc.json", lora_edit(m["edit"], HEAD_SWAP, 1.0, "head_swap",
+                                                              "얼굴 바꾸기 BFS head swap 1.0 (<image1> 컷 · <image2> 얼굴, 25스텝)", 25,
+                                                              loader="LoraLoaderBypassModelOnly"))):
         c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
         (ROOT / "vast" / name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
         print("서버 저장", name, "노드", len(ui["nodes"]))

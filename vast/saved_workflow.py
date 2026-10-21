@@ -21,9 +21,14 @@ from comfy_client import Comfy
 # 판의 성질은 워크플로우의 extra.webtoon 에 적는다(없으면 이름·노드에서 읽는다):
 #   name(판 이름, 없으면 파일 이름의 <이름>) · label(사람이 읽는 설명) · refs(참고 그림을 받나, 기본 True) · edit(고치기 워크플로우 파일)
 #   · default(true 면 작품에 판이 없을 때 쓰는 기본 판) · cfg {turbo, full} · steps {turbo, full}
+#   · sigmas {turbo, full}: "1.0, 0.97, …, 0" 처럼 적으면 첫 샘플러(KSampler)를 그 시그마로 그린다(SamplerCustomAdvanced + ManualSigmas, _custom_sigmas)
 # 고치기 워크플로우는 판의 edit → webtoon_edit_<이름>.json → 기본 판의 것 순서로 찾는다.
 # 서버에 닿지 않으면 마지막으로 읽은 목록, 그것도 없으면 OFFLINE 의 이름만(그리기는 서버가 있어야 하니 그때는 어차피 실패한다).
 OFFLINE = {"uc": ("webtoon_vertical_qwen21_uc.json", "webtoon_edit_qwen21_uc.json")}
+# 시험용으로 워크플로우의 sigmas 를 덮는다: off(워크플로우 KSampler 그대로) · lq(스케줄러만 linear_quadratic) · 숫자 목록(그 값으로)
+SIGMAS_ENV = os.environ.get("WEBTOON_SIGMAS", "").strip()
+# 터보 LoRA 도 옆길로(시험용, 1 이면). 기본은 워크플로우대로 섞기(LoraLoaderModelOnly): 학습한 LoRA 는 옆길이 깨끗했지만 터보는 아직 견주지 않았다
+TURBO_BYPASS = os.environ.get("WEBTOON_TURBO_BYPASS", "0") == "1"
 _models, _models_at = {}, 0.0
 MODELS_TTL = 60.0
 
@@ -218,6 +223,8 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
             if n["type"] == "LoraLoaderModelOnly" and ("turbo" in str((n.get("widgets_values") or [""])[0]).lower()
                                                         or re.search(r"터보|turbo", str(n.get("title", "")), re.I)):
                 n["mode"] = 0 if turbo else 4
+                if TURBO_BYPASS:
+                    n["type"] = "LoraLoaderBypassModelOnly"
     if refine is not None:
         for n in nodes.values():
             if str(n.get("title", "")).startswith("2차 다듬기"):
@@ -269,6 +276,11 @@ def to_api(ui: dict, turbo=None, refine=None, loras=None) -> dict:
                 v["inputs"]["cfg"] = float(meta["cfg"]["turbo" if turbo else "full"])
                 if (meta.get("sampler") or {}).get("turbo" if turbo else "full"):  # 판마다 샘플러도 다르면(MOSS 터보 euler · 일반 er_sde)
                     v["inputs"]["sampler_name"] = meta["sampler"]["turbo" if turbo else "full"]
+    sig = SIGMAS_ENV or (str((meta.get("sigmas") or {}).get("turbo" if turbo else "full") or "") if turbo is not None else "")
+    if sig:  # 처음부터 다 그리는 샘플러에만 표시해 두고 fill 이 스텝을 넣은 뒤 바꾼다(2차 다듬기처럼 일부만 다시 그리는 샘플러는 그대로)
+        for v in api.values():
+            if v["class_type"] == "KSampler" and float(v["inputs"].get("denoise", 1.0)) == 1.0:
+                v.setdefault("_meta", {})["sigmas"] = sig
     return api
 
 
@@ -345,4 +357,28 @@ def fill(g: dict, prompt: str, ref_names: list, w: int, h: int, seed: int, steps
     if "7r" in g:  # 켜진 2차 다듬기 샘플러: 같은 시드. 스텝·강도는 워크플로우 값(첫 단이 터보 8스텝이어도 다듬기는 16스텝에서 일부만 다시 그린다)
         g["7r"]["inputs"].update(seed=seed)
     g["9"]["inputs"]["filename_prefix"] = prefix
+    return _custom_sigmas(g)
+
+
+def _custom_sigmas(g: dict) -> dict:
+    """to_api 가 sigmas 를 표시한 KSampler 를 같은 번호의 SamplerCustomAdvanced(+ RandomNoise · KSamplerSelect · ManualSigmas · CFGGuider)로 바꾼다.
+    (2026-10-21 조사: Qwen-Image-2.1 Turbo 는 8스텝 시그마가 정해져 증류됐는데 simple 스케줄러는 그걸 근사하지 못해 그림이 뿌옇다,
+    huggingface.co/Comfy-Org/Qwen-Image-2.1/discussions/22. 터보 LoRA 도 같은 증류에서 뽑았다.)
+    값의 개수가 스텝 + 1 이 아니면(부르는 쪽이 스텝을 바꿈) 그 샘플러는 그대로 둔다."""
+    for k in [k for k, v in g.items() if v["class_type"] == "KSampler" and (v.get("_meta") or {}).get("sigmas")]:
+        i, sig = g[k]["inputs"], g[k]["_meta"]["sigmas"]
+        if sig == "off":
+            continue
+        if sig == "lq":
+            i["scheduler"] = "linear_quadratic"
+            continue
+        vals = [float(x) for x in re.split(r"[,\s]+", sig) if x]
+        if len(vals) != int(i["steps"]) + 1:
+            continue
+        g[f"{k}n"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": i["seed"]}}
+        g[f"{k}s"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": i["sampler_name"]}}
+        g[f"{k}m"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": ", ".join(f"{x:g}" for x in vals)}}
+        g[f"{k}g"] = {"class_type": "CFGGuider", "inputs": {"model": i["model"], "positive": i["positive"], "negative": i["negative"], "cfg": i["cfg"]}}
+        g[k] = {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [f"{k}n", 0], "guider": [f"{k}g", 0], "sampler": [f"{k}s", 0],
+                                                                  "sigmas": [f"{k}m", 0], "latent_image": i["latent_image"]}}
     return g

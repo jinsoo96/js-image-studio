@@ -115,6 +115,21 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
         return _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo, edit)
 
 
+def copied_ref(img: Path, refs: list, limit: float = 8.0):
+    """결과가 참고 그림을 거의 그대로 옮긴 것이면 그 참고 그림(아니면 None). ComfyUI 0.42.x 에서 프롬프트를 무시하고 참고 그림을
+    픽셀 평균 5~6/255 차이로 내놓는 버그가 오류 없이 나고 재시작 전까지 계속된다(github.com/comfyanonymous/ComfyUI/issues/17187, 2026-10-21 조사)."""
+    from PIL import Image as _Im, ImageChops, ImageStat
+    out = _Im.open(img).convert("L").resize((256, 256))
+    for r in refs:
+        try:
+            ref = _Im.open(r).convert("L").resize((256, 256))
+        except Exception:  # noqa: BLE001
+            continue
+        if ImageStat.Stat(ImageChops.difference(out, ref)).mean[0] < limit:
+            return Path(r)
+    return None
+
+
 def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False):
     """저장 워크플로우와 같은 구성을 코드로 짠 것(서버 워크플로우를 못 불러올 때만)."""
     g = {
@@ -579,6 +594,10 @@ def main():
                 raise RuntimeError(msg)
             img = next(i for o in hist["outputs"].values() for i in o.get("images", []))
             c.download(img, dst)
+            cp = None if (first and cont[0] == "next_scene") else copied_ref(dst, rf)
+            if cp:
+                raise RuntimeError(f"참고 그림 {cp.name} 를 거의 그대로 내놓음(ComfyUI 0.42 버그 #17187, 서버를 재시작할 때까지 계속된다): "
+                                   "다른 사람 작업이 없을 때 vast/comfy_admin.py restart")
             if args.fix:  # 2단: 남는 사람 지우기(2026-10-16, 무대 뒤 소파 6명 → 3명, D+18 p003 우빈 둘 → 하나)
                 from refine import fix_extras
                 fix_extras(c, cache, dst, series, p, seed=sd % 100000, log=log)
@@ -593,7 +612,9 @@ def main():
             import traceback
             print(f"{p['id']}: 실패 {str(e)[:300]}", flush=True)
             # 어디서 터졌는지 남긴다(검사 단계의 None 오류가 메시지 한 줄로만 남아 원인을 못 찾았다, 2026-10-19 Cherry 시험 p054)
-            print("".join(traceback.format_exception(e)[-4:]), file=sys.stderr, flush=True)
+            # 우리 코드 줄만 남긴다: 끝 네 줄만 남기니 http 내부 줄뿐이라 어느 요청이 시간 초과였는지 몰랐다(2026-10-21 외출 p101)
+            ours = [f for f in traceback.extract_tb(e.__traceback__) if "webtoon-studio" in f.filename.replace("\\", "/")]
+            print("".join(traceback.format_list(ours[-4:])) + f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
             failed.append(p["id"])
     if failed:
         print("실패한 컷:", ",".join(failed))

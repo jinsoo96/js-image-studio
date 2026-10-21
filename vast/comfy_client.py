@@ -13,6 +13,7 @@
     python vast/comfy_client.py downloads            받는 중인 작업
 """
 import base64
+import http.client
 import json
 import os
 import re
@@ -106,9 +107,21 @@ class Comfy:
         if data is not None:
             body = data if isinstance(data, bytes) else json.dumps(data).encode()
             h["Content-Type"] = ctype
-        with urllib.request.urlopen(urllib.request.Request(self.base + path, data=body, headers=h), timeout=timeout) as r:
-            b = r.read()
-            return b if raw else json.loads(b.decode("utf-8")) if b else None
+        # vast 프록시가 가끔 한 번 끊기거나 늦는다: 서버에서 다 그린 컷이 결과 묻기(/history) 한 번이 시간 초과라 통째로 실패했다(2026-10-21 외출 p101).
+        # 다시 보내도 같은 요청(읽기, 덮어쓰는 그림 올리기)만 세 번까지. 큐에 넣기(/prompt)는 두 번 들어갈 수 있어 다시 보내지 않는다
+        tries = 3 if data is None or path.startswith("/upload/") else 1
+        for k in range(tries):
+            try:
+                with urllib.request.urlopen(urllib.request.Request(self.base + path, data=body, headers=h), timeout=timeout) as r:
+                    b = r.read()
+                    return b if raw else json.loads(b.decode("utf-8")) if b else None
+            except urllib.error.HTTPError as e:
+                if e.code not in (502, 503, 504) or k == tries - 1:
+                    raise
+            except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException):
+                if k == tries - 1:
+                    raise
+            time.sleep(3 * (k + 1))
 
     def upload_image(self, path: Path, name: str = "", subfolder: str = "", ctype: str = "image/png") -> str:
         """서버 input/(subfolder/) 에 올린다. 학습 데이터 폴더는 그림과 같은 이름의 캡션 .txt 도 같이 올린다(lora.py)."""
@@ -122,12 +135,37 @@ class Comfy:
     def queue(self, prompt: dict, workflow: dict | None = None) -> str:
         """workflow(화면용 워크플로우)를 주면 결과 PNG·서버 기록에 같이 남아 ComfyUI 화면에서 그 작업을 캔버스로 연다.
         (2026-10-15 사용자 "comfyui 보니까 워크플로우를 사용한 느낌이 안 난다": API 그래프만 보내면 화면에서 열리지 않았다)"""
-        body = {"prompt": prompt, "client_id": "webtoon-studio"}
+        # 작업 번호를 이쪽에서 정해 보낸다(서버가 받아 준다): 응답이 끊겨도 그 번호가 큐·기록에 있으면 들어간 것이라 두 번 넣지 않고,
+        # 없을 때만 다시 보낸다. 모델을 새로 올리는 첫 컷에서 응답 대기 시간 초과로 컷이 통째로 실패했다(2026-10-21 외출 p101 두 번)
+        pid = str(uuid.uuid4())
+        body = {"prompt": prompt, "client_id": "webtoon-studio", "prompt_id": pid}
         if os.environ.get("WEBTOON_QUEUE_FRONT") == "1":  # 사람이 기다리는 작업(agent app 에서 시킨 것)은 큐 앞으로(mcp/server.py ENV)
             body["front"] = True
         if workflow:
             body["extra_data"] = {"extra_pnginfo": {"workflow": workflow}}
-        return self.req("/prompt", body)["prompt_id"]
+        for k in range(3):
+            try:
+                return self.req("/prompt", body, timeout=120)["prompt_id"]
+            except urllib.error.HTTPError as e:
+                if e.code not in (502, 503, 504) or k == 2:
+                    raise
+            except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException):
+                if k == 2:
+                    raise
+            time.sleep(5 * (k + 1))
+            if self._queued(pid):
+                return pid
+        return pid
+
+    def _queued(self, pid: str) -> bool:
+        """이 번호의 작업이 서버 큐(돌고 있거나 기다림)나 기록에 있나."""
+        try:
+            q = self.req("/queue") or {}
+            if any(len(x) > 1 and x[1] == pid for x in (q.get("queue_running") or []) + (q.get("queue_pending") or [])):
+                return True
+            return bool(self.req(f"/history/{pid}"))
+        except Exception:  # noqa: BLE001
+            return False
 
     def wait(self, pid: str, timeout=900) -> dict:
         t0 = time.time()

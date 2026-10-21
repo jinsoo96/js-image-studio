@@ -11,6 +11,7 @@
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -133,6 +134,48 @@ FACE = ("<image2> is {name}'s face. In <image1>, redraw only {name}'s face and h
         "pose, hands, clothes and everything else in <image1> exactly the same: the other people, the place, the light, the framing and the art style.")
 
 
+# BFS head swap 작성자 프롬프트 그대로(huggingface.co/Alissonerdx/BFS-Best-Face-Swap docs/qwen-image-2.1.md): 시선·고개·미세 표정은 <image1>(컷)에서
+HEAD_SWAP = ("head_swap: start with <image1> as the base image, keeping its lighting, environment, and background. "
+             "remove the head from <image1> completely and replace it with the head from <image2>, strictly preserving the hair, "
+             "eye color, nose structure from <image2>. "
+             "copy the direction of the eye, head rotation, micro expressions from <image1>, high quality, sharp details, 4k")
+
+
+def head_swap_ready(series: Path) -> bool:
+    from saved_workflow import models, pick
+    try:
+        return bool(models()[pick(series)[0]]["roles"].get("head_swap"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def head_swap(c, cache, series: Path, dst: Path, ref: Path, pick, seed: int):
+    """컷 dst 에서 그 인물 머리·어깨 둘레만 잘라 1024 쯤으로 키워 BFS 로 얼굴을 바꾸고, 줄여 가장자리를 흐리게 다시 붙인다.
+    여럿 나오는 컷에서 다른 사람 머리를 바꾸지 않게, 작은 얼굴도 크게 보고 바꾸게(작성자: 작은 얼굴·급한 각도에 약함). 얼굴을 못 찾으면 False."""
+    from PIL import Image, ImageDraw, ImageFilter
+    from char_check import char_box
+    im = Image.open(dst).convert("RGB")
+    box = char_box(im, pick, scale=3.2)
+    if not box:
+        return False
+    crop = im.crop(box)
+    k = 1024 / max(crop.size)
+    big = crop.resize((max(32, round(crop.width * k / 32) * 32), max(32, round(crop.height * k / 32) * 32)), Image.LANCZOS)
+    tmp = dst.parent / "_qa_before" / f"{dst.stem}_headcrop.png"
+    big.save(tmp)
+    g = graph(HEAD_SWAP, [upload(c, tmp, cache), upload(c, ref, cache)], 0, 0, seed, 25, 1024, turbo=False, edit=True, series=series, role="head_swap")
+    g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/face"
+    h = c.wait(c.queue(g), 900)
+    c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), tmp)
+    new = Image.open(tmp).convert("RGB").resize(crop.size, Image.LANCZOS)
+    m = Image.new("L", crop.size, 0)
+    e = max(4, int(min(crop.size) * 0.08))
+    ImageDraw.Draw(m).rectangle((e, e, crop.width - e, crop.height - e), fill=255)
+    im.paste(new, box[:2], m.filter(ImageFilter.GaussianBlur(e / 2)))
+    im.save(dst)
+    return True
+
+
 def fix_face(c, cache, series: Path, ep: Path, folder: str, p: dict, who: str, seed: int, log=print, tries: int = 2) -> tuple:
     """얼굴이 다른 사람처럼 보이는 컷: 그 인물 상반신 참고 그림을 <image2> 로 주고 얼굴·머리만 다시 그리는 편집. 고친 뒤 얼굴 거리를 다시 재
     가장 가까워진 판만 남긴다(멀어지거나 얼굴을 못 찾으면 원본). (전 거리, 후 거리).
@@ -157,14 +200,21 @@ def fix_face(c, cache, series: Path, ep: Path, folder: str, p: dict, who: str, s
     prompt = FACE.format(name=who_p["name"], age=re.split(r"(?<=\.)\s", who_p["who"])[0][:100], acting=p.get("acting") or "as in <image1>")
     ref = series / "assets" / "vast_refs" / f"{who}_bust.png"
     orig = dst.read_bytes()
+    # 얼굴 바꾸기(BFS)는 고를 때만(WEBTOON_HEAD_SWAP=1). 2026-10-21 외출 5컷 시험: 옆얼굴(p061)은 고개·시선을 지켰지만
+    # 강 PM(p403)은 정면 참고 그림을 따라 고개를 돌려 카메라를 봤고 거리도 0.035 → 0.079 로 멀어졌다(exports/2026-10-21/비교/외출_얼굴고치기_예전vsBFS.jpg)
+    swap = os.environ.get("WEBTOON_HEAD_SWAP") == "1" and head_swap_ready(series)
     for t in range(tries):
         dst.write_bytes(orig)
-        g = graph(prompt, [upload(c, dst, cache), upload(c, ref, cache)], 0, 0, seed + t, 8, 1024, turbo=True, edit=True, series=series)
-        g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/face"
-        h = c.wait(c.queue(g), 600)
-        c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), dst)
+        if swap:
+            if not head_swap(c, cache, series, dst, ref, pick, seed + t):
+                break
+        else:
+            g = graph(prompt, [upload(c, dst, cache), upload(c, ref, cache)], 0, 0, seed + t, 8, 1024, turbo=True, edit=True, series=series)
+            g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/face"
+            h = c.wait(c.queue(g), 600)
+            c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), dst)
         d1 = face_distance(series, who, dst, pick)
-        log(f"  {p['id']}: {who} 얼굴 맞추기 {t + 1}회 거리 {d0:.3f} → {d1 if d1 is None else round(d1, 3)}")
+        log(f"  {p['id']}: {who} 얼굴 {'바꾸기(BFS)' if swap else '맞추기'} {t + 1}회 거리 {d0:.3f} → {d1 if d1 is None else round(d1, 3)}")
         if d1 is not None and d1 < best[0]:
             # 거리만 보고 남기면 안 된다: 정면 참고 그림을 따라 시선이 카메라로 돌거나(p061·p471·p325·p007) 손이 하나 더 생겼다(p495)
             # (2026-10-20 사용자 "어디 보고 말함", "손이 두 개임") → 원본에 없던 정면 응시·남는 팔다리가 생기면 버린다
