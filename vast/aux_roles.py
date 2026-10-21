@@ -5,6 +5,8 @@
                            시험: 0.6 은 배치를 지켰고 0.4·없이는 좌우가 바뀌었다. 0.55 로 낮췄더니 터보 8스텝에서 또 바뀌어(외출 p016) 0.7 · 끝 0.6.
   webtoon_next_scene_uc    (role next_scene)  편집 + Next-Scene LoRA 0.8: 같은 사람이 이어 나오는 클로즈업을 앞 컷에서 잇는다(얼굴·옷·배경·그림체 유지).
   webtoon_asset_sheet_uc   (role asset_sheet) 편집 + 캐릭터 시트 LoRA 1.0: 서 있는 전신 → 얼굴 + 앞·뒤·옆·3/4 전신 시트(터보 끔 25스텝, 작성자 권장).
+  webtoon_restyle_uc       (role restyle)     편집 + Restyle LoRA(작품마다 도구가 넣는다, 옆길) 25스텝: 1단 Qwen UC 초안을 그 작품 그림체로 마무리.
+                           'Convert image 1 to <그림체>.' (vast/restyle.py, 2026-10-21 짝 데이터 Restyle). aux_roles.py restyle 로 이것만 저장.
   webtoon_head_swap_uc     (role head_swap)   편집 + BFS head swap LoRA 1.0(옆길): <image1> 컷의 얼굴·머리만 <image2> 인물로, 시선·고개·표정은 컷 그대로
                            (2026-10-21 조사: 얼굴 고치기가 정면 참고 그림을 따라 시선을 카메라로 돌렸다. BFS 는 시선·고개를 image1 에서 가져오라고 학습됨, MIT).
 
@@ -111,9 +113,24 @@ def lora_edit(base: str, lora: str, strength: float, role: str, label: str, step
     return ui
 
 
+RESTYLE_TITLE = "Restyle LoRA"  # vast/restyle.py 가 이 제목으로 시작하는 노드에 그 작품 LoRA 를 넣는다
+
+
+def restyle_edit(base: str) -> dict:
+    lz = next((f for f in Comfy().req("/models/loras") or [] if "restyle" in f), "webtoon/restyle.safetensors")
+    return lora_edit(base, lz, 1.0, "restyle", f"{RESTYLE_TITLE} (작품 그림체, 도구가 작품마다 넣는다) · 25스텝 · 'Convert image 1 to <그림체>.'",
+                     25, loader="LoraLoaderBypassModelOnly")
+
+
 def main():
     m = models(refresh=True)["uc"]
     c = Comfy()
+    if sys.argv[1:2] == ["restyle"]:
+        ui = restyle_edit(m["edit"])
+        name = "webtoon_restyle_uc.json"
+        c.req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(ui, ensure_ascii=False).encode("utf-8"))
+        (ROOT / "vast" / name).write_text(json.dumps(ui, ensure_ascii=False, indent=1), encoding="utf-8")
+        return print("서버 저장", name, "노드", len(ui["nodes"]), "· uc 역할:", models(refresh=True)["uc"]["own_roles"])
     for name, ui in (("webtoon_layout_lock_uc.json", layout_lock(m["gen"])),
                      ("webtoon_next_scene_uc.json", lora_edit(m["edit"], NEXT_SCENE, 0.8, "next_scene",
                                                                "앞 컷에서 잇기 (Next-Scene LoRA 0.8, 글 앞에 'Next Scene:')", 25)),

@@ -498,6 +498,41 @@ def build_lora_dataset(folder="3d", model="uc"):
     return wf
 
 
+def build_restyle_dataset(fin="restyle_in", fout="restyle_out", name="webtoon/restyle", model="uc"):
+    """Restyle 학습 데이터(화면 형식, vast/restyle.py dataset 이 폴더·이름만 바꿔 돌린다): 정본(목표 그림 + 캡션) → VAEEncode(목표 잠재),
+    Qwen UC 판(입력) → TextEncodeQwenImage21 images.image_1(편집 조건) + 캡션 'Convert image 1 to <그림체>.' → SaveTrainingDataset.
+    목록 노드라 짝마다 한 번씩 돈다(두 폴더의 파일 이름 순서가 짝)."""
+    tm = TRAIN_MODELS[model]
+    g = G()
+    g.node("MarkdownNote", (-470, 0), (420, 300), [
+        "## Restyle 학습 데이터\n\n같은 장면의 **Qwen UC 판(입력)** 과 **정본(목표)** 짝으로 '그 작품 그림체로 바꾸기' 편집 LoRA 를 학습한다.\n\n"
+        "- 목표 폴더: input/ 아래 정본 그림 + 같은 이름 .txt(캡션 'Convert image 1 to <그림체>.')\n- 입력 폴더: 같은 이름의 Qwen UC 판\n"
+        "- 만든 뒤 webtoon_train_lora_uc_base 로 학습(도구: vast/restyle.py train)"], title="사용법")
+    clip = g.node("CLIPLoader", (20, 50), (340, 106), [tm["clip"][0], tm["clip"][1], "default"], outputs=[("CLIP", "CLIP")])
+    vae = g.node("VAELoader", (20, 180), (340, 58), [tm["vae"]], outputs=[("VAE", "VAE")])
+    out = g.node("LoadImageTextDataSetFromFolder", (420, 50), (340, 82), [fout], outputs=[("images", "IMAGE"), ("texts", "STRING")],
+                 title="목표: 정본 폴더 (그림 + 캡션)")
+    inp = g.node("LoadImageDataSetFromFolder", (420, 170), (340, 82), [fin], outputs=[("images", "IMAGE")], title="입력: Qwen UC 판 폴더 (같은 이름)")
+    enc = g.node("VAEEncode", (800, 50), (240, 60), [], inputs=[("pixels", "IMAGE"), ("vae", "VAE")], outputs=[("LATENT", "LATENT")], title="목표 잠재")
+    cond = g.node("TextEncodeQwenImage21", (800, 150), (360, 200), ["", "", 1024],
+                  inputs=[("clip", "CLIP"), ("vae", "VAE"), ("images.image_1", "IMAGE"), ("prompt", "STRING")],
+                  outputs=[("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent", "LATENT")], title="편집 조건 (image1 = Qwen UC 판)")
+    cond["inputs"][3]["widget"] = {"name": "prompt"}
+    save = g.node("SaveTrainingDataset", (1200, 50), (340, 106), [name, 1000], inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
+                  title="학습 데이터 저장 (datasets/ 아래)")
+    g.link(out, 0, enc, "pixels")
+    g.link(vae, 0, enc, "vae")
+    g.link(clip, 0, cond, "clip")
+    g.link(vae, 0, cond, "vae")
+    g.link(inp, 0, cond, "images.image_1")
+    g.link(out, 1, cond, "prompt")
+    g.link(enc, 0, save, "latents")
+    g.link(cond, 0, save, "conditioning")
+    wf = g.dump()
+    wf["extra"]["webtoon"] = {"model": model, "role": "restyle_dataset", "label": "Restyle 학습 데이터(Qwen UC 판 → 정본 짝, 학습은 webtoon_train_lora_uc_base)"}
+    return wf
+
+
 TRAIN_NODE = "WebtoonTrainLora"  # 서버 custom_nodes/webtoon_train_lora(vast/server_nodes). 없으면 기본 TrainLoraNode
 
 
@@ -571,6 +606,12 @@ def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=1e-4, model="u
 
 
 def main():
+    if sys.argv[1:2] == ["restyle"]:  # make_workflow.py restyle → Restyle 학습 데이터 워크플로우(편집 마무리 워크플로우는 aux_roles.py restyle)
+        wf = build_restyle_dataset()
+        name = "webtoon_restyle_dataset_uc.json"
+        Comfy().req("/api/userdata/" + urllib.parse.quote("workflows/" + name, safe="") + "?overwrite=true", json.dumps(wf, ensure_ascii=False).encode("utf-8"))
+        (ROOT / "vast" / name).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
+        return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if sys.argv[1:2] == ["sigmas"]:  # make_workflow.py sigmas [off] → 터보 워크플로우에 공식 시그마를 적는다(off 면 뺀다)
         return print("터보 시그마", "뺌" if sys.argv[2:3] == ["off"] else "적음", set_turbo_sigmas("" if sys.argv[2:3] == ["off"] else QWEN21_TURBO_SIGMAS))
     if sys.argv[1:2] == ["library"]:

@@ -104,7 +104,16 @@ def pairs(series: Path, strength: float = 0.6, res: int = 1024, log=print, limit
     return info
 
 
-def dataset(series: Path, log=print) -> str:
+def _role(role: str):
+    """그리는 판(uc)의 그 역할 서버 워크플로우 이름, 없으면 None(예전 코드 그래프로)."""
+    from saved_workflow import models
+    try:
+        return models(refresh=True)["uc"]["roles"].get(role)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def dataset(series: Path, log=print, name: str = "") -> str:
     """짝을 서버 input/restyle_<작품>_{in,out} 에 올리고 학습 데이터를 만든다. 목록 노드라 짝마다 한 번씩 돈다:
     정본 → VAEEncode(목표 잠재) · Qwen 판 → TextEncodeQwenImage21 images.image_1(편집 조건, 캡션은 'Convert image 1 to …')."""
     from concurrent.futures import ThreadPoolExecutor
@@ -119,7 +128,21 @@ def dataset(series: Path, log=print) -> str:
     up += [(f, fout, "text/plain" if f.suffix == ".txt" else "image/png") for f in sorted((d / "out").iterdir()) if f.stem in have]
     with ThreadPoolExecutor(6) as ex:
         list(ex.map(lambda a: c.upload_image(a[0], a[0].name, subfolder=a[1], ctype=a[2]), up))
-    name = f"webtoon/{slug}_restyle"
+    name = name or f"webtoon/{slug}_restyle"
+    wf = _role("restyle_dataset")
+    if wf:  # 서버 워크플로우 webtoon_restyle_dataset_uc(화면에서 열어 고칠 수 있다): 폴더·이름만 넣는다
+        from saved_workflow import load_ui, to_api
+        ui = load_ui(wf)
+        api = to_api(ui)
+        lora._set(api, "LoadImageTextDataSetFromFolder", folder=fout)
+        lora._set(api, "LoadImageDataSetFromFolder", folder=fin)
+        lora._set(api, "SaveTrainingDataset", folder_name=name)
+        log(f"학습 데이터 만들기({wf}) → datasets/{name} (짝 {len(have)})")
+        h = c.wait(c.queue(api, ui), 3600)
+        st = h.get("status", {})
+        if st.get("status_str") == "error":
+            raise RuntimeError(next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?"))
+        return name
     api = {
         "1": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "qwen_image", "device": "default"}},
         "2": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
@@ -164,16 +187,25 @@ def apply(series: Path, episode: str, ids: list, src_folder: str = "panels_hf_va
     c, cache = Comfy(), {}
     word = _style_word(series)
     res = []
+    wf = _role("restyle")
     for pid in ids:
         src = ep / src_folder / f"{pid}.png"
-        g = fill(to_api(load_ui(models()["uc"]["edit"]), turbo=False), f"Convert image 1 to {word}.", [CP.upload(c, src, cache)], 0, 0, SEED, steps, 1024,
-                 prefix="webtoon_studio/restyle")
-        g["R1"] = {"class_type": "LoraLoaderBypassModelOnly", "inputs": {"model": ["1", 0], "lora_name": file, "strength_model": strength}}
-        for k, v in g.items():
-            if k != "R1":
-                for kk, x in list(v["inputs"].items()):
-                    if x == ["1", 0]:
-                        v["inputs"][kk] = ["R1", 0]
+        if wf:  # 서버 워크플로우 webtoon_restyle_uc: 'Restyle LoRA' 노드에 이 작품 LoRA 를 넣는다
+            ui = load_ui(wf)
+            for n in ui["nodes"]:
+                if str(n.get("title", "")).startswith("Restyle LoRA"):
+                    n["widgets_values"] = [file, float(strength)]
+                    n["mode"] = 0
+            g = fill(to_api(ui, turbo=False), f"Convert image 1 to {word}.", [CP.upload(c, src, cache)], 0, 0, SEED, steps, 1024, prefix="webtoon_studio/restyle")
+        else:
+            g = fill(to_api(load_ui(models()["uc"]["edit"]), turbo=False), f"Convert image 1 to {word}.", [CP.upload(c, src, cache)], 0, 0, SEED, steps, 1024,
+                     prefix="webtoon_studio/restyle")
+            g["R1"] = {"class_type": "LoraLoaderBypassModelOnly", "inputs": {"model": ["1", 0], "lora_name": file, "strength_model": strength}}
+            for k, v in g.items():
+                if k != "R1":
+                    for kk, x in list(v["inputs"].items()):
+                        if x == ["1", 0]:
+                            v["inputs"][kk] = ["R1", 0]
         h = c.wait(c.queue(g), 900)
         c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), out / f"{pid}.png")
         res.append(out / f"{pid}.png")
@@ -241,9 +273,23 @@ def evaluate(series: Path, files: list | None = None, log=print) -> Path:
     return dst
 
 
+def status(series: Path) -> dict:
+    """짝·학습·평가 상태(GPU 안 씀)."""
+    d = _dir(series)
+    info = json.loads((d / "data.json").read_text(encoding="utf-8")) if (d / "data.json").exists() else {}
+    e = lora.registry(series).get(f"{WHO}@base") or {}
+    ev = ROOT / "exports"
+    sheets = sorted(ev.glob(f"*/비교/{series.name}_Restyle_평가.jpg"))
+    return {"series": series.name, "style_word": _style_word(series),
+            "pairs_made": len(list((d / "in").glob("*.png"))) if (d / "in").exists() else 0, "pairs_planned": len(_held_and_train(series)[0]),
+            "held_out": len(info.get("held", [])), "lora": e.get("file"), "checkpoints": [c["steps"] for c in e.get("checkpoints", [])],
+            "trained_at": e.get("at"), "eval_sheet": str(sheets[-1]) if sheets else None,
+            "workflows": {"dataset": _role("restyle_dataset"), "apply": _role("restyle"), "train": _role("train_lora_base")}}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["pairs", "dataset", "train", "apply", "eval"])
+    ap.add_argument("cmd", choices=["pairs", "dataset", "train", "apply", "eval", "status"])
     ap.add_argument("series")
     ap.add_argument("episode", nargs="?")
     ap.add_argument("panels", nargs="?")
@@ -267,6 +313,8 @@ def main():
         apply(series, a.episode, a.panels.split(","), a.src, a.file, a.variant)
     elif a.cmd == "eval":
         evaluate(series, a.files.split(",") if a.files else None)
+    elif a.cmd == "status":
+        print(json.dumps(status(series), ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":

@@ -406,7 +406,9 @@ def _folder(folder: str) -> str:
         return "panels_hf"
     if f in ("vast", "panels_hf_vast"):
         return "panels_hf_vast"
-    raise ValueError('folder 는 비우거나(힉스필드 본편) "vast"')
+    if f in ("vast_restyle", "restyle", "panels_hf_vast_restyle"):
+        return "panels_hf_vast_restyle"
+    raise ValueError('folder 는 비우거나(힉스필드 본편) "vast" · "vast_restyle"')
 
 
 def _ep_dirs(series: str = ""):
@@ -1109,7 +1111,8 @@ VAST_MAX = 80
 
 @mcp.tool()
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
-              check: bool = True, model: str = "", refine: bool = False, continuity: bool = True, continue_closeups: bool = False) -> str:
+              check: bool = True, model: str = "", refine: bool = False, continuity: bool = True, continue_closeups: bool = False,
+              restyle: bool = False) -> str:
     """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
     그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
     refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
@@ -1120,6 +1123,8 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     continuity=True(기본)면 같은 장면의 앞 컷을 쓴다: 같은 인물 묶음의 넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다
     (2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 장소가 바뀌거나 시간 자막('수요일')·옷이 바뀐 컷에서는 쓰지 않는다. 어느 앞 컷을 썼는지 작업 로그에 남는다.
     continue_closeups=True 면 같은 사람 연속 클로즈업을 앞 컷에서 잇기도 쓴다(얼굴·배경은 잘 이어지나 얼굴 얼룩·옷 바뀜이 섞여 기본은 끔).
+    restyle=True 면 그린 뒤 그 작품 Restyle LoRA(restyle 도구로 학습한 것)로 그림체를 마무리해 panels_hf_vast_restyle/ 에 따로 둔다(컷당 +약 40초).
+    견줘 볼 땐 contact_sheet(folder='vast') 와 contact_sheet(folder='vast_restyle').
     그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
     ep = _episode(series, episode)
     sd = _series(series)
@@ -1149,8 +1154,16 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--check"] if check else []
     cmd += ["--refine"] if refine else []
     cmd += ([] if continuity else ["--no-continuity"]) + (["--continue-closeups"] if continue_closeups else [])
-    job = _start_job("vast_draw", ep, [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}])
-    per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0)
+    steps = [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}]
+    if restyle:
+        sys.path.insert(0, str(VAST))
+        import lora as L
+        if not (L.registry(sd).get("_restyle@base") or {}).get("file"):
+            return _fail("no_restyle_lora", given=sd.name, reason="이 작품의 Restyle LoRA 가 없다: restyle(series, action='pairs'→'dataset'→'train') 먼저")
+        steps.append({"label": "Restyle 마무리", "cmd": [PY, str(VAST / "restyle.py"), "apply", str(sd), ep.name, ",".join(want),
+                                                       "--src", "panels_hf_vast", "--variant", "vast_restyle"]})
+    job = _start_job("vast_draw", ep, steps)
+    per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0) + (40 if restyle else 0)
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
             f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast')")
 
@@ -1234,14 +1247,23 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
 
 
 @mcp.tool()
-def restyle(series: str, action: str = "apply", episode: str = "", panels: str = "", source: str = "panels_hf_vast", steps: int = 1500) -> str:
-    """짝 데이터 Restyle(UC 만): 'Qwen UC 가 그린 결 → 그 작품 정본 결' 을 배우는 편집 LoRA 로 컷을 그 작품 그림체로 마무리한다(작업으로 돈다).
+def restyle(series: str, action: str = "status", episode: str = "", panels: str = "", source: str = "panels_hf_vast", steps: int = 1500) -> str:
+    """짝 데이터 Restyle(UC 만): 'Qwen UC 가 그린 결 → 그 작품 정본 결' 을 배우는 편집 LoRA 로 컷을 그 작품 그림체로 마무리한다.
+    서버 워크플로우를 쓴다: 짝 = 생성(webtoon_vertical_qwen21_uc), 데이터 = webtoon_restyle_dataset_uc, 학습 = webtoon_train_lora_uc_base,
+    마무리 = webtoon_restyle_uc(편집 + Restyle LoRA). action=status 는 바로 답한다(짝 수·학습한 파일·중간 파일·평가 그림), 나머지는 작업으로 돈다.
     action: pairs(정본 컷을 같은 구도로 Qwen UC 가 다시 그린 짝 만들기) → dataset(짝을 편집 조건 학습 데이터로) → train(공식 bf16 + UC 위 학습, steps)
     → eval(학습에 안 쓴 정본 컷: 정답 | 1단 Qwen UC | 2단 Restyle, exports/<날짜>/비교/<작품>_Restyle_평가.jpg)
     → apply(episode 의 panels(쉼표) 를 source 폴더 그림에서 마무리, 결과 panels_hf_restyle/). 학습한 것은 loras.json '_restyle@base'."""
     sd = _series(series)
-    if action not in ("pairs", "dataset", "train", "eval", "apply"):
-        return _fail("unknown_action", given=action, candidates=["pairs", "dataset", "train", "eval", "apply"])
+    if action not in ("status", "pairs", "dataset", "train", "eval", "apply"):
+        return _fail("unknown_action", given=action, candidates=["status", "pairs", "dataset", "train", "eval", "apply"])
+    if action == "status":
+        sys.path.insert(0, str(VAST))
+        import restyle as RS
+        st = RS.status(sd)
+        if st.get("eval_sheet"):
+            st["eval_link"] = _link(Path(st["eval_sheet"]))
+        return json.dumps(st, ensure_ascii=False)
     cmd = [PY, str(VAST / "restyle.py"), action, str(sd)]
     if action == "apply":
         if not episode or not panels:
