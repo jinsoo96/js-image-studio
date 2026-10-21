@@ -161,14 +161,15 @@ def dataset(series: Path, log=print, name: str = "") -> str:
     return name
 
 
-def train(series: Path, steps: int = 1500, rank: int = 32, lr: float = 1e-4, chunk: int = 500, log=print, role: str = "train_lora") -> dict:
+def train(series: Path, steps: int = 1500, rank: int = 32, lr: float = 1e-4, chunk: int = 500, log=print, role: str = "train_lora",
+          resume: str = "", resume_steps: int = 0) -> dict:
     """기본은 UC fp8 원본 위(역할 train_lora, 옆길). 공식 bf16 원본 위(train_lora_base)는 참고 그림만큼 길어진 입력에서 메모리가 빠듯해
     ComfyUI 가 CUDA 'invalid argument' 로 통째로 죽었다(2026-10-21, 같은 bf16 이라도 짧은 입력의 그림체 학습은 3000스텝 무사)."""
     info = json.loads((_dir(series) / "data.json").read_text(encoding="utf-8"))
     key = WHO if role == "train_lora" else f"{WHO}@{role.replace('train_lora_', '')}"
     lora.set_entry(series, key, {"trigger": f"{series.name.replace('-', '')}restyle", "model": "uc"})
     return lora.train(series, WHO, steps, rank, lr, log=log, register=True, chunk=chunk, role=role,
-                      dataset=f"webtoon/{series.name.replace('-', '')}_restyle", count=info["count"])
+                      dataset=f"webtoon/{series.name.replace('-', '')}_restyle", count=info["count"], resume=resume, resume_steps=resume_steps)
 
 
 def apply(series: Path, episode: str, ids: list, src_folder: str = "panels_hf_vast", file: str = "", variant: str = "restyle",
@@ -304,6 +305,8 @@ def main():
     ap.add_argument("--files", default="")
     ap.add_argument("--variant", default="restyle")
     ap.add_argument("--limit", type=int, default=0, help="pairs: 앞에서 몇 쌍만(시험)")
+    ap.add_argument("--resume", default="", help="train: 이 중간 파일(서버 LoRA 이름)에서 이어서")
+    ap.add_argument("--resume-steps", type=int, default=0, help="train: 그 파일까지 한 스텝 수")
     a = ap.parse_args()
     series = (ROOT / "series" / a.series).resolve() if not Path(a.series).exists() else Path(a.series).resolve()
     if a.cmd == "pairs":
@@ -311,7 +314,7 @@ def main():
     elif a.cmd == "dataset":
         print(dataset(series))
     elif a.cmd == "train":
-        print(train(series, a.steps, a.rank))
+        print(train(series, a.steps, a.rank, resume=a.resume, resume_steps=a.resume_steps))
     elif a.cmd == "apply":
         apply(series, a.episode, a.panels.split(","), a.src, a.file, a.variant)
     elif a.cmd == "eval":

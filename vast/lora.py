@@ -338,11 +338,12 @@ TRAIN_CLASSES = ("WebtoonTrainLora", "TrainLoraNode")  # 앞: 우리 노드(vast
 
 def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 12, res: int = 1024, log=print, register: bool = True,
           reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500, role: str = "train_lora",
-          trigger_only: float = 0.0, dataset: str | None = None, count: int = 0) -> dict:
+          trigger_only: float = 0.0, dataset: str | None = None, count: int = 0, resume: str = "", resume_steps: int = 0) -> dict:
     """데이터 만들기 → 올리기 → ① 학습 데이터 워크플로우(역할 lora_dataset) → 모델 내리기 → ② 학습 워크플로우(역할 train_lora) → lora/loras.json 등록.
     워크플로우는 작품의 판에서(없으면 기본 판의 것), ② 의 판(extra.webtoon.model)이 이 LoRA 를 붙일 수 있는 판이다.
     reuse_data: 서버에 이미 만든 학습 데이터(datasets/webtoon/<trigger>)로 ② 만 다시(스텝·rank 만 바꿔 볼 때).
     overrides: 이번만 학습 노드 칸을 바꾼다(예: {"training_dtype": "bf16"}). force: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험).
+    resume·resume_steps: 멈췄던 학습을 그 중간 파일(서버 LoRA 이름)에서 이어 간다(steps 는 전체 목표, 이미 한 스텝은 건너뜀).
     dataset·count: 서버에 이미 만든 학습 데이터(datasets/<dataset>)로 ② 만(짝 데이터 Restyle 처럼 ① 을 따로 만든 경우, vast/restyle.py).
     role: 학습 워크플로우 역할. train_lora_base 면 공식 bf16 원본 + UC LoRA 위에서 학습(make_workflow.py train uc_base).
     chunk: 이 스텝마다 끊어 저장하고 그 파일(existing_lora)에서 시드를 바꿔 이어 학습한다. 중간 파일이 entry["checkpoints"] 에 남아
@@ -389,7 +390,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     log(f"② 학습 시작 {wf_train}({tcls}): {total}스텝" + (f"({size}스텝씩 이어서)" if size < total else "")
         + f" rank {t['rank']} lr {t['learning_rate']}" + (f" 바꾼 칸 {overrides}" if overrides else ""))
     # 메모리 부족 때 offloading 을 켜고 저절로 다시 돌리던 것은 뺐다: 그 재시도 직후 공용 서버 ComfyUI 가 재시작됐다(2026-10-19 20:44)
-    done, prev, ckpts = 0, "[None]", []
+    done, prev, ckpts = (int(resume_steps), resume, [{"steps": int(resume_steps), "file": resume}]) if resume else (0, "[None]", [])
     while done < total:
         n = min(size, total - done)
         # 이어 학습: 앞 파일을 existing_lora 로(노드가 파일 이름의 '_<스텝>_steps_' 로 앞 스텝 수를 읽는다), 시드를 바꿔 같은 노이즈를 되풀이하지 않게
