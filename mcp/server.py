@@ -1201,8 +1201,8 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
     """LoRA 를 vast 에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로),
     style 이면 그 작품의 그림체 LoRA(본편 컷으로 학습, 사람 없는 컷까지 모든 컷에 붙는다). 학습 데이터는 도구가 만든다:
     인물은 표정 은행(정면 상반신) + 기본 전신 + 그 인물 혼자 나온 잘 된 컷 panels 장(기본 12), 그림체는 본편 컷 panels 장(기본 100, 샷 종류를 고루, 종류마다 둘은 평가용으로 남김).
-    서버 워크플로우(역할 train_lora, WebtoonTrainLora: alpha=rank · 블록 안 층만 · 속도 손실 · LoRA fp32, 화면에서 값을 고칠 수 있다)로 학습한다.
-    steps 는 전체 스텝(0 이면 인물 1500 · 그림체 3000), rank·learning_rate 가 0 이면 워크플로우 값(16 · 5e-5).
+    서버 워크플로우(역할 train_lora, WebtoonTrainLora: 묶음 잠재 정규화 · alpha=rank + PEFT 초기값 · 블록 안 층만 · 속도 손실 · LoRA fp32, 화면에서 값을 고칠 수 있다)로 학습한다.
+    steps 는 전체 스텝(0 이면 인물 1500 · 그림체 3000), rank·learning_rate 가 0 이면 워크플로우 값(16 · 1e-4).
     chunk 스텝마다 저장하고 이어 학습해 중간 파일이 남는다: 이때는 꺼 둔 채 등록되니 lora_compare 로 견줘 고른 뒤 set_lora(file=…, on=True).
     chunk=0 이면 한 번에 학습하고 바로 켠다. 시간은 loras() 의 train_s 참고(그림체 100장 3000스텝은 약 2시간). 학습 중엔 같은 GPU 로 그리기가 기다린다."""
     sys.path.insert(0, str(VAST))

@@ -1,5 +1,5 @@
 {
- "id": "11d6a09f-fbb3-440b-b430-c4e582a19fe2",
+ "id": "d9ab0671-fb1c-408c-b56f-c637cdeb318a",
  "revision": 0,
  "last_node_id": 8,
  "last_link_id": 8,
@@ -270,7 +270,8 @@
     true,
     "rank",
     true,
-    "velocity"
+    "velocity",
+    "peft"
    ]
   },
   {

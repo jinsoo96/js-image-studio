@@ -490,7 +490,7 @@ def build_lora_dataset(folder="3d", model="uc"):
 TRAIN_NODE = "WebtoonTrainLora"  # 서버 custom_nodes/webtoon_train_lora(vast/server_nodes). 없으면 기본 TrainLoraNode
 
 
-def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=5e-5, model="uc"):
+def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=1e-4, model="uc"):
     """② 인물 LoRA 학습 워크플로우(화면 형식): 저장된 학습 데이터 → 해상도 버킷 → TrainLoraNode → SaveLoRA · 손실 그래프.
     TrainLoraNode 위젯 순서는 서버 노드 정의(object_info)에서 읽는다(버전마다 칸이 늘었다)."""
     from saved_workflow import _node_spec, _widget_names
@@ -502,10 +502,10 @@ def build_train(dataset="webtoon/dataset", steps=500, rank=16, lr=5e-5, model="u
           # 절약이 없어 같은 31GB 초과였다
           "gradient_checkpointing": True, "checkpoint_depth": 2, "offloading": False, "existing_lora": "[None]", "bucket_mode": True,
           "bypass_mode": TRAIN_MODELS[model]["bypass"],  # bypass 는 fp8(UC) 가중치에만. MOSS 는 bf16 이라 끈다
-          # 2026-10-21 조사·시험(worklogs/2026-10-21-uc-optimize.md): 기본 노드는 alpha 1 고정(효과 1/rank)·블록 밖 전역 층과 norm·bias 까지
-          # 학습·x0 손실(낮은 노이즈 무시)이라 그림체가 거의 안 배워지고 얼룩이 났다 → 우리 노드로 alpha=rank·블록 안 Linear 만·속도 손실,
-          # LoRA 가중치는 fp32(bf16 이면 작은 갱신이 반올림에 사라진다), 학습률 5e-5(alpha=rank 기준, 다른 트레이너 1e-4 의 한 단계 아래)
-          "alpha_mode": "rank", "blocks_only": True, "loss_mode": "velocity"}
+          # 2026-10-21(worklogs/2026-10-21-uc-optimize.md): 기본 노드는 묶음 모드에서 잠재를 정규화하지 않아 LoRA 가 그 차이를 배워 얼룩졌다.
+          # 우리 노드: 묶음 잠재 정규화 · alpha=rank + PEFT 초기값(다른 트레이너의 lr 이 그대로 맞는다) · 블록 안 Linear 만 · 속도 손실,
+          # LoRA 가중치 fp32, 학습률 1e-4(ai-toolkit Qwen-Image 기본, 200스텝 시험에서 강도 1 이 깨끗하고 그림체가 묻었다)
+          "alpha_mode": "rank", "blocks_only": True, "loss_mode": "velocity", "init": "peft"}
     node_cls = TRAIN_NODE if _node_spec(TRAIN_NODE) else "TrainLoraNode"
     if node_cls == TRAIN_NODE:
         tv["lora_dtype"] = "fp32"
