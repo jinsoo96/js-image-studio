@@ -41,7 +41,7 @@ def main():
     rule = probe.get("people_rule") or "All people are adults with realistic proportions."
     seed = int(probe.get("seed", 20261018))
     c = Comfy()
-    used, cells = {}, {}
+    used, cells, queued = {}, {}, []
     for si, (sname, scene) in enumerate(probe["scenes"].items()):
         w, h = SIZES[scene.get("aspect", "3:2")]
         for stname, style in probe["styles"].items():
@@ -51,10 +51,13 @@ def main():
             if not dst.exists():  # 다시 부르면 빠진 것만 그린다
                 g = graph(pr, [], w, h, seed + si, 8, 1024, turbo=True)
                 g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/style_probe"
-                hist = c.wait(c.queue(g), 900)
-                c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
-                print(dst, flush=True)
+                queued.append((c.queue(g), dst))
             cells[(stname, sname)] = dst
+    # 한꺼번에 큐에 넣고 기다린다: 한 장씩 넣고 기다리면 공용 서버에서 학습 구간(30분 넘게)마다 한 장씩 밀렸다(2026-10-21)
+    for pid, dst in queued:
+        hist = c.wait(pid, 6 * 3600)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+        print(dst, flush=True)
     (out / "prompts.json").write_text(json.dumps(used, ensure_ascii=False, indent=1), encoding="utf-8")
     # 비교표: 줄마다 그림체 하나, 왼쪽에 이름
     cw, lab = 520, 150
