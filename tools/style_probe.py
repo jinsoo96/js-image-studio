@@ -7,7 +7,7 @@
 probe.json:
   {"styles": {"<한글 이름>": "English art style paragraph", ...},
    "scenes": {"<한글 이름>": {"text": "English: who, where, what happens, light", "aspect": "3:2"}, ...},
-   "people_rule": "선택: 사람 규칙 한 문장(기본은 성인)", "seed": 20261018}
+   "people_rule": "선택: 사람 규칙 한 문장(기본은 성인)", "seed": 20261018, "full": false}   full=true 면 터보 없이 40스텝
 결과: <폴더>/<장면>__<그림체>.png 와 비교표 compare.jpg(줄 = 그림체, 칸 = 장면), prompts.json(쓴 문장)
 """
 import json
@@ -49,7 +49,8 @@ def main():
             pr = prompt_for(scene, style, rule)
             used[dst.name] = pr
             if not dst.exists():  # 다시 부르면 빠진 것만 그린다
-                g = graph(pr, [], w, h, seed + si, 8, 1024, turbo=True)
+                full = bool(probe.get("full"))  # "full": true 면 터보 없이 40스텝(고른 그림체를 품질로 확인할 때)
+                g = graph(pr, [], w, h, seed + si, 40 if full else 8, 1024, turbo=not full)
                 g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/style_probe"
                 queued.append((c.queue(g), dst))
             cells[(stname, sname)] = dst
