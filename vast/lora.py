@@ -338,11 +338,12 @@ TRAIN_CLASSES = ("WebtoonTrainLora", "TrainLoraNode")  # 앞: 우리 노드(vast
 
 def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 12, res: int = 1024, log=print, register: bool = True,
           reuse_data: bool = False, overrides: dict | None = None, force: bool = False, chunk: int = 500, role: str = "train_lora",
-          trigger_only: float = 0.0) -> dict:
+          trigger_only: float = 0.0, dataset: str | None = None, count: int = 0) -> dict:
     """데이터 만들기 → 올리기 → ① 학습 데이터 워크플로우(역할 lora_dataset) → 모델 내리기 → ② 학습 워크플로우(역할 train_lora) → lora/loras.json 등록.
     워크플로우는 작품의 판에서(없으면 기본 판의 것), ② 의 판(extra.webtoon.model)이 이 LoRA 를 붙일 수 있는 판이다.
     reuse_data: 서버에 이미 만든 학습 데이터(datasets/webtoon/<trigger>)로 ② 만 다시(스텝·rank 만 바꿔 볼 때).
     overrides: 이번만 학습 노드 칸을 바꾼다(예: {"training_dtype": "bf16"}). force: 학습 워크플로우의 disabled 를 무시(원인 찾는 시험).
+    dataset·count: 서버에 이미 만든 학습 데이터(datasets/<dataset>)로 ② 만(짝 데이터 Restyle 처럼 ① 을 따로 만든 경우, vast/restyle.py).
     role: 학습 워크플로우 역할. train_lora_base 면 공식 bf16 원본 + UC LoRA 위에서 학습(make_workflow.py train uc_base).
     chunk: 이 스텝마다 끊어 저장하고 그 파일(existing_lora)에서 시드를 바꿔 이어 학습한다. 중간 파일이 entry["checkpoints"] 에 남아
     너무 배운 것(그림이 데이터 컷을 베끼거나 얼룩)과 덜 배운 것을 비교해 고른다(lora_eval.py). 0 이면 한 번에.
@@ -359,10 +360,11 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
     lmodel = tmeta.get("model") or name
     tg = trigger(series, who)
     # 판마다 잠재·글 꼴이 달라(Qwen VAE·qwen3vl ↔ Flux2 128채널·Qwen3.5) 학습 데이터를 따로 둔다. 기본 판(uc)은 예전 이름 그대로
-    dataset = f"webtoon/{tg}" if lmodel == "uc" else f"webtoon/{tg}_{lmodel}"
+    given = dataset
+    dataset = given or (f"webtoon/{tg}" if lmodel == "uc" else f"webtoon/{tg}_{lmodel}")
     t0 = time.time()
-    info = json.loads((series / "lora" / who / "data.json").read_text(encoding="utf-8")) if reuse_data else None
-    if not reuse_data:
+    info = {"count": count} if given else json.loads((series / "lora" / who / "data.json").read_text(encoding="utf-8")) if reuse_data else None
+    if not reuse_data and not given:
         info = build_style_data(series, panels, res, trigger_only) if who == STYLE else build_data(series, who, panels, res)
         log(f"데이터 {info['count']}장(뺀 것 {len(info['skipped'])}) → 서버에 올림")
         folder = upload_data(c, series, who)

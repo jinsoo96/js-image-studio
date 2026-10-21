@@ -1234,6 +1234,27 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
 
 
 @mcp.tool()
+def restyle(series: str, action: str = "apply", episode: str = "", panels: str = "", source: str = "panels_hf_vast", steps: int = 1500) -> str:
+    """짝 데이터 Restyle(UC 만): 'Qwen UC 가 그린 결 → 그 작품 정본 결' 을 배우는 편집 LoRA 로 컷을 그 작품 그림체로 마무리한다(작업으로 돈다).
+    action: pairs(정본 컷을 같은 구도로 Qwen UC 가 다시 그린 짝 만들기) → dataset(짝을 편집 조건 학습 데이터로) → train(공식 bf16 + UC 위 학습, steps)
+    → eval(학습에 안 쓴 정본 컷: 정답 | 1단 Qwen UC | 2단 Restyle, exports/<날짜>/비교/<작품>_Restyle_평가.jpg)
+    → apply(episode 의 panels(쉼표) 를 source 폴더 그림에서 마무리, 결과 panels_hf_restyle/). 학습한 것은 loras.json '_restyle@base'."""
+    sd = _series(series)
+    if action not in ("pairs", "dataset", "train", "eval", "apply"):
+        return _fail("unknown_action", given=action, candidates=["pairs", "dataset", "train", "eval", "apply"])
+    cmd = [PY, str(VAST / "restyle.py"), action, str(sd)]
+    if action == "apply":
+        if not episode or not panels:
+            return _fail("episode_and_panels_required", given={"episode": episode, "panels": panels})
+        cmd += [episode, panels, "--src", source]
+    if action == "train":
+        cmd += ["--steps", str(steps)]
+    _ensure_idle(sd)
+    job = _start_job("restyle", sd, [{"label": f"Restyle {action}", "cmd": cmd}])
+    return json.dumps({"job": job, "next": f"job_wait('{job}')"}, ensure_ascii=False)
+
+
+@mcp.tool()
 def lora_compare(series: str, character: str = "style", strengths: str = "1.0", panels: int = 4, files: str = "") -> str:
     """학습한 LoRA 의 중간 파일들(lora_train 의 chunk 마다 저장된 것, loras() 의 checkpoints)을 같은 시드로 그려 한 장에 놓는다(작업으로 돈다).
     학습에 쓰지 않은 본편 컷을 골라 정답(원본) | LoRA 끔 | 중간 파일 × strengths(쉼표, 예 0.6,0.8,1.0) 순서. 그림체(style)는 클로즈업·둘 이상·배경·와이드를 고루.
