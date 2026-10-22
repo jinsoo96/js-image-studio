@@ -23,7 +23,7 @@
   "name": "",
   "url": ""
  },
- "idle_min": 60,
+ "idle_min": 30,
  "max_hours": 14,
  "ready_timeout_min": 60,
  "resume_timeout_min": 15,
@@ -227,7 +227,7 @@
   "name": "qwen3.8-27b",
   "vllm_version": "0.31.0",
   "gpu_util": 0.4,
-  "max_len": 16384
+  "max_len": 32768
  },
  "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용."
 }
