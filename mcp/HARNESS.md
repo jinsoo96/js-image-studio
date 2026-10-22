@@ -29,6 +29,7 @@
 - 처음 나오는 인물·장소는 add_to_series 로 더한다(옛 작품은 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄).
 
 ## 4. 긴 작업과 대화
+- 있는 파일을 옮기거나 틀로 쓸 땐 copy_file(src, dst) 한 번으로 복사하고 고칠 곳만 edit_file 로 고친다(read_file 로 읽어 write_file 로 다시 치지 않는다: 수만 자가 컨텍스트에 들어와 무거워지고 끊긴다).
 - 파일이 길면(콘티 16KB 안팎) write_file 을 part="first" → part="more"(4천 자 안팎씩) → part="last" 로 나눠 쓴다(last 에서 문법 검사). 일부만 고칠 땐 edit_file.
 - 한 번의 답에서 도구를 30번 넘게 부르지 않는다(사내 모델이 마지막 답을 시간 안에 못 시작한다). 콘티·컷 설명이 끝나면 답을 끝내고, 그리기는 다음 답에서.
 - prepare_episode·make_episode·vast_draw·compose·export 는 모두 작업이다(긴 한 화는 몇 분에서 몇 시간): state 가 running 이면 panels_done/panels_total·eta_s 를 알리고 답을 끝낸다. 작업은 대화·턴 제한과 상관없이 이어 도니 기다리며 도구를 되풀이하지 않는다. 작업 번호를 잃었거나 새 대화면 list_jobs 로 이어 본다. stalled 가 true 면 멈춘 것이니 그대로 사용자에게 알린다.

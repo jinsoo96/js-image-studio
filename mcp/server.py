@@ -789,6 +789,36 @@ def edit_file(path: str, old: str, new: str, series: str = "") -> str:
 
 
 @mcp.tool()
+def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> str:
+    """작업실 안 파일을 그대로 복사한다. 내용을 읽어 다시 쓰지 않으니 긴 콘티·컷 설명(수만 자)을 옮길 때 이걸 쓴다(read_file → write_file 로 옮기지 않는다).
+    src 는 작업실 안 어디든, dst 는 write_file 이 쓸 수 있는 곳(작품 폴더의 .py .json .md .txt, worklogs/ 등). series 를 주면 두 경로 모두 그 작품 폴더 기준.
+    dst 가 있는 폴더면 같은 이름으로 그 안에. 이미 있는 파일은 overwrite=True 일 때만 덮어쓰고 원본은 state/mcp_backups/ 에 남긴다. 복사한 뒤 고칠 곳만 edit_file."""
+    # 모델이 3만 자를 읽어 들여 그대로 다시 치면 컨텍스트가 무거워지고 한 번에 다 못 써 끊겼다(2026-10-22 미사일 스튜디오)
+    try:
+        s = _existing(src, series)
+    except NotFound as e:
+        return str(e)
+    if not s.is_file():
+        return f"파일이 아니다: {src}"
+    base = f"series/{_series(series).name}/" if series else ""
+    d = _inside(base + dst.replace("\\", "/").lstrip("/"))
+    if d.is_dir():
+        d = d / s.name
+    if not _writable(d):
+        return f"여기는 쓸 수 없다: {d.relative_to(ROOT.resolve()).as_posix()} (작품 폴더의 글 파일·worklogs 만)"
+    if d.resolve() == s.resolve():
+        return "src 와 dst 가 같은 파일이다"
+    note = ""
+    if d.exists():
+        if not overwrite:
+            return f"이미 있다: {d.relative_to(ROOT.resolve()).as_posix()} (덮어쓰려면 overwrite=True)"
+        note = _backup(d)
+    d.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(s, d)
+    return f"복사했다 {s.relative_to(ROOT.resolve()).as_posix()} → {d.relative_to(ROOT.resolve()).as_posix()} ({d.stat().st_size}바이트){note}"
+
+
+@mcp.tool()
 def new_episode(series: str, episode: str, template: str = "") -> str:
     """새 회차 폴더를 앞 회차 틀로 연다: template 회차(기본 = 그 작품의 가장 최신 회차)의 make_storyboard.py·build_panels.py·trailer.json 을 복사한다.
     그다음 read_file 로 열어 사용자 이야기에 맞게 고쳐 write_file 로 쓰고 prepare_episode 를 돌린다. 이미 있는 회차 폴더는 건드리지 않는다."""

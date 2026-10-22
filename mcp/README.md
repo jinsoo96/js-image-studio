@@ -9,7 +9,7 @@
 | `status` · `credits` | 작품·회차·작화·합성 상태, 진행 중 작업, 남은 크레딧 | 0 |
 | `list_panels` · `contact_sheet` | 컷 목록 · 검수용 모아보기 그림(경로를 돌려줌, `state\mcp_sheets\`) | 0 |
 | `review_panels` | 그림 검수: 그림을 보는 모델(`qwen3.8-27b`, agent platform 공인망 게이트웨이)이 컷 그림 + 컷 설명을 맞대어 인원·좌우·시선·옷·표정·배경 판정과 고칠 점. 8컷 이하는 바로, 더 많으면 작업(`state\mcp_reviews\`). 본체 `vision_review.py`(명령줄로도 돈다) | 0 |
-| `list_files` · `read_file` · `write_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절 | 0 |
+| `list_files` · `read_file` · `write_file` · `copy_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절. `copy_file` 은 내용을 읽지 않고 그대로 복사(긴 콘티를 옮길 때) | 0 |
 | `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
 | `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
 | `compose` · `export` | 합성·PDF·기계 점검 / 예고편·epub·exports 복사(작업) | 0 |
