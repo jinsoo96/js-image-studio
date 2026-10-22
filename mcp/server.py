@@ -202,6 +202,8 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
         if f.name.endswith(".status.json") or f.stat().st_mtime < since:
             continue
         old = _json(f, {})
+        if not isinstance(old, dict):  # 작업 기록이 아닌 JSON(손으로 둔 명령 목록 등)이 섞여도 모든 작업 도구가 멈추지 않게(2026-10-22 'list' has no attribute 'get')
+            continue
         if old.get("fingerprint") == fp:
             raise RepeatedJob(json.dumps({"error": "repeated_job", "previous_job": old.get("id"),
                                           "previous": json.loads(job_status(old.get("id"), tail_lines=5))}, ensure_ascii=False))

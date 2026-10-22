@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -113,22 +114,42 @@ def _role(role: str):
         return None
 
 
-def dataset(series: Path, log=print, name: str = "") -> str:
+def _small(d: Path, res: int) -> Path:
+    """짝을 긴 변 res 로 줄인 사본(<_restyle>/<res>/in·out). 학습이 짝 두 장(목표 + 편집 조건)을 다 넣어 1024 에선 스텝당 약 10초였다
+    (2026-10-22 RunPod RTX PRO 6000): 768 이면 토큰이 약 절반."""
+    out = d / str(res)
+    for sub in ("in", "out"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
+        for f in sorted((d / sub).iterdir()):
+            g = out / sub / f.name
+            if g.exists():
+                continue
+            if f.suffix == ".png":
+                im = lora._fit(Image.open(f).convert("RGB"), res)
+                im.resize((im.width // 16 * 16, im.height // 16 * 16), Image.LANCZOS).save(g)
+            elif f.suffix == ".txt":
+                shutil.copy2(f, g)
+    return out
+
+
+def dataset(series: Path, log=print, name: str = "", res: int = 0) -> str:
     """짝을 서버 input/restyle_<작품>_{in,out} 에 올리고 학습 데이터를 만든다. 목록 노드라 짝마다 한 번씩 돈다:
-    정본 → VAEEncode(목표 잠재) · Qwen 판 → TextEncodeQwenImage21 images.image_1(편집 조건, 캡션은 'Convert image 1 to …')."""
+    정본 → VAEEncode(목표 잠재) · Qwen 판 → TextEncodeQwenImage21 images.image_1(편집 조건, 캡션은 'Convert image 1 to …').
+    res 를 주면 짝을 긴 변 res 로 줄여 올린다(데이터 이름 끝에 res, 학습도 같은 res 로 부른다)."""
     from concurrent.futures import ThreadPoolExecutor
     from comfy_client import Comfy
     from comfy_panel import CLIP, VAE
     c = Comfy()
-    d = _dir(series)
+    d = _dir(series) if not res else _small(_dir(series), res)
     slug = series.name.replace("-", "")
-    fin, fout = f"restyle_{slug}_in", f"restyle_{slug}_out"
+    tag = str(res) if res else ""
+    fin, fout = f"restyle_{slug}_in{tag}", f"restyle_{slug}_out{tag}"
     have = {f.stem for f in (d / "in").glob("*.png")}  # 입력이 있는 짝만(짝 만들기가 중간이면 목표만 있는 것은 뺀다)
     up = [(f, fin, "image/png") for f in sorted((d / "in").glob("*.png"))]
     up += [(f, fout, "text/plain" if f.suffix == ".txt" else "image/png") for f in sorted((d / "out").iterdir()) if f.stem in have]
     with ThreadPoolExecutor(6) as ex:
         list(ex.map(lambda a: c.upload_image(a[0], a[0].name, subfolder=a[1], ctype=a[2]), up))
-    name = name or f"webtoon/{slug}_restyle"
+    name = name or f"webtoon/{slug}_restyle{tag}"
     wf = _role("restyle_dataset")
     if wf:  # 서버 워크플로우 webtoon_restyle_dataset_uc(화면에서 열어 고칠 수 있다): 폴더·이름만 넣는다
         from saved_workflow import load_ui, to_api
@@ -162,14 +183,14 @@ def dataset(series: Path, log=print, name: str = "") -> str:
 
 
 def train(series: Path, steps: int = 1500, rank: int = 32, lr: float = 1e-4, chunk: int = 500, log=print, role: str = "train_lora",
-          resume: str = "", resume_steps: int = 0) -> dict:
+          resume: str = "", resume_steps: int = 0, res: int = 0) -> dict:
     """기본은 UC fp8 원본 위(역할 train_lora, 옆길). 공식 bf16 원본 위(train_lora_base)는 참고 그림만큼 길어진 입력에서 메모리가 빠듯해
     ComfyUI 가 CUDA 'invalid argument' 로 통째로 죽었다(2026-10-21, 같은 bf16 이라도 짧은 입력의 그림체 학습은 3000스텝 무사)."""
     info = json.loads((_dir(series) / "data.json").read_text(encoding="utf-8"))
     key = WHO if role == "train_lora" else f"{WHO}@{role.replace('train_lora_', '')}"
     lora.set_entry(series, key, {"trigger": f"{series.name.replace('-', '')}restyle", "model": "uc"})
     return lora.train(series, WHO, steps, rank, lr, log=log, register=True, chunk=chunk, role=role,
-                      dataset=f"webtoon/{series.name.replace('-', '')}_restyle", count=info["count"], resume=resume, resume_steps=resume_steps)
+                      dataset=f"webtoon/{series.name.replace('-', '')}_restyle{res or ''}", count=info["count"], resume=resume, resume_steps=resume_steps)
 
 
 def apply(series: Path, episode: str, ids: list, src_folder: str = "panels_hf_vast", file: str = "", variant: str = "restyle",
@@ -300,6 +321,8 @@ def main():
     ap.add_argument("--strength", type=float, default=0.6)
     ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--rank", type=int, default=32)
+    ap.add_argument("--res", type=int, default=0, help="dataset·train: 짝을 긴 변 이만큼으로 줄인 데이터(예 768, 학습이 약 두 배 빠르다)")
+    ap.add_argument("--chunk", type=int, default=500, help="train: 이 스텝마다 저장하고 이어 학습")
     ap.add_argument("--src", default="panels_hf_vast")
     ap.add_argument("--file", default="")
     ap.add_argument("--files", default="")
@@ -312,9 +335,9 @@ def main():
     if a.cmd == "pairs":
         print(json.dumps({k: v for k, v in pairs(series, a.strength, limit=a.limit).items() if k != "items"}, ensure_ascii=False)[:400])
     elif a.cmd == "dataset":
-        print(dataset(series))
+        print(dataset(series, res=a.res))
     elif a.cmd == "train":
-        print(train(series, a.steps, a.rank, resume=a.resume, resume_steps=a.resume_steps))
+        print(train(series, a.steps, a.rank, chunk=a.chunk, resume=a.resume, resume_steps=a.resume_steps, res=a.res))
     elif a.cmd == "apply":
         apply(series, a.episode, a.panels.split(","), a.src, a.file, a.variant)
     elif a.cmd == "eval":
