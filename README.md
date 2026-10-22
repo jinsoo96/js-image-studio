@@ -90,6 +90,7 @@ $ep = "series\d-plus-18-hf\episodes\ep003"
 | `sepia_flashback.py` · `tv_frame.py` · `ecg_graphic.py` · `strip_panel.py` | 합성 재료 컷(콘티 composite 로 run_episode 가 부름) |
 | `review.py` | 점검표(run_episode 가 부름) |
 | `collage.py` · `cover.py` · `lineup.py` | 표지·라인업 만들 때 가끔 |
+| `ailism_publish.py` | Ailism Original(play.ailism.team)에 API 로 게시: `works`(내 작품) · `work <slug>`(만들기·고치기, 작가 이름 "미사일 발사대") · `episode <slug> <회차 폴더\|PDF\|그림 폴더>`(합성본을 PDF 와 같은 자리에서 잘라 올림, `--publish now\|schedule\|draft`, 고칠 땐 `--replace 회차번호`). 키는 CREDENTIALS 의 Ailism 절. MCP 는 `ailism_works`·`ailism_work`·`publish_ailism` |
 
 | 쉬는 도구(ComfyUI·RunPod 판) | |
 |---|---|

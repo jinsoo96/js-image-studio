@@ -1621,6 +1621,74 @@ def export(series: str, episode: str) -> str:
     pdf = _link(ROOT / "exports" / day / f"{name}.pdf")
     return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "")
 
+# ── Ailism Original 에 게시(tools/ailism_publish.py, API 키로) ─────────────────
+@mcp.tool()
+def ailism_works() -> str:
+    """Ailism Original(play.ailism.team)에 올린 내 작품 목록: 주소 이름(slug)·제목·작가·회차 수·공개 상태·링크.
+    publish_ailism·ailism_work 에 넣을 slug 를 여기서 찾는다."""
+    return _run([PY, str(TOOLS / "ailism_publish.py"), "works"], timeout=60)
+
+
+@mcp.tool()
+def ailism_work(slug: str, title: str = "", summary: str = "", genre: str = "", tags: str = "", age: str = "", status: str = "",
+                days: str = "-", cover: str = "", author: str = "", visible: str = "") -> str:
+    """Ailism Original 작품을 만들거나(없는 slug + title) 고친다. 주지 않은 칸은 지금 값 그대로, 작가 이름은 늘 넣는다(기본 '미사일 발사대').
+    사용자가 Ailism 에 새 작품을 올리라거나 작품 정보를 바꾸라고 할 때만 부른다(바로 사이트에 반영된다).
+    slug: 영문 소문자·숫자·- (예: d-plus-18). genre: 로맨스·드라마·판타지·일상·개그·스릴러 등. tags: 쉼표로 8개까지. age: all · 15.
+    status: ongoing · completed · hiatus. days: mon,thu 처럼(빈 문자열이면 비정기, '-' 면 그대로). cover: 세로 3:4 그림 경로(작업실 기준).
+    visible: '' 그대로 · 'true' 공개 · 'false' 비공개. 스튜디오 화면에서 작품 정보를 저장하면 작가 이름이 계정 이름으로 돌아가니 그때 이 도구를 한 번 부른다."""
+    cmd = [PY, str(TOOLS / "ailism_publish.py"), "work", slug]
+    if title:
+        cmd += ["--title", title]
+    if summary:
+        f = JOBS / f"ailism_summary_{slug}.txt"
+        JOBS.mkdir(parents=True, exist_ok=True)
+        f.write_text(summary, encoding="utf-8")
+        cmd += ["--summary-file", str(f)]
+    for flag, v in (("--genre", genre), ("--tags", tags), ("--age", age), ("--status", status), ("--author", author)):
+        if v:
+            cmd += [flag, v]
+    if days != "-":
+        cmd += ["--days", days]
+    if cover:
+        cmd += ["--cover", str(_inside(cover))]
+    if visible.lower() in ("true", "false"):
+        cmd += ["--visible" if visible.lower() == "true" else "--hidden"]
+    return _run(cmd, timeout=180)
+
+
+@mcp.tool()
+def publish_ailism(series: str, episode: str, slug: str, title: str = "", thumb: str = "", note: str = "", publish: str = "now",
+                   publish_at: str = "", replace: int = 0) -> str:
+    """다 만든 회차(compose·export 뒤)를 Ailism Original 에 올린다. 사용자가 Ailism 에 올리라고 했을 때만 부른다: publish=now 면 바로 공개된다.
+    합성본(out/<회차>_full.png)을 PDF 와 같은 자리(컷 사이 여백)에서 잘라 올리고, 제목을 비우면 콘티 title_card 에서 'N화.' 를 뗀 것.
+    slug: Ailism 작품 주소 이름(모르면 ailism_works, 작품이 없으면 ailism_work 로 먼저 만든다). thumb: 목록 그림(컷 번호 p010 이나 그림 경로, 비우면 첫 그림 윗부분).
+    publish: now · schedule(publish_at 에 ISO 시각, 예 2026-10-25T18:00:00+09:00) · draft(저장만). 같은 회차를 다시 올리면 회차가 하나 더 생긴다
+    → 이미 올린 회차를 고칠 땐 replace=회차 번호. 업로드는 분당 20장이라 60장이면 3분 남짓(작업으로 돈다)."""
+    ep = _episode(series, episode)
+    if not slug.strip():
+        return "slug 가 비었다. 지금 올린 작품:\n" + ailism_works()
+    if publish not in ("now", "schedule", "draft"):
+        return "publish 는 now · schedule · draft"
+    if not (ep / "out" / f"{ep.name}_full.png").exists():
+        return f"{ep.name} 합성본이 없다. compose 를 먼저 부른다"
+    cmd = [PY, str(TOOLS / "ailism_publish.py"), "episode", slug.strip(), str(ep), "--publish", publish]
+    if title:
+        cmd += ["--title", title]
+    if thumb:
+        pid = re.fullmatch(r"p\d+\w*", thumb.strip())
+        f = next((ep / d / f"{thumb.strip()}.png" for d in ("panels_hf", "panels") if pid and (ep / d / f"{thumb.strip()}.png").exists()), None)
+        cmd += ["--thumb", str(f or _inside(thumb))]
+    if note:
+        cmd += ["--note", note]
+    if publish_at:
+        cmd += ["--at", publish_at]
+    if replace:
+        cmd += ["--replace", str(int(replace))]
+    job = _start_job("publish_ailism", ep, [{"label": f"Ailism 게시({slug} {ep.name}, {publish})", "cmd": cmd}])
+    return (f"작업 시작 {job}: {ep.name} → play.ailism.team/ko/webtoon/{slug}. 3~4분 안팎. "
+            f"기다리지 말고 사용자에게 작업 번호를 알리고 답을 끝낸다. 끝나면 job_status('{job}') 로그 끝에 회차 링크가 나온다.")
+
 
 def _job_review(spec: dict, started: str) -> list:
     """이 작업이 그린 컷 중 사람 확인이 남은 컷. 검수(vast/refine.py record_review)가 <회차>/review/staging.json 에 남긴 것을 읽는다."""
