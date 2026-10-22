@@ -9,8 +9,9 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
-- 크레딧을 쓰는 도구(draw_panels)는 confirm_credits 가 예상 비용 이상이어야 돌고, 한 번에 40컷까지.
-- vast_* 도구는 회사 공용 vast.ai GPU 로 크레딧 없이 그린다. 그리는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다 set_model, 한 번만 바꿀 땐 vast_draw 의 model. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
+- 그리기는 GPU 서버(ComfyUI; state/comfy_url.txt 가 가리키는 곳, 지금은 RunPod 파드) 하나로 크레딧 없이 한다. 힉스필드(유료) 도구는 뺐다(2026-10-22 사용자,
+  손으로 쓸 땐 tools/hf_panel.py). 그리는 판은 그 서버에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다는 series.json model,
+  한 번만 바꿀 땐 vast_draw 의 model. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
@@ -120,14 +121,6 @@ def _run(cmd, timeout=25) -> str:
     return out[-4000:] if out else f"(출력 없음, 종료 코드 {r.returncode})"
 
 
-def _credits() -> float | None:
-    try:
-        out = _run([PY, "-c", "import sys; sys.path.insert(0, r'%s'); import hf_gen; print(hf_gen.credits())" % TOOLS], timeout=20)
-        return float(re.findall(r"[\d.]+", out)[-1])
-    except Exception:
-        return None
-
-
 def _panels_json(ep: Path) -> list:
     return _json(ep / "panels.json", []) or []
 
@@ -163,7 +156,7 @@ def _running_job(ep: Path):
 
 
 class JobBusy(Exception):
-    """그 회차(작품)에 아직 도는 작업이 있음. 메시지는 JSON(도는 작업 번호·상태): 에이전트가 그 번호로 job_wait 한다."""
+    """그 회차(작품)에 아직 도는 작업이 있음. 메시지는 JSON(도는 작업 번호·상태): 에이전트가 그 번호로 job_status(wait=50) 한다."""
 
 
 def _ensure_idle(ep: Path):
@@ -314,18 +307,40 @@ def _ids(text) -> list:
 
 
 # ── 읽기 도구 ─────────────────────────────────────────────────
+
+def _gpu_host() -> str:
+    """지금 그리기에 쓰는 ComfyUI 서버의 호스트(state/comfy_url.txt → COMFY_URL 순). 도구 설명은 서버 이름을 박지 않고 여기서 읽는다."""
+    import urllib.parse as _up
+    url = ""
+    sw = ROOT / "state" / "comfy_url.txt"
+    if sw.exists():
+        url = sw.read_text(encoding="utf-8").strip().splitlines()[0] if sw.read_text(encoding="utf-8").strip() else ""
+    url = url or os.environ.get("COMFY_URL", "")
+    if not url:
+        return "주소 없음(state/comfy_url.txt 비어 있음)"
+    host = _up.urlparse(url).netloc or url
+    kind = "RunPod 파드" if "runpod" in host else ("vast.ai" if "vast" in host else "ComfyUI")
+    return f"{host} ({kind})"
+
 @mcp.tool()
 def guide() -> str:
     """웹툰 하네스 안내: 단계(작품 열기 → 콘티 → 컷 설명 → 그리기 → 이어짐 → 합성·출판), 단계마다 통과해야 하는 관문, 돈·장비·내용 규칙.
     어떤 에이전트든 일을 시작하기 전에 꼭 한 번 부른다(이 MCP 는 따로 시스템 프롬프트가 필요 없다)."""
-    return (ROOT / "mcp" / "HARNESS.md").read_text(encoding="utf-8")
+    return f"지금 그리는 GPU 서버: {_gpu_host()} (state/comfy_url.txt 또는 COMFY_URL)\n\n" + (ROOT / "mcp" / "HARNESS.md").read_text(encoding="utf-8")
 
 
 @mcp.tool()
 def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000) -> str:
-    """작업실 문서를 읽는다. doc: CLAUDE · README · LESSONS · OPEN_ISSUES · ACTING_GUIDE(작업실 공통),
-    또는 series 를 주면 README · SERIES · STYLE · ASSETS(그 작품). 긴 문서는 offset 으로 이어 읽는다."""
+    """작업실 문서·스킬을 읽는다. doc: CLAUDE · README · LESSONS · OPEN_ISSUES · ACTING_GUIDE(작업실 공통),
+    series 를 주면 README · SERIES · STYLE · ASSETS(그 작품), 'skill' 이면 스킬 목록과 웹툰 템플릿, 'skill:<이름>' 이면 그 스킬
+    (storyboard 콘티 · panel-spec 컷 설명 · continuity 이어 그리기 · asset 에셋 · staging-review 연출 검수 · lettering-publish 식자·출판).
+    그 일을 시작하기 전에 해당 스킬을 읽고 순서·규칙대로 한다. 긴 문서는 offset 으로 이어 읽는다."""
     d = doc.strip().upper()
+    if d == "SKILL" or d.startswith("SKILL:"):
+        t = _skill_text(doc.strip()[6:])
+        part = t[offset:offset + max_chars]
+        return part + (f"\n\n(… 전체 {len(t)}자 중 {offset}~{offset + len(part)}. 이어 읽으려면 offset={offset + len(part)})"
+                       if offset + len(part) < len(t) else "")
     if series:
         if d not in SERIES_DOCS:
             return f"작품 문서는 {', '.join(SERIES_DOCS)} 중 하나"
@@ -340,11 +355,9 @@ def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000
     return part + more
 
 
-@mcp.tool()
-def read_skill(name: str = "") -> str:
-    """이미지 스튜디오 스킬(작업 노하우 설명서 skills/<이름>/SKILL.md)을 읽는다. 비우면 스킬 목록과 웹툰 템플릿.
-    스킬: storyboard(콘티) · panel-spec(컷 설명) · continuity(이어 그리기) · asset(에셋) · staging-review(연출 검수) · lettering-publish(식자·출판).
-    그 일을 시작하기 전에 해당 스킬을 읽고 순서·규칙대로 한다."""
+def _skill_text(name: str = "") -> str:
+    """스킬(작업 노하우 설명서 skills/<이름>/SKILL.md). 비우면 스킬 목록과 웹툰 템플릿. read_doc('skill:<이름>') 이 부른다
+    (도구를 줄이려고 read_doc('skill:…') 을 read_doc 에 합침, 2026-10-22)."""
     sk = ROOT / "skills"
     n = (name or "").strip().lower()
     if not n:
@@ -360,7 +373,7 @@ def read_skill(name: str = "") -> str:
 
 @mcp.tool()
 def status() -> str:
-    """작품별 회차 목록(제목·컷 수·그린 컷·합성 여부), 진행 중인 작업, 남은 힉스필드 크레딧."""
+    """작품별 회차 목록(제목·컷 수·그린 컷·합성 여부), 진행 중인 작업."""
     lines = []
     for s in sorted(d for d in (ROOT / "series").iterdir() if d.is_dir() and not d.name.startswith("_")):
         lines.append(f"# {s.name}")
@@ -373,9 +386,7 @@ def status() -> str:
             lines.append(f"- {ep.name}: {b.get('title_card', '')} | 컷 {len(panels)} | 새로 그릴 컷 {drawn}/{len(pj)} 그림 | "
                          f"합성 {'있음 ' + pdf.name if pdf else '없음'}")
     running = [st.name.replace('.status.json', '') for st in JOBS.glob('*.status.json') if (_json(st, {}) or {}).get('state') == 'running']
-    c = _credits()
     lines.append(f"\n진행 중인 작업: {', '.join(running) or '없음'}")
-    lines.append(f"남은 크레딧: {c if c is not None else '확인 실패'}")
     lines.append("정본·다음 할 일은 read_doc('OPEN_ISSUES') 와 각 작품 README.")
     return "\n".join(lines)
 
@@ -402,7 +413,7 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
 
 
 def _folder(folder: str) -> str:
-    """그림 폴더: 비우면 힉스필드 본편(panels_hf), "vast" 면 vast 판(panels_hf_vast)."""
+    """그림 폴더: 비우면 본편 그림(panels_hf), "vast" 면 GPU 서버로 그린 판(panels_hf_vast)."""
     f = (folder or "").strip().lower()
     if f in ("", "hf", "panels_hf"):
         return "panels_hf"
@@ -410,7 +421,7 @@ def _folder(folder: str) -> str:
         return "panels_hf_vast"
     if f in ("vast_restyle", "restyle", "panels_hf_vast_restyle"):
         return "panels_hf_vast_restyle"
-    raise ValueError('folder 는 비우거나(힉스필드 본편) "vast" · "vast_restyle"')
+    raise ValueError('folder 는 비우거나(본편) "vast" · "vast_restyle"')
 
 
 def _ep_dirs(series: str = ""):
@@ -487,7 +498,7 @@ def panel_info(series: str, episode: str, panel: str) -> str:
 @mcp.tool()
 def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> list:
     """검수용 모아보기를 만들어 그림 자체와 JSON(sheet 경로·link 원격 링크)을 돌려준다(그림을 직접 보고 판단한다). ids(쉼표) 또는 scene(장소 이름)으로 고른다.
-    비우면 새로 그린 컷 전부. folder="vast" 면 vast 로 그린 컷(panels_hf_vast). 사용자에게는 link 를 준다."""
+    비우면 새로 그린 컷 전부. folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast). 사용자에게는 link 를 준다."""
     ep = _episode(series, episode)
     sub = _folder(folder)
     pj = _panels_json(ep)
@@ -552,7 +563,7 @@ SYNC_REVIEW_MAX = 3
 def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
-    folder="vast" 면 vast 로 그린 컷을 본다(vast 판은 다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
+    folder="vast" 면 GPU 서버로 그린 컷을 본다(다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
     3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel·derive_panel·fix_faces 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw."""
     ep = _episode(series, episode)
     sd = _series(series)
@@ -686,38 +697,8 @@ def read_file(path: str, offset: int = 0, max_chars: int = 12000, series: str = 
     return part + more
 
 
-@mcp.tool()
-def write_file(path: str, content: str) -> str:
-    """작업실 글 파일 쓰기(덮어쓰기). 쓸 수 있는 곳: 작품 폴더(series/<작품>-hf/...)의 .py .json .md .txt, worklogs/, LESSONS.md, reader/index.html.
-    도구(tools/)·그림·에셋·.git 은 쓸 수 없다. 덮어쓰기 전 원본은 state/mcp_backups/ 에 남긴다. 파이썬 파일은 쓴 뒤 문법을 검사한다."""
-    p = _inside(path)
-    if not _writable(p):
-        return f"여기는 쓸 수 없다: {path}"
-    if "—" in content:
-        return "em dash(—) 는 쓰지 않는다(작업실 규칙). 쉼표·마침표로 바꿔 다시"
-    note = ""
-    if p.exists():
-        bk = BACKUPS / time.strftime("%Y%m%d-%H%M%S") / p.relative_to(ROOT.resolve())
-        bk.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(p, bk)
-        note = f" (원본 백업 {bk.relative_to(ROOT)})"
-    if p.suffix == ".py":
-        try:
-            compile(content, str(p), "exec")
-        except SyntaxError as e:
-            return f"파이썬 문법 오류라 쓰지 않았다: {e.msg} (줄 {e.lineno})"
-    if p.suffix == ".json":
-        try:
-            json.loads(content)
-        except ValueError as e:
-            return f"JSON 오류라 쓰지 않았다: {e}"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
-    return f"썼다 {p.relative_to(ROOT)} ({len(content)}자){note}"
-
-
-# 한 번에 약 8천 토큰까지만 쓰는 모델(agent app 의 Qwen)도 한 화 콘티(약 16KB)·컷 설명(약 22KB)을 쓸 수 있게:
-# start_file → append_file 여러 번 → check_file, 고칠 땐 edit_file. 문법 검사는 다 쓴 뒤 check_file 에서(조각마다는 못 함). 2026-10-16
+# 한 번에 약 8천 토큰까지만 쓰는 모델(agent app 의 Qwen)도 한 화 콘티(약 16KB)·컷 설명(약 22KB)을 쓸 수 있게 나눠 쓰기를 둔다(2026-10-16).
+# 예전엔 start_file → append_file → check_file 세 도구였는데, 도구 수를 줄이려고 write_file 의 part 로 합쳤다(2026-10-22).
 def _guard(path: str, content: str):
     p = _inside(path)
     if not _writable(p):
@@ -736,32 +717,52 @@ def _backup(p: Path) -> str:
     return f" (원본 백업 {bk.relative_to(ROOT)})"
 
 
+def _syntax_error(p: Path, t: str) -> str:
+    """.py 는 파이썬 문법, .json 은 JSON. 통과면 빈 글, 아니면 줄 번호와 그 근처."""
+    try:
+        if p.suffix == ".py":
+            compile(t, str(p), "exec")
+        elif p.suffix == ".json":
+            json.loads(t)
+    except SyntaxError as e:
+        ls = t.splitlines()
+        near = "\n".join(f"{i + 1}: {ls[i]}" for i in range(max(0, (e.lineno or 1) - 3), min(len(ls), (e.lineno or 1) + 2)))
+        return f"파이썬 문법 오류: {e.msg} (줄 {e.lineno})\n{near}"
+    except ValueError as e:
+        return f"JSON 오류: {e}"
+    return ""
+
+
 @mcp.tool()
-def start_file(path: str, content: str) -> str:
-    """긴 파일을 나눠 쓰기 시작한다: 첫 조각으로 새로 쓴다(있으면 백업 뒤 덮어씀). 이어서 append_file 로 나머지 조각을 붙이고 마지막에 check_file.
-    한 화 콘티·컷 설명처럼 한 번에 다 못 쓰는 파일에 쓴다. 조각은 4천 자 안팎으로."""
+def write_file(path: str, content: str, part: str = "whole") -> str:
+    """작업실 글 파일 쓰기. 쓸 수 있는 곳: 작품 폴더(series/<작품>-hf/...)의 .py .json .md .txt, worklogs/, LESSONS.md, reader/index.html.
+    도구(tools/)·그림·에셋·.git 은 쓸 수 없다. 덮어쓰기 전 원본은 state/mcp_backups/ 에 남긴다.
+    part: whole(통째로 덮어쓰기, 문법이 틀리면 안 씀) · 한 번에 다 못 쓰는 긴 파일(한 화 콘티·컷 설명)은 first(첫 조각으로 새로 씀) → more(조각 붙이기, 여러 번)
+    → last(마지막 조각을 붙이고 .py·.json 문법 검사). 조각은 4천 자 안팎, 줄바꿈은 content 에 넣는다. 일부만 고칠 땐 edit_file."""
     try:
         p = _guard(path, content)
     except ValueError as e:
         return str(e)
-    note = _backup(p)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
-    return f"시작 {p.relative_to(ROOT)} ({len(content)}자){note}. append_file 로 이어 쓰고 끝나면 check_file"
-
-
-@mcp.tool()
-def append_file(path: str, content: str) -> str:
-    """start_file 로 시작한 파일 끝에 조각을 붙인다(줄바꿈은 content 에 넣는다). 지금까지 길이를 돌려준다."""
-    try:
-        p = _guard(path, content)
-    except ValueError as e:
-        return str(e)
+    if part not in ("whole", "first", "more", "last"):
+        return "part 는 whole · first · more · last"
+    if part == "whole":
+        err = _syntax_error(p, content)
+        if err:
+            return err + "\n(쓰지 않았다)"
+    if part in ("whole", "first"):
+        note = _backup(p)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"썼다 {p.relative_to(ROOT)} ({len(content)}자){note}" + (". 이어서 part='more' 로 붙이고 마지막 조각은 part='last'" if part == "first" else "")
     if not p.exists():
-        return "파일이 없다. start_file 로 먼저 시작한다"
+        return "파일이 없다. part='first' 로 먼저 시작한다"
     with p.open("a", encoding="utf-8") as f:
         f.write(content)
-    return f"붙였다 {p.relative_to(ROOT)} (지금 {p.stat().st_size}바이트)"
+    if part == "more":
+        return f"붙였다 {p.relative_to(ROOT)} (지금 {p.stat().st_size}바이트)"
+    t = p.read_text(encoding="utf-8")
+    err = _syntax_error(p, t)
+    return (err + "\n(edit_file 로 고친다)") if err else f"다 썼다, 문법 통과 {p.relative_to(ROOT)} ({len(t)}자, {t.count(chr(10)) + 1}줄)"
 
 
 @mcp.tool()
@@ -788,25 +789,6 @@ def edit_file(path: str, old: str, new: str, series: str = "") -> str:
 
 
 @mcp.tool()
-def check_file(path: str, series: str = "") -> str:
-    """나눠 쓴 파일을 검사한다: .py 는 파이썬 문법, .json 은 JSON. 오류면 줄 번호와 그 근처를 보여 준다(edit_file 로 고친다)."""
-    p = _existing(path, series)
-    t = p.read_text(encoding="utf-8")
-    try:
-        if p.suffix == ".py":
-            compile(t, str(p), "exec")
-        elif p.suffix == ".json":
-            json.loads(t)
-    except SyntaxError as e:
-        ls = t.splitlines()
-        near = "\n".join(f"{i + 1}: {ls[i]}" for i in range(max(0, (e.lineno or 1) - 3), min(len(ls), (e.lineno or 1) + 2)))
-        return f"파이썬 문법 오류: {e.msg} (줄 {e.lineno})\n{near}"
-    except ValueError as e:
-        return f"JSON 오류: {e}"
-    return f"문법 통과 {p.relative_to(ROOT)} ({len(t)}자, {t.count(chr(10)) + 1}줄)"
-
-
-@mcp.tool()
 def new_episode(series: str, episode: str, template: str = "") -> str:
     """새 회차 폴더를 앞 회차 틀로 연다: template 회차(기본 = 그 작품의 가장 최신 회차)의 make_storyboard.py·build_panels.py·trailer.json 을 복사한다.
     그다음 read_file 로 열어 사용자 이야기에 맞게 고쳐 write_file 로 쓰고 prepare_episode 를 돌린다. 이미 있는 회차 폴더는 건드리지 않는다."""
@@ -822,8 +804,8 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
         shutil.copy2(ROOT / "skills" / "storyboard" / "make_storyboard_template.py", dst / "make_storyboard.py")
         (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
         (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
-        return (f"새 회차 {dst.relative_to(ROOT)} (첫 회차라 빈 콘티 틀). read_skill('storyboard') 를 읽고 make_storyboard.py 의 '컷' 부분을 "
-                "이야기대로 쓴 뒤(start_file·append_file·check_file) prepare_episode, 컷 설명은 set_panels 로 채운다")
+        return (f"새 회차 {dst.relative_to(ROOT)} (첫 회차라 빈 콘티 틀). read_doc('skill:storyboard') 를 읽고 make_storyboard.py 의 '컷' 부분을 "
+                "이야기대로 쓴 뒤(write_file, 길면 part='first'·'more'·'last') prepare_episode, 컷 설명은 set_panels 로 채운다")
     tpl = template.strip() or eps[-1]
     src = s / "episodes" / tpl
     if not src.is_dir():
@@ -839,7 +821,7 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
     (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
     return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사, 컷 설명 표(panels_spec.json) 준비. "
-            "make_storyboard.py 를 새 이야기로 고친 뒤(start_file·append_file·check_file) prepare_episode 로 storyboard.json 을 만들고, "
+            "make_storyboard.py 를 새 이야기로 고친 뒤(write_file, 길면 part='first'·'more'·'last') prepare_episode 로 storyboard.json 을 만들고, "
             "컷 설명은 set_panels 로 몇 컷씩 채운다(틀 회차의 컷 설명 예시는 read_file 로 그 회차 build_panels.py 를 본다)")
 
 
@@ -856,7 +838,7 @@ def new_series(spec: str) -> str:
      "model": "uc" | "anima"(그리는 판, 비우면 uc. anima 는 글만 받아 인물 생김새를 who 글로 맞춘다, 편집은 uc)}
     직함·호칭은 cast 의 role 에 적는다(콘티 관문이 대사의 호칭과 맞춰 본다). era_rule 은 그리기 지시와 그림 검수에 들어간다.
     폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 다음: new_episode(slug, "ep001") → 콘티 → set_panels →
-    make_episode(에셋 점검에서 인물 시트·장소 시안을 vast 로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
+    make_episode(에셋 점검에서 인물 시트·장소 시안을 GPU 서버로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
     try:
         d = json.loads(spec) if isinstance(spec, str) else spec
         made = ns.create(d)
@@ -907,7 +889,7 @@ def _check_model(name: str):
 
 @mcp.tool()
 def draw_models(series: str = "") -> str:
-    """그릴 때 고를 수 있는 판(모델)의 목록. vast ComfyUI 에 저장된 웹툰 워크플로우(mcp_use_webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
+    """그릴 때 고를 수 있는 판(모델)의 목록. GPU 서버 ComfyUI 에 저장된 웹툰 워크플로우(mcp_use_webtoon_vertical_<판>)에서 읽으니, 서버에서 워크플로우를 저장하거나 지우면
     목록이 따라 바뀐다. 판마다: label(설명) · use_for(어디에 맞는지·한계, 판을 고를 때 읽는다) · refs(참고 그림으로 얼굴·장소를 맞추나, 아니면 글로만) ·
     roles(생성·고치기·에셋·시안 역할마다 쓰는 워크플로우, own_roles 밖은 기본 판의 것) · refine(2차 다듬기를 지원하나) · models(쓰는 모델 파일) · ready(모델 파일이 서버에 다 있나) · default.
     series 를 주면 그 작품이 쓰는 판(current)도 알려 준다."""
@@ -925,26 +907,8 @@ def draw_models(series: str = "") -> str:
 
 
 @mcp.tool()
-def set_model(series: str, model: str) -> str:
-    """작품의 바탕 판을 고정한다(series.json model). 보통은 부를 필요가 없다: 비워 두면(또는 "auto") 컷마다 자동으로 고른다(vast_draw 설명). 사용자가 '이 작품은 Anima 로'처럼 판을 정했을 때만 쓴다. 쓸 수 있는 판은 vast ComfyUI 에 저장된 웹툰 워크플로우가 정한다: draw_models() 가 지금 목록과 각 판의
-    모델·참고 그림을 받는지·모델 파일이 서버에 다 있는지를 준다. 이미 그린 컷은 그대로다: 판을 바꾼 뒤 새로 그리는 컷부터 바뀐다(한 화 안에서 섞으면 그림체가 달라진다)."""
-    if model.strip().lower() != "auto":
-        err = _check_model(model)
-        if err:
-            return err
-    m = model.strip().lower()
-    d = _series(series)
-    f = d / "series.json"
-    spec = _json(f, {}) or {}
-    old = spec.get("model") or "uc"
-    spec["model"] = m
-    f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
-    return json.dumps({"series": d.name, "model": m, "was": old}, ensure_ascii=False)
-
-
-@mcp.tool()
 def redo_candidate(series: str, kind: str, name: str) -> str:
-    """사용자가 마음에 안 들어 한 새 인물 시트·장소 시안을 다른 시드로 다시 그린다(크레딧 0, vast, 약 2~4분). kind = sheet | location.
+    """사용자가 마음에 안 들어 한 새 인물 시트·장소 시안을 다른 시드로 다시 그린다(크레딧 0, GPU 서버, 약 2~4분). kind = sheet | location.
     지난 시안은 지우지 않고 assets/_candidates/_rejected/ 로 옮긴다. 생김새·옷을 바꾸려면 먼저 add_to_series 로 설정을 고친다."""
     try:
         s = _series(series)
@@ -959,7 +923,7 @@ def redo_candidate(series: str, kind: str, name: str) -> str:
         rej.mkdir(parents=True, exist_ok=True)
         shutil.move(str(cand), str(rej / f"{cand.stem}_{time.strftime('%m%d%H%M%S')}.png"))
     job = _start_job("redo_candidate", s, [{"label": f"시안 다시 그리기({kind} {name})", "cmd": [PY, str(VAST / "new_assets.py"), str(s), kind, name]}])
-    return f"작업 시작 {job}: 시안 {cand.relative_to(ROOT)} 를 다시 그린다(약 2~4분). job_wait('{job}')"
+    return f"작업 시작 {job}: 시안 {cand.relative_to(ROOT)} 를 다시 그린다(약 2~4분). job_status('{job}', wait=50)"
 
 
 SPEC_STUB = '''"""컷 설명은 panels_spec.json(MCP set_panels 로 채움). 이 파일은 공용 변환기 tools/panels_from_spec.py 를 부른다."""
@@ -1032,13 +996,13 @@ def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", re
             + ("\n다음: " + ("남은 컷 설명을 set_panels 로 채운다." if need else "prepare_episode 로 관문 채점을 받는다(통과해야 그린다).")))
 
 
-# ── 준비·비용 ─────────────────────────────────────────────────
+# ── 준비 ─────────────────────────────────────────────────────
 @mcp.tool()
 def prepare_episode(series: str, episode: str) -> str:
     """회차의 make_storyboard.py → build_panels.py 를 돌려 storyboard.json·panels.json 을 다시 만들고, 관문(격리 judge)으로 콘티·컷 설명을 채점한다(크레딧 안 씀).
     관문 기준표는 skills/storyboard/judge.json · skills/panel-spec/judge.json(하네스 s08 judge 와 같은 꼴, 합격 0.8, 꼭 지킬 기준은 하나라도 어기면 걸림).
     긴 한 화는 몇 분 걸려서 작업으로 돈다: 40초 안에 끝나면 그 자리에서 job_status 모양의 결과(gates = 관문 통과 여부, log_tail = 걸린 곳)를 주고,
-    아니면 state running 과 작업 번호를 주니 job_wait 로 이어 본다. 걸리면 결과의 '고칠 점'대로 make_storyboard.py(edit_file)나 컷 설명(set_panels)을 고치고 다시 부른다."""
+    아니면 state running 과 작업 번호를 주니 job_status(wait=50) 로 이어 본다. 걸리면 결과의 '고칠 점'대로 make_storyboard.py(edit_file)나 컷 설명(set_panels)을 고치고 다시 부른다."""
     ep = _episode(series, episode)
     steps = []
     for name, label in (("make_storyboard.py", "콘티(make_storyboard.py)"), ("build_panels.py", "컷 설명(build_panels.py)")):
@@ -1049,58 +1013,6 @@ def prepare_episode(series: str, episode: str) -> str:
     steps.append({"label": "관문(콘티·컷 설명 채점)", "cmd": [PY, str(TOOLS / "gates.py"), str(ep), "all"], "allow_fail": True})
     job = _start_job("prepare", ep, steps)
     return _wait_job(job, 40, 80)
-
-
-@mcp.tool()
-def estimate_draw(series: str, episode: str, ids: str = "") -> str:
-    """그릴 컷과 예상 크레딧. ids 를 비우면 panels.json 에서 아직 그림이 없는 컷 전부. 그리기 전에 이 결과를 사용자에게 보여 확인받는다."""
-    ep = _episode(series, episode)
-    pj = {p["id"]: p for p in _panels_json(ep)}
-    todo = _pids(ep, ids) or [i for i in pj if not (ep / "panels_hf" / f"{i}.png").exists()]
-    c = _credits()
-    return (f"그릴 컷 {len(todo)}개: {', '.join(todo) or '없음'}\n예상 크레딧 {len(todo) * COST_PER_PANEL:.2f}(장당 {COST_PER_PANEL}, 검열 오탐은 무료)\n"
-            f"남은 크레딧 {c}\n한 번에 {MAX_PANELS}컷까지. 기준 컷(SCENES anchor)이 먼저 그려져 있어야 한다.")
-
-
-# ── 크레딧을 쓰는 도구 ────────────────────────────────────────
-def _draw(series: str, episode: str, ids: list, confirm_credits: float, kind: str, note: str = "") -> str:
-    ep = _episode(series, episode)
-    pj = {p["id"] for p in _panels_json(ep)}
-    todo = [i for i in ids if i in pj]
-    if not todo:
-        return "그릴 컷이 없다(panels.json 에 있는 번호인지, prepare_episode 를 돌렸는지 확인)"
-    if len(todo) > MAX_PANELS:
-        return f"한 번에 {MAX_PANELS}컷까지다({len(todo)}컷). 나눠서 부른다"
-    cost = len(todo) * COST_PER_PANEL
-    if confirm_credits < cost:
-        return f"확인 값이 모자라다: 예상 {cost:.2f} 크레딧. 사용자에게 확인받은 뒤 confirm_credits={cost:.2f} 로 다시 부른다"
-    c = _credits()
-    if c is not None and c < cost:
-        return f"크레딧이 모자라다(남은 {c}, 필요 {cost:.2f})"
-    _ensure_idle(ep)
-    cmd = [PY, str(TOOLS / "hf_panel.py"), str(_series(series)), str(ep / "panels.json"), "--episode", ep.name, "--n", "1", "--only", ",".join(todo)]
-    job = _start_job(kind, ep, [{"label": f"{len(todo)}컷 그리기(예상 {cost:.2f} 크레딧)", "cmd": cmd},
-                                {"label": "합성용으로 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]}], note)
-    return f"작업 시작 {job}: {len(todo)}컷, 예상 {cost:.2f} 크레딧. 한 컷에 약 1분. job_status('{job}') 로 확인"
-
-
-@mcp.tool()
-def draw_panels(series: str, episode: str, ids: str, confirm_credits: float, reason: str = "") -> str:
-    """컷을 힉스필드로 그린다(크레딧 사용). ids: 쉼표로 컷 번호(빈 값이면 아직 없는 컷 전부). 이미 그림이 있는 컷을 주면 다시 그린다:
-    지금 그림은 panels_hf/_rejected/ 로 옮긴다(reason 에 이유). 다시 그리기 전에 그 컷 설명을 고친다(set_panels → prepare_episode).
-    confirm_credits 는 estimate_draw 의 예상 크레딧 이상이어야 돈다(사용자 확인을 받은 값). 끝나면 합성용 폴더에도 놓는다."""
-    ep = _episode(series, episode)
-    want = _pids(ep, ids) or [p["id"] for p in _panels_json(ep) if not (ep / "panels_hf" / f"{p['id']}.png").exists()]
-    if want and confirm_credits >= len(want) * COST_PER_PANEL:
-        rej = ep / "panels_hf" / "_rejected"
-        stamp = time.strftime("%m%d%H%M")
-        for i in want:
-            f = ep / "panels_hf" / f"{i}.png"
-            if f.exists():
-                rej.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(f), str(rej / f"{i}_{stamp}.png"))
-    return _draw(series, episode, want, confirm_credits, "draw", note=reason)
-
 
 
 # ── vast.ai 공용 GPU(크레딧 0) ───────────────────────────────
@@ -1115,12 +1027,14 @@ VAST_MAX = 80
 def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr: bool = True, aspect: str = "", seed: int = -1, fix: bool = True,
               check: bool = True, model: str = "", refine: bool = False, continuity: bool = True, continue_closeups: bool = False,
               restyle: bool = False) -> str:
-    """컷을 vast GPU 로 그린다(크레딧 0). model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
-    그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓰고 결과는 panels_hf_vast/ 에 쌓인다(힉스필드 본편 panels_hf 는 안 건드림).
+    """컷을 GPU 서버(ComfyUI)로 그린다(크레딧 0, 기본 작화 도구). 결과는 panels_hf_vast/ 에 쌓이고 본편(panels_hf)은 안 바뀐다: 한 컷을 다시 그려
+    보여 줄 때도 이것(ids='p022', seed 를 바꾸면 다른 그림) → compare_panel(what='redraw') 로 본편과 나란히 보여 주고, 사용자가 고르면 vast_adopt.
+    model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
+    그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓴다.
     refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
     ids: 쉼표로 컷 번호(비우면 vast 그림이 아직 없는 컷 전부). turbo=True 면 8스텝(컷당 약 30초), False 면 40스텝(약 2분).
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
-    fix=True(기본)면 그린 뒤 그림 보는 사내 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
+    fix=True(기본)면 그린 뒤 그림 보는 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
     continuity=True(기본)면 같은 장면의 앞 컷을 쓴다: 같은 인물 묶음의 넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다
     (2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 장소가 바뀌거나 시간 자막('수요일')·옷이 바뀐 컷에서는 쓰지 않는다. 어느 앞 컷을 썼는지 작업 로그에 남는다.
@@ -1133,13 +1047,13 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     pj = [p["id"] for p in _panels_json(ep)]
     want = _pids(ep, ids) or [i for i in pj if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
     if not want:
-        return "그릴 컷이 없다(vast 그림이 다 있다. 다시 그리려면 ids 를 준다)"
+        return "그릴 컷이 없다(GPU 서버 그림이 다 있다. 다시 그리려면 ids 를 준다)"
     if len(want) > VAST_MAX:
-        return f"공용 GPU 라 한 번에 {VAST_MAX}컷까지다({len(want)}컷). 나눠서 부른다"
+        return f"한 번에 {VAST_MAX}컷까지다({len(want)}컷). 나눠서 부른다"
     if aspect and aspect not in ("9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9"):
         return "aspect 는 9:16·2:3·3:4·1:1·4:3·3:2·16:9 중 하나"
     if not (sd / "assets" / "vast_refs").is_dir():
-        return "이 작품의 vast 참고 그림이 없다. 먼저 vast_make_assets(series) 를 부른다"
+        return "이 작품의 참고 그림(assets/vast_refs)이 없다. 먼저 vast_make_assets(series) 를 부른다"
     m = (model or "").strip().lower()
     if m:
         err = _check_model(m)
@@ -1156,7 +1070,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--check"] if check else []
     cmd += ["--refine"] if refine else []
     cmd += ([] if continuity else ["--no-continuity"]) + (["--continue-closeups"] if continue_closeups else [])
-    steps = [{"label": f"vast {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}]
+    steps = [{"label": f"GPU 서버 {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}]
     if restyle:
         sys.path.insert(0, str(VAST))
         import lora as L
@@ -1172,7 +1086,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
 
 @mcp.tool()
 def vast_make_assets(series: str, character: str = "all", what: str = "both") -> str:
-    """인물 에셋을 vast 로 만든다(크레딧 0): 시트에서 참고 그림 자르기 → 회색 기본복 베이스 몸·센 표정 12가지(오열·고함·경멸 등).
+    """인물 에셋을 GPU 서버로 만든다(크레딧 0): 시트에서 참고 그림 자르기 → 회색 기본복 베이스 몸·센 표정 12가지(오열·고함·경멸 등).
     character: 인물 id(cast.json) 또는 all. what: base · expr · both(센 표정) · subtle(잔잔한 표정 20가지, 차분한 연기용. series.json expressions 로 바꿀 수 있다)
     · turn(캐릭터 시트: 얼굴 + 앞·뒤·옆·3/4 전신. 칸마다 잘라 뒷모습·옆모습 컷의 참고 그림으로 그리기 도구가 알아서 쓴다, 인물당 약 20초).
     이미 있는 그림은 건너뛴다. make_episode 가 새 화를 만들 때 필요한 것을 알아서 만드니, 따로 부르는 건 에셋만 다시 만들거나 보탤 때다."""
@@ -1190,21 +1104,35 @@ def vast_make_assets(series: str, character: str = "all", what: str = "both") ->
 
 
 @mcp.tool()
-def loras(series: str = "") -> str:
-    """인물 LoRA 상태. server: vast ComfyUI 에 있는 LoRA 파일(webtoon/… 는 여기서 학습한 것). series 를 주면 registered: 그 작품에 등록된 인물별 LoRA
-    {file, trigger, model(학습한 판, 그 판으로 그릴 때만 붙는다), strength, on, steps, images, train_s}, can_train: 학습할 수 있는 인물(cast 에 있고 표정 은행이 있는 사람).
-    train_workflow: 학습에 쓰는 서버 워크플로우(역할 train_lora). training_disabled 가 있으면 지금 이 서버에선 학습하지 않는다(이유·대안)."""
+def loras(series: str = "", character: str = "", strength: float = -1, on: str = "", file: str = "") -> str:
+    """LoRA 상태를 보고, character 를 주면 그 LoRA 를 고친다. server: GPU 서버 ComfyUI 에 있는 LoRA 파일(webtoon/… 는 여기서 학습한 것).
+    series 를 주면 registered: 그 작품에 등록된 LoRA {file, trigger, model(학습한 판, 그 판으로 그릴 때만 붙는다), strength, on, steps, images, train_s},
+    can_train: 학습할 수 있는 인물(cast 에 있고 표정 은행이 있는 사람), train_workflow: 학습에 쓰는 서버 워크플로우(역할 train_lora).
+    training_disabled 가 있으면 지금 이 서버에선 학습하지 않는다(이유·대안).
+    고치기(series + character, 그림체는 style): strength(0~1.5, 얼굴이 너무 굳거나 그림체가 무너지면 내린다, -1 은 그대로) · on('true' 붙임 · 'false' 안 붙임 · 비우면 그대로)
+    · file(서버 LoRA 파일 이름으로 바꾸기, server 목록). 다음에 그리는 컷부터 바뀐다(예전 loras(series, character, …) 를 여기에 합침, 2026-10-22)."""
     sys.path.insert(0, str(VAST))
     import lora as L
+    if character:
+        if not series:
+            return _fail("series_required", given={"character": character})
+        sd = _series(series)
+        who = L.STYLE if character in ("style", "그림체") else character
+        if who not in L.registry(sd) and not file:
+            return _fail("no_lora", given=character, registered=sorted(L.registry(sd)), reason="학습한 LoRA 가 없다: lora_train 으로 학습하거나 file 로 지정")
+        if file and file not in L.server_loras():
+            return _fail("unknown_lora_file", given=file, candidates=_near(file, L.server_loras()))
+        flag = {"true": True, "false": False}.get(on.strip().lower()) if on else None
+        cur = L.set_entry(sd, who, {"strength": strength if strength >= 0 else None, "on": flag, "file": file or None})
+        return json.dumps({"series": sd.name, "character": who, "lora": cur}, ensure_ascii=False)
     out = {"server": L.server_loras()}
     m = _draw_models()
     out["train_workflow"] = {k: v["roles"].get("train_lora") for k, v in m.items() if "train_lora" in v.get("own_roles", [])}
     if series:
-        blocked = L.training_block(_series(series))
+        sd = _series(series)
+        blocked = L.training_block(sd)
         if blocked:
             out["training_disabled"] = blocked
-    if series:
-        sd = _series(series)
         out["series"] = sd.name
         out["registered"] = L.registry(sd)
         out["can_train"] = L.people(sd)
@@ -1213,12 +1141,12 @@ def loras(series: str = "") -> str:
 
 @mcp.tool()
 def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learning_rate: float = 0.0, panels: int = 0, chunk: int = 500) -> str:
-    """LoRA 를 vast 에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로),
+    """LoRA 를 GPU 서버에서 학습한다(크레딧 0, GPU 시간만, 작업으로 돈다). character 는 인물 id, 쉼표로 여럿, all 이면 학습할 수 있는 인물 전부(차례로),
     style 이면 그 작품의 그림체 LoRA(본편 컷으로 학습, 사람 없는 컷까지 모든 컷에 붙는다). 학습 데이터는 도구가 만든다:
     인물은 표정 은행(정면 상반신) + 기본 전신 + 그 인물 혼자 나온 잘 된 컷 panels 장(기본 12), 그림체는 본편 컷 panels 장(기본 100, 샷 종류를 고루, 종류마다 둘은 평가용으로 남김).
     서버 워크플로우(역할 train_lora, WebtoonTrainLora: 묶음 잠재 정규화 · alpha=rank + PEFT 초기값 · 블록 안 층만 · 속도 손실 · LoRA fp32, 화면에서 값을 고칠 수 있다)로 학습한다.
     steps 는 전체 스텝(0 이면 인물 1500 · 그림체 3000), rank·learning_rate 가 0 이면 워크플로우 값(16 · 1e-4).
-    chunk 스텝마다 저장하고 이어 학습해 중간 파일이 남는다: 이때는 꺼 둔 채 등록되니 lora_compare 로 견줘 고른 뒤 set_lora(file=…, on=True).
+    chunk 스텝마다 저장하고 이어 학습해 중간 파일이 남는다: 이때는 꺼 둔 채 등록되니 lora_compare 로 견줘 고른 뒤 loras(series, character, file=…, on='true').
     chunk=0 이면 한 번에 학습하고 바로 켠다. 시간은 loras() 의 train_s 참고(그림체 100장 3000스텝은 약 2시간). 학습 중엔 같은 GPU 로 그리기가 기다린다."""
     sys.path.insert(0, str(VAST))
     import lora as L
@@ -1232,7 +1160,7 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
     tw = L.training_block(sd)
     if tw:  # 학습 워크플로우 데이터에 막아 둔 이유(extra.webtoon.disabled)가 있으면 작업을 띄우지 않는다
         return _fail("training_disabled", given=character, reason=tw,
-                     alternative="다른 GPU 에서 학습한 LoRA 파일을 서버 loras/webtoon/ 에 두고 set_lora(series, character, file=…) 로 등록")
+                     alternative="다른 GPU 에서 학습한 LoRA 파일을 서버 loras/webtoon/ 에 두고 loras(series, character, file=…) 로 등록")
     _ensure_idle(sd)
     steps_list = []
     for c in who:  # 여럿이면 한 작업 안에서 차례로(공용 GPU 큐를 한 번에 하나만 쓴다)
@@ -1244,7 +1172,7 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
                 cmd += [flag, str(v)]
         steps_list.append({"label": f"{'그림체' if style else '인물'} LoRA 학습({c})", "cmd": cmd})
     job = _start_job("lora_train", sd, steps_list)
-    nxt = f"job_wait('{job}') 를 되풀이(학습은 오래 걸린다), 끝나면 " + (f"lora_compare('{sd.name}', …) 로 중간 파일을 견줘 고르고 set_lora" if chunk else f"loras('{sd.name}')")
+    nxt = f"job_status('{job}', wait=50) 를 되풀이(학습은 오래 걸린다), 끝나면 " + (f"lora_compare('{sd.name}', …) 로 중간 파일을 견줘 고르고 loras(series, character, …)" if chunk else f"loras('{sd.name}')")
     return json.dumps({"job": job, "next": nxt}, ensure_ascii=False)
 
 
@@ -1275,14 +1203,14 @@ def restyle(series: str, action: str = "status", episode: str = "", panels: str 
         cmd += ["--steps", str(steps)]
     _ensure_idle(sd)
     job = _start_job("restyle", sd, [{"label": f"Restyle {action}", "cmd": cmd}])
-    return json.dumps({"job": job, "next": f"job_wait('{job}')"}, ensure_ascii=False)
+    return json.dumps({"job": job, "next": f"job_status('{job}', wait=50)"}, ensure_ascii=False)
 
 
 @mcp.tool()
 def lora_compare(series: str, character: str = "style", strengths: str = "1.0", panels: int = 4, files: str = "") -> str:
     """학습한 LoRA 의 중간 파일들(lora_train 의 chunk 마다 저장된 것, loras() 의 checkpoints)을 같은 시드로 그려 한 장에 놓는다(작업으로 돈다).
     학습에 쓰지 않은 본편 컷을 골라 정답(원본) | LoRA 끔 | 중간 파일 × strengths(쉼표, 예 0.6,0.8,1.0) 순서. 그림체(style)는 클로즈업·둘 이상·배경·와이드를 고루.
-    files 를 주면(쉼표) 그 파일들만. 결과는 exports/<날짜>/비교/ 의 jpg: 사람이 보고 고른 파일을 set_lora(series, character, file=…, on=True) 로 켠다.
+    files 를 주면(쉼표) 그 파일들만. 결과는 exports/<날짜>/비교/ 의 jpg: 사람이 보고 고른 파일을 loras(series, character, file=…, on='true') 로 켠다.
     너무 배운 파일은 데이터 컷을 베끼거나 얼룩이 지고, 덜 배운 파일은 LoRA 끔과 같아 보인다. 그리는 동안 loras.json 을 잠깐 바꿨다가 되돌린다."""
     sys.path.insert(0, str(VAST))
     import lora as L
@@ -1293,45 +1221,22 @@ def lora_compare(series: str, character: str = "style", strengths: str = "1.0", 
     _ensure_idle(sd)
     cmd = [PY, str(VAST / "lora_eval.py"), str(sd), character, "--strengths", strengths, "--panels", str(panels)] + (["--files", files] if files else [])
     job = _start_job("lora_compare", sd, [{"label": f"LoRA 중간 파일 견주기({character})", "cmd": cmd}])
-    return json.dumps({"job": job, "next": f"job_wait('{job}'), 끝나면 로그 마지막 줄의 jpg 를 보고 set_lora"}, ensure_ascii=False)
+    return json.dumps({"job": job, "next": f"job_status('{job}', wait=50), 끝나면 로그 마지막 줄의 jpg 를 보고 loras(…, file=…, on='true')"}, ensure_ascii=False)
 
 
 @mcp.tool()
-def set_lora(series: str, character: str, strength: float = -1, on: bool = True, file: str = "") -> str:
-    """작품에 등록된 인물 LoRA 를 고친다: strength(0~1.5, 얼굴이 너무 굳거나 그림체가 무너지면 내린다, -1 은 그대로) · on(False 면 붙이지 않는다) ·
-    file(서버 LoRA 파일 이름으로 바꾸기, loras() 의 server 목록). 다음에 그리는 컷부터 바뀐다."""
-    sys.path.insert(0, str(VAST))
-    import lora as L
-    sd = _series(series)
-    if character not in L.registry(sd) and not file:
-        return _fail("no_lora", given=character, registered=sorted(L.registry(sd)), reason="학습한 LoRA 가 없다: lora_train 으로 학습하거나 file 로 지정")
-    if file and file not in L.server_loras():
-        return _fail("unknown_lora_file", given=file, candidates=_near(file, L.server_loras()))
-    cur = L.set_entry(sd, character, {"strength": strength if strength >= 0 else None, "on": on, "file": file or None})
-    return json.dumps({"series": sd.name, "character": character, "lora": cur}, ensure_ascii=False)
-
-
-@mcp.tool()
-def comfy_server(action: str = "status", version: str = "", lines: int = 60, old: bool = False, force: bool = False) -> str:
-    """vast ComfyUI 서버 관리(공용 서버). action:
-    status(버전·실행 인자·VRAM·큐, vast 인스턴스, 판마다 모델 파일이 있나) · downloads(fetch_model 로 받는 중인 모델) · versions(올릴 수 있는 버전) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
-    · restart(supervisor 로 재시작) · switch(version 으로 전환: 워크플로우를 state/workflow_backups 에 받아 두고, 덧댄 수정을 걷어 내고, ComfyUI-Manager 로 바꾼 뒤
-    수정을 다시 붙이고 재시작해 상태를 돌려준다) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654)
-    · nodes(우리 노드 vast/server_nodes 를 custom_nodes 에 올린다, 예: WebtoonTrainLora. 바뀌었으면 재시작). switch 뒤에는 nodes 도 다시 확인한다.
-    restart·switch 는 큐에 작업이 있으면 하지 않는다(force=True 로만). 새 모델(예: 새 판)에 더 높은 ComfyUI 가 필요하면 versions → switch → draw_models 로 확인."""
+def comfy_server(action: str = "status", lines: int = 60, old: bool = False, force: bool = False) -> str:
+    """GPU 서버의 ComfyUI 관리(주소는 state/comfy_url.txt). action:
+    status(버전·실행 인자·VRAM·큐, GPU 인스턴스, 판마다 모델 파일이 있나) · logs(서버 프로세스 로그 끝 lines 줄, old=True 면 직전 실행의 로그: 서버가 재시작됐을 때 죽은 이유를 본다)
+    · restart(supervisor 로 재시작) · patch(덧댄 상류 수정 vast/server_patches 가 붙어 있나 보고 붙인다, 예: Qwen 2.1 학습 수정 PR #16654)
+    · nodes(우리 노드 vast/server_nodes 를 custom_nodes 에 올린다, 예: WebtoonTrainLora. 바뀌었으면 재시작).
+    restart 는 큐에 작업이 있으면 하지 않는다(force=True 로만). ComfyUI 버전과 모델 파일은 RunPod 설정(cloud/runpod_qwen.json)이 정하고
+    tools/runpod_cloud.py sync 로 받는다(이 도구로 버전을 바꾸거나 모델을 받지 않는다, 2026-10-22)."""
     sys.path.insert(0, str(VAST))
     import comfy_admin as A
     try:
         if action == "status":  # 서버(버전·인자) + vast 인스턴스(남은 VRAM·큐·판마다 모델 파일이 서버에 있나)
             return json.dumps({"server": A.status(), "vast": _run([PY, str(VAST / "comfy_client.py"), "status"], timeout=25)}, ensure_ascii=False)
-        if action == "downloads":  # 서버가 받고 있거나 받은 모델 파일(fetch_model 뒤 진행률)
-            from comfy_client import Comfy
-            tasks = Comfy().req("/model-manager/download/task").get("data", [])
-            return json.dumps({"downloads": [{"name": t.get("fullname"), "status": t.get("status"), "progress": round(t.get("progress") or 0),
-                                              "size_gb": round((t.get("totalSize") or 0) / 1e9, 2), "error": t.get("error") or ""} for t in tasks]},
-                              ensure_ascii=False)
-        if action == "versions":
-            return json.dumps(A.versions(), ensure_ascii=False)
         if action == "logs":
             return json.dumps({"log": A.logs(old, max(10, min(lines, 400)))}, ensure_ascii=False)
         if action == "restart":
@@ -1346,35 +1251,14 @@ def comfy_server(action: str = "status", version: str = "", lines: int = 60, old
             if r["changed"]:
                 r.update(A.restart(force))
             return json.dumps(r, ensure_ascii=False)
-        if action == "switch":
-            if not version:
-                return _fail("version_required", given=version, candidates=A.versions().get("versions", []))
-            return json.dumps(A.switch(version, force), ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
-        return _fail("comfy_server_failed", given={"action": action, "version": version}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return _fail("unknown_action", given=action, candidates=["status", "downloads", "versions", "logs", "restart", "switch", "patch", "nodes"])
-
-
-@mcp.tool()
-def fetch_model(url: str, folder: str, name: str = "") -> str:
-    """Hugging Face 파일을 vast ComfyUI 의 models/<folder>/ 에 받는다(서버의 Model Manager 가 받는다, 이미 있으면 건너뜀).
-    url = https://huggingface.co/<저장소>/resolve/main/<경로>. folder = diffusion_models · text_encoders · vae · loras 등. name 을 주면 그 이름으로 저장
-    (로라 저장소들이 lora.safetensors 처럼 같은 이름을 쓴다). 진행은 comfy_server('downloads'). 받은 뒤 그 모델로 판을 만들려면 서버에 webtoon_vertical_<판> 워크플로우를 저장한다."""
-    sys.path.insert(0, str(VAST))
-    from comfy_client import Comfy
-    if "huggingface.co/" not in url or "/resolve/" not in url:
-        return _fail("bad_url", given=url, reason="https://huggingface.co/<저장소>/resolve/main/<경로> 꼴만 받는다")
-    try:
-        r = Comfy().fetch_model(folder, url, name)
-    except Exception as e:  # noqa: BLE001
-        return _fail("fetch_failed", given={"url": url, "folder": folder, "name": name}, reason=f"{type(e).__name__}: {str(e)[:300]}")
-    return json.dumps({"folder": folder, "name": name or url.rsplit("/", 1)[-1], "task": r, "next": "comfy_server('downloads')"}, ensure_ascii=False)
-
+        return _fail("comfy_server_failed", given={"action": action}, reason=f"{type(e).__name__}: {str(e)[:300]}")
+    return _fail("unknown_action", given=action, candidates=["status", "logs", "restart", "patch", "nodes"])
 
 
 @mcp.tool()
 def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
-    """vast 로 그린 컷을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
+    """GPU 서버로 그린 컷(panels_hf_vast)을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
     사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""
     ep = _episode(series, episode)
     want = _pids(ep, ids, "any")
@@ -1382,7 +1266,7 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
         return "채택할 컷 번호를 준다"
     miss = [i for i in want if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
     if miss:
-        return f"vast 그림이 없는 컷: {', '.join(miss)}(vast_draw 로 먼저 그린다)"
+        return f"GPU 서버 그림이 없는 컷: {', '.join(miss)}(vast_draw 로 먼저 그린다)"
     _ensure_idle(ep)
     rej = ep / "panels_hf" / "_rejected"
     rej.mkdir(parents=True, exist_ok=True)
@@ -1408,7 +1292,7 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
     """그린 컷의 일부만 고친다(다시 그리지 않음, 크레딧 0, 컷당 약 30초): 그 판의 편집 워크플로우에 지금 본편 그림(<image1>)과 지시를 준다.
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
-    사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(derive_panel 이나 vast_draw). 끝나면 compare_panel 로 전/후를 본다. """ + FIX_LADDER
+    사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(derive_panel 이나 vast_draw). 끝나면 compare_panel 로 전/후를 본다. """
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if not (instruction or "").strip():
@@ -1423,7 +1307,7 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
 def derive_panel(series: str, episode: str, panel: str, source_panel: str, box: str, instruction: str, refs: str = "", seed: int = -1) -> str:
     """같은 장면의 잘 된 컷(source_panel)에서 상자를 잘라 키우고, 이 컷의 순간으로 다시 그린다(자리·테이블·음식·배경·빛이 그 컷과 같아진다).
     인물이 컷마다 다른 테이블로 옮겨 앉거나 배경이 바뀌는 문제를 고칠 때 쓴다. box 는 source_panel 그림 기준 0~1000 비율 "x0,y0,x1,y1"
-    (예: 오른쪽 절반 "500,150,1000,750"). instruction 은 이 순간의 동작·표정(영어). refs 는 얼굴 참고 인물 id. """ + FIX_LADDER
+    (예: 오른쪽 절반 "500,150,1000,750"). instruction 은 이 순간의 동작·표정(영어). refs 는 얼굴 참고 인물 id. """
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     src = _pids(ep, source_panel, "any")[0]
@@ -1438,7 +1322,7 @@ def derive_panel(series: str, episode: str, panel: str, source_panel: str, box: 
 @mcp.tool()
 def fix_faces(series: str, episode: str, panels: str) -> str:
     """얼굴이 다른 사람처럼 보이는 컷: 그 인물 기준 얼굴(상반신 참고 그림)로 얼굴·머리만 다시 그리고, 얼굴 동일인 거리(CCIP)를 재 가까워진 판만
-    남긴다(멀어지면 원본 그대로). panels: "p061:eunyoung,p496:sangsu"(인물을 빼면 그 컷의 첫 인물). 컷당 약 1분. 결과의 distance 는 작을수록 같은 사람. """ + FIX_LADDER
+    남긴다(멀어지면 원본 그대로). panels: "p061:eunyoung,p496:sangsu"(인물을 빼면 그 컷의 첫 인물). 컷당 약 1분. 결과의 distance 는 작을수록 같은 사람. """
     ep = _episode(series, episode)
     items = []
     for it in [x.strip() for x in (panels or "").split(",") if x.strip()]:
@@ -1477,27 +1361,50 @@ def revert_panel(series: str, episode: str, panel: str, version: str) -> str:
 
 
 @mcp.tool()
-def compare_panel(series: str, episode: str, panel: str) -> list:
-    """이 컷의 마지막 고치기 전/후 나란히 그림(edit_panel·derive_panel·fix_faces·revert_panel 이 남긴 것)을 그림 자체로 돌려준다. 고친 뒤 반드시 본다:
-    지시한 곳이 고쳐졌는지, 다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → revert_panel."""
+def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> list:
+    """이 컷의 전/후 나란히 그림을 그림 자체로 돌려준다(사용자에게 보여 줄 때도 이것). what:
+    fix(기본, 마지막 고치기 전/후: edit_panel·derive_panel·fix_faces·revert_panel 이 남긴 것) · preview(마지막 미리 보기: preview_panel·preview_design, 이름 목록도 준다)
+    · redraw(본편 | GPU 로 새로 그린 판 panels_hf_vast: 한 컷을 vast_draw 로 다시 그려 본 뒤). 고친 뒤엔 반드시 본다: 지시한 곳이 고쳐졌는지,
+    다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → revert_panel, 미리 보기는 adopt_preview, 다시 그린 판은 vast_adopt 로 본편에."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
-    cands = sorted((ep / "review" / "edits").glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if (ep / "review" / "edits").exists() else []
-    if not cands:
-        return "이 컷의 고치기 기록이 없다"
-    im = Image.open(cands[-1]).convert("RGB")
+    if what not in ("fix", "preview", "redraw"):
+        return "what 은 fix · preview · redraw"
+    if what == "redraw":
+        new = ep / "panels_hf_vast" / f"{pid}.png"
+        if not new.exists():
+            return "GPU 로 새로 그린 판이 없다(vast_draw 로 이 컷을 먼저 그린다)"
+        tiles = [Image.open(f).convert("RGB") for f in (ep / "panels_hf" / f"{pid}.png", new) if f.exists()]
+        h = 700
+        tiles = [t.resize((round(t.width * h / t.height), h)) for t in tiles]
+        im = Image.new("RGB", (sum(t.width for t in tiles) + 12 * (len(tiles) - 1), h), "white")
+        x = 0
+        for t in tiles:
+            im.paste(t, (x, 0))
+            x += t.width + 12
+        out = ep / "review" / "redraws" / f"{pid}_{time.strftime('%m%d%H%M%S')}.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        im.save(out, quality=88)
+        info = {"panel": pid, "left": "본편" if len(tiles) == 2 else "(본편 없음)", "right": "새로 그린 판", "compare": str(out), "link": _link(out)}
+    else:
+        d = ep / "review" / ("edits" if what == "fix" else "previews")
+        cands = sorted(d.glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if d.exists() else []
+        if not cands:
+            return "이 컷의 고치기 기록이 없다" if what == "fix" else "이 컷의 미리 보기가 없다(preview_panel·preview_design 먼저)"
+        im = Image.open(cands[-1]).convert("RGB")
+        info = {"panel": pid, "compare": str(cands[-1]), "link": _link(cands[-1])}
+        info.update({"edits": len(cands)} if what == "fix" else {"latest": cands[-1].stem, "all": [f.stem for f in cands]})
     im.thumbnail((1400, 1400))
     buf = io.BytesIO()
     im.save(buf, "JPEG", quality=82)
-    return [json.dumps({"panel": pid, "compare": str(cands[-1]), "link": _link(cands[-1]), "edits": len(cands)}, ensure_ascii=False),
-            McpImage(data=buf.getvalue(), format="jpeg")]
+    return [json.dumps(info, ensure_ascii=False), McpImage(data=buf.getvalue(), format="jpeg")]
 
 
 @mcp.tool()
 def preview_panel(series: str, episode: str, panel: str, instruction: str, refs: str = "", seed: int = -1) -> str:
     """본편은 그대로 두고 한 컷을 고친 모습만 미리 본다(크레딧 0, 약 30초). 사용자가 '이 컷 이렇게 바꾸면 어때, 보여줘'라고 할 때.
     instruction 은 edit_panel 과 같은 영어 지시('무엇을 어떻게 바꾸고 나머지는 그대로'). 결과는 <회차>/review/previews/ 에만 쌓인다.
-    끝나면 show_preview 로 전/후를 그림으로 보여 주고, 사용자가 고르면 adopt_preview 로 본편에 넣는다."""
+    끝나면 compare_panel(what='preview') 로 전/후를 그림으로 보여 주고, 사용자가 고르면 adopt_preview 로 본편에 넣는다."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if not (instruction or "").strip():
@@ -1505,14 +1412,14 @@ def preview_panel(series: str, episode: str, panel: str, instruction: str, refs:
     cmd = [PY, str(VAST / "panel_edit.py"), "preview", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
     cmd += ["--seed", str(seed)] if seed >= 0 else []
     job = _start_job("preview_panel", ep, [{"label": f"{pid} 미리 보기", "cmd": cmd}], instruction[:120])
-    return f"작업 시작 {job}(약 30초~1분, 본편은 그대로). job_status('{job}') → 끝나면 show_preview('{series}', '{episode}', '{pid}')"
+    return f"작업 시작 {job}(약 30초~1분, 본편은 그대로). job_status('{job}') → 끝나면 compare_panel(what='preview')('{series}', '{episode}', '{pid}')"
 
 
 @mcp.tool()
 def preview_design(series: str, episode: str, panel: str, character: str, change: str, seed: int = -1) -> str:
     """인물 디자인(머리 색·머리 모양·옷·안경·소품 등)을 바꾸면 어떻게 보일지 그 인물이 나오는 한 컷으로 미리 본다(본편·시트는 그대로).
     character: 인물 id. change: 영어로 바꿀 디자인(예 "short silver-white hair instead of black hair", "a burgundy three-piece suit").
-    끝나면 show_preview 로 본다. 마음에 들어 작품 전체에 쓰려면 시트·series.json 의 그 인물 설명을 바꾸는 일이 따로 필요하다(사용자에게 묻는다)."""
+    끝나면 compare_panel(what='preview') 로 본다. 마음에 들어 작품 전체에 쓰려면 시트·series.json 의 그 인물 설명을 바꾸는 일이 따로 필요하다(사용자에게 묻는다)."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if not (change or "").strip() or not (character or "").strip():
@@ -1520,29 +1427,12 @@ def preview_design(series: str, episode: str, panel: str, character: str, change
     cmd = [PY, str(VAST / "panel_edit.py"), "design", str(_series(series)), ep.name, pid, change, "--who", character]
     cmd += ["--seed", str(seed)] if seed >= 0 else []
     job = _start_job("preview_design", ep, [{"label": f"{pid} {character} 디자인 미리 보기", "cmd": cmd}], change[:120])
-    return f"작업 시작 {job}(약 30초~1분, 본편·시트는 그대로). job_status('{job}') → 끝나면 show_preview('{series}', '{episode}', '{pid}')"
-
-
-@mcp.tool()
-def show_preview(series: str, episode: str, panel: str) -> list:
-    """그 컷의 미리 보기(preview_panel·preview_design 결과) 중 마지막 것의 전/후 나란히 그림을 그림 자체로 돌려준다. 미리 보기 이름 목록도 준다."""
-    ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    d = ep / "review" / "previews"
-    cands = sorted(d.glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if d.exists() else []
-    if not cands:
-        return "이 컷의 미리 보기가 없다(preview_panel·preview_design 먼저)"
-    im = Image.open(cands[-1]).convert("RGB")
-    im.thumbnail((1400, 1400))
-    buf = io.BytesIO()
-    im.save(buf, "JPEG", quality=82)
-    return [json.dumps({"panel": pid, "latest": cands[-1].stem, "all": [f.stem for f in cands], "link": _link(cands[-1])}, ensure_ascii=False),
-            McpImage(data=buf.getvalue(), format="jpeg")]
+    return f"작업 시작 {job}(약 30초~1분, 본편·시트는 그대로). job_status('{job}') → 끝나면 compare_panel(what='preview')('{series}', '{episode}', '{pid}')"
 
 
 @mcp.tool()
 def adopt_preview(series: str, episode: str, panel: str, preview: str = "") -> str:
-    """미리 보기를 본편에 넣는다(사용자가 고른 것만). preview: show_preview 가 준 이름(비우면 마지막 것). 옛 본편은 panels_hf/_rejected/ 로,
+    """미리 보기를 본편에 넣는다(사용자가 고른 것만). preview: compare_panel(what='preview') 가 준 이름(비우면 마지막 것). 옛 본편은 panels_hf/_rejected/ 로,
     되돌리기는 panel_versions → revert_panel."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
@@ -1560,7 +1450,7 @@ def adopt_preview(series: str, episode: str, panel: str, preview: str = "") -> s
 
 @mcp.tool()
 def make_episode(series: str, episode: str, accept_new: bool = False, until: str = "export", check: bool = True, skip_gates: bool = False) -> str:
-    """한 화를 끝까지 한 번에(어느 작품이든, 크레딧 0): 콘티 준비 → 에셋 점검 → vast 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기.
+    """한 화를 끝까지 한 번에(어느 작품이든, 크레딧 0): 콘티 준비 → 에셋 점검 → GPU 서버 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기.
     콘티(make_storyboard.py·build_panels.py)는 먼저 써 둔다(new_episode 로 틀을 열고 이야기대로 고침).
     이 화에 처음 나오는 장소·인물이 있으면 vast 로 시안을 만들어 assets/_candidates/ 에 두고 멈춘다(job 이 '실패'로 끝나고 로그에 '확인 필요').
     그때 사용자에게 시안 경로를 보여 주고, 고르면 accept_new=True 로 다시 부른다. 본편 그림(panels_hf)이 이미 있는 컷은 건드리지 않는다.
@@ -1620,6 +1510,7 @@ def export(series: str, episode: str) -> str:
     job = _start_job("export", ep, steps)
     pdf = _link(ROOT / "exports" / day / f"{name}.pdf")
     return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "")
+
 
 # ── Ailism Original 에 게시(tools/ailism_publish.py, API 키로) ─────────────────
 @mcp.tool()
@@ -1769,33 +1660,22 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
 
 
 @mcp.tool()
-def job_status(job_id: str, tail_lines: int = 40) -> str:
-    """작업(job)의 상태(JSON). state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나
-    candidates 의 시안을 사용자에게 보여 준다). panels_done/panels_total/eta_s = 진행(그리는 작업), stalled = 로그가 오래 안 늘었거나 프로세스가 죽음,
-    gates = 준비 작업의 관문 통과 여부, review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), drawn · links = 그린 컷·내보낸 파일 링크."""
-    return json.dumps(_job_info(job_id, tail_lines), ensure_ascii=False)
-
-
-def _wait_job(job_id: str, seconds: int = 50, tail_lines: int = 30) -> str:
-    """작업이 끝날 때까지(또는 seconds 초) 기다렸다가 job_status 와 같은 결과(agent app 는 MCP 호출을 60초에 끊어 50초가 상한)."""
-    end = time.time() + max(1, min(int(seconds), 50))
+def job_status(job_id: str, wait: int = 0, tail_lines: int = 40) -> str:
+    """작업(job)의 상태(JSON). wait 를 주면 끝날 때까지 최대 wait 초(50까지) 기다렸다가 답한다: 짧은 작업(컷 몇 장)은 wait=50 으로 부르고,
+    같은 작업으로 최대 4번(약 5분)까지. 그래도 running 이면 사용자에게 작업 번호·panels_done/panels_total·eta_s 를 알리고 답을 끝낸다(작업은 대화와 상관없이
+    이어 돈다). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 알린다. wait 없이 몇 초 간격으로 되풀이하지 않는다.
+    state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나 candidates 의 시안을 사용자에게 보여 준다).
+    panels_done/panels_total/eta_s = 진행(그리는 작업), stalled = 로그가 오래 안 늘었거나 프로세스가 죽음, gates = 준비 작업의 관문 통과 여부,
+    review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), drawn · links = 그린 컷·내보낸 파일 링크.
+    (예전 job_status(wait=50) 를 여기에 합침, 2026-10-22. 2026-10-16 agent app 시험: 몇 초 간격 되풀이가 반복 방지에 걸려 다 그린 결과를 보고하지 못했다)"""
+    if not re.fullmatch(r"[\w-]+", job_id):
+        return json.dumps({"error": "bad_job_id"})
+    end = time.time() + max(0, min(int(wait or 0), 50))
     while time.time() < end:
         if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "starting", "running"):
             break
         time.sleep(2)
-    return job_status(job_id, tail_lines)
-
-
-@mcp.tool()
-def job_wait(job_id: str, seconds: int = 50, tail_lines: int = 30) -> str:
-    """작업이 끝날 때까지 최대 seconds 초(50초까지, agent app 의 도구 호출 한도 60초 안쪽) 기다렸다가 job_status 와 같은 결과를 준다. job_status 를 연달아 부르지 말고 이걸 쓴다.
-    컷 몇 장처럼 짧은 작업에만, 같은 작업으로 최대 4번까지(약 5분). 그래도 running 이면 사용자에게 작업 번호·panels_done/panels_total·eta_s 를 알리고 답을 끝낸다
-    (작업은 대화와 상관없이 이어 돈다. 사용자가 '다 됐어?' 하면 list_jobs 나 job_status 한 번). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 그렇게 알린다.
-    sleep 같은 다른 도구로 기다리지 않는다.
-    (2026-10-16 agent app 시험: job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려, 그림은 다 그려졌는데 결과를 보고하지 못했다)"""
-    if not re.fullmatch(r"[\w-]+", job_id):
-        return json.dumps({"error": "bad_job_id"})
-    return _wait_job(job_id, seconds, tail_lines)
+    return json.dumps(_job_info(job_id, tail_lines), ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1821,6 +1701,38 @@ def list_jobs(series: str = "", episode: str = "", running_only: bool = False, l
         if len(rows) >= max(1, min(int(limit), 30)):
             break
     return json.dumps({"jobs": rows}, ensure_ascii=False)
+
+
+# ── 모델에게 보내는 도구 설명은 첫 문단(360자 안쪽)만. 긴 설명·규칙은 tool_help 로 읽는다(2026-10-22 사용자: 설명이 길고 규칙이
+# 박혀 있어 도구를 몇 번 부르면 LLM 컨텍스트가 넘치고, 지시가 범용적으로 안 먹는다). 전체 글은 _FULL_DOCS 에 남긴다.
+_FULL_DOCS: dict = {}
+
+
+def _first_para(text: str, n: int = 360) -> str:
+    t = (text or "").strip()
+    para = " ".join(re.split(r"\n\s*\n", t, 1)[0].split())
+    if len(para) > n:
+        cut = para[:n]
+        m = max(cut.rfind(". "), cut.rfind("다. "), cut.rfind(") "))
+        para = (cut[: m + 1] if m > n // 3 else cut).rstrip() + "…"
+    return para
+
+
+for _t in mcp._tool_manager._tools.values():
+    # 고치기 도구들은 예전엔 docstring 뒤에 FIX_LADDER 를 '+' 로 붙였는데, 그러면 docstring 이 아니게 되어 모델에게 설명이 비어 갔다
+    # (2026-10-22: 옷 바꾸기 같은 부분 수정을 시켜도 edit_panel 을 모르던 원인). 전체 글에만 순서를 붙인다.
+    _FULL_DOCS[_t.name] = (_t.description or "") + ("\n\n" + FIX_LADDER if _t.name in ("edit_panel", "derive_panel", "fix_faces") else "")
+    _short_desc = _first_para(_t.description or "")
+    _t.description = _short_desc + (" (전체 설명·규칙: tool_help)" if _short_desc != " ".join((_t.description or "").split()) else "")
+
+
+@mcp.tool()
+def tool_help(name: str = "") -> str:
+    """도구의 전체 설명(인자 뜻·규칙·주의)을 읽는다. name 을 비우면 도구 이름 목록."""
+    if not name.strip():
+        return "\n".join(sorted(_FULL_DOCS))
+    k = name.strip().split("__")[-1]
+    return _FULL_DOCS.get(k) or f"{k}: 그런 도구가 없다"
 
 
 if __name__ == "__main__":

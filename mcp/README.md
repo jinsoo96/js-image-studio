@@ -12,10 +12,8 @@
 | `list_files` · `read_file` · `write_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절 | 0 |
 | `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
 | `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
-| `estimate_draw` | 그릴 컷과 예상 크레딧 | 0 |
-| `draw_panels` | 힉스필드 작화(작업). `confirm_credits` 가 예상 비용 이상이어야 돈다, 한 번에 40컷. 이미 그린 컷을 주면 다시 그리고 원본은 `_rejected` 로 | 장당 1.25 |
 | `compose` · `export` | 합성·PDF·기계 점검 / 예고편·epub·exports 복사(작업) | 0 |
-| `job_status` | 작업 상태와 로그 끝(작업 기록은 `state\mcp_jobs\`) | 0 |
+| `job_status` | 작업 상태와 로그 끝(작업 기록은 `state\mcp_jobs\`). `wait` 초(50까지)를 주면 끝날 때까지 기다렸다 답한다(옛 job_wait 를 합침) | 0 |
 
 원칙: 한 번 호출은 30초 안(agent platform 브리지 제한), 오래 걸리는 일은 작업으로 띄우고 job_status. 지우는 도구는 없다. 자식 프로세스는 stdin 을 막는다(MCP 전송로를 물려받으면 멈춘다).
 
@@ -93,6 +91,6 @@ agent app 의 MCP 목록은 PC 마다 따로고(서버 동기화 없음), 서버
 ## agent app 시험에서 고친 것(2026-10-16)
 - 그림은 2분 만에 다 그려졌는데, 에이전트가 job_status 를 몇 초 간격으로 반복하다 agent app 의 반복 방지에 걸려 결과를 보고하지 못했다 → `job_wait`(최대 25초씩 기다림) 추가, job_status 에 걸린 시간·끝난 컷 수·사람 눈으로 확인할 컷. 고친 뒤 같은 요청이 끝까지 보고됐다.
 - 에이전트가 회차를 "1화", 컷을 "30" 으로 불렀다 → 둘 다 받아 준다(ep001, p030).
-- agent app 의 Qwen 은 한 번에 약 8천 토큰까지 쓴다. 한 화 콘티(약 16KB)·컷 설명(약 22KB)은 write_file 한 번에 못 담는다 → `start_file`·`append_file`·`edit_file`·`check_file` 로 나눠 쓰고 고친다.
+- agent app 의 Qwen 은 한 번에 약 8천 토큰까지 쓴다. 한 화 콘티(약 16KB)·컷 설명(약 22KB)은 write_file 한 번에 못 담는다 → 나눠 쓰고 고친다(처음엔 start_file·append_file·check_file 세 도구, 2026-10-22 부터 `write_file` 의 part first·more·last 와 `edit_file`).
 - Qwen 이 콘티(make_storyboard.py)는 잘 썼지만 컷 설명(build_panels.py)을 코드로 쓰다 잘리고 작업실에 없는 함수를 지어냈다 → 컷 설명은 표(panels_spec.json)를 `set_panels` 로 몇 컷씩 채우고, 공용 변환기 `tools/panels_from_spec.py` 가 panels.json 을 만든다. new_episode 는 이제 표 방식으로 연다.
 - 시나리오 한 줄로 시험 회차를 끝까지 시켰다: 콘티 작성(56줄, 문법 통과) → 컷 설명 5개 표로 채움 → make_episode(5컷 그리기, 연출 확인에서 1컷 다시) → 기계 점검이 표지판식 자막 1개를 막음 → 에이전트가 edit_file 로 고쳐 다시 합성(막는 경고 0) → 내보내기. 결과물은 다 나왔지만 한 대화에서 도구 44번·36분을 끌자 마지막 답이 사내 모델 시간 초과(180초)로 실패했다 → 긴 작업은 부르고 바로 답을 끝내고, 한 화는 콘티 → 그리기 → 결과 확인으로 답을 나눠 진행한다(AGENT_PROMPT).

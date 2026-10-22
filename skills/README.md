@@ -14,7 +14,7 @@
 ## 스킬
 | 스킬 | 언제 | 주로 부르는 것 |
 |---|---|---|
-| `storyboard` 콘티 | 시나리오를 받아 한 화를 짤 때 | MCP new_episode · start_file/append_file · prepare_episode |
+| `storyboard` 콘티 | 시나리오를 받아 한 화를 짤 때 | MCP new_episode · write_file(part) · prepare_episode |
 | `panel-spec` 컷 설명 | 콘티의 컷마다 인물·옷·장소·카메라·연기를 정할 때 | MCP set_panels · prepare_episode |
 | `continuity` 이어 그리기 | 같은 인물·장소로 컷을 이어 그릴 때 | vast/comfy_panel.py(--expr) · agent platform ComfyUI 노드(웹툰 컷 1명·2명) |
 | `asset` 에셋 | 새 장소·인물이 나오거나 표정이 모자랄 때 | vast/new_assets.py · vast/make_assets.py · vast/xgen_catalog.py assets |
@@ -26,6 +26,6 @@
 ## 정본과 쓰는 곳
 - 정본은 이 폴더의 SKILL.md 다. 규칙의 근거(사용자가 짚은 일)는 `../LESSONS.md` 에 남고, SKILL.md 는 그중 지금 지켜야 할 것만 짧게 모은다.
 - agent platform 「이미지 스튜디오 (Qwen)」 에이전트의 시스템 프롬프트는 `continuity` · `panel-spec` 의 "agent platform 에서" 절로 만든다(`vast/xgen_studio_agent.py apply`). SKILL.md 를 고치면 다시 돌린다.
-- agent app 의 Qwen 은 MCP `read_skill(이름)` 으로 읽는다. Claude Code 는 파일을 바로 읽는다.
+- 에이전트는 MCP `read_doc('skill:이름')` 으로 읽는다. Claude Code 는 파일을 바로 읽는다.
 - agent app 에이전트는 둘이다: 「새 웹툰 생성기」(새 작품 열기 → 1화, MCP `new_series`) · 「웹툰 이어 그리기」(있는 작품의 다음 화). 도구·스킬·ComfyUI 워크플로우는 같고 시작점만 다르다(`mcp/agents/`).
 - agent platform 자체의 Skill(agent-workflow 의 Skill 클래스, 에이전트 SKILL 입력)으로 올리는 일은 제품 개발(MR)이라 아직 하지 않았다.

@@ -11,7 +11,7 @@ description: 시나리오를 받아 웹툰 한 화의 콘티(컷·대사·내레
 ## 순서
 1. 앞 회차 틀로 회차를 연다: MCP `new_episode(작품, epNNN)`(가장 최신 본보기 D+18 `ep002_v2`). Claude Code 는 앞 회차 `make_storyboard.py` 를 복사한다.
 2. `make_storyboard.py` 를 이야기대로 새로 쓴다. 형식은 틀 그대로: `add(id, shot, scene, chars, *대사)` · `chat(id, 이름, 메시지)` · 제목 컷 · 작가 표기(`CREDIT`).
-   길면 `start_file` → `append_file`(장면 단위, 4천 자 안팎) → `check_file`.
+   길면 `write_file` 을 part `first` → `more`(장면 단위, 4천 자 안팎) → `last`(문법 검사).
 3. `prepare_episode` 로 storyboard.json 을 만들고 컷 수를 확인한다.
 4. 사용자에게 컷 목록(번호·샷·장면·대사)을 보여 준다. "콘티까지"면 여기서 멈춘다.
 

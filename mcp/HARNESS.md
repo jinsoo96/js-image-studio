@@ -6,13 +6,13 @@
 ## 0. 시작
 - 이 문서를 읽은 뒤 status() 로 작품·회차·도는 작업을 본다. 사용자에게는 한국어로 짧게 답한다. em dash(—)는 쓰지 않는다.
 - 도구 결과 끝에 "다음:" 이 있으면 그대로 따른다. 관문에 걸리면 고칠 점을 고치고 같은 도구를 다시 부른다.
-- 일의 노하우는 스킬에 있다: read_skill("storyboard") 콘티 · read_skill("panel-spec") 컷 설명 · read_skill("continuity") 이어 그리기 · read_skill("asset") 에셋.
+- 일의 노하우는 스킬에 있다: read_doc("skill:storyboard") 콘티 · read_doc("skill:panel-spec") 컷 설명 · read_doc("skill:continuity") 이어 그리기 · read_doc("skill:asset") 에셋.
 
 ## 1. 하네스 단계(어느 에이전트가 붙어도 같다)
 | 단계 | 도구 | 관문·검사(통과해야 다음 단계) |
 |---|---|---|
 | 작품 열기 | new_series(spec) · add_to_series | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(그림체 후보 비교: 작업실의 tools/style_probe.py) |
-| 콘티 | new_episode → make_storyboard.py 의 컷 부분을 쓴다(start_file·append_file·check_file·edit_file) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
+| 콘티 | new_episode → make_storyboard.py 의 컷 부분을 쓴다(write_file·edit_file) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
 | 컷 설명 | set_panels(5~8컷씩) | prepare_episode 의 **컷 설명 관문**(skills/panel-spec/judge.json + 연출 문법 코드 검사): 마주 보기·얼굴 방향, 앉음 이어짐, 소품 종류·개수, 탈것 방향, 대사 중 뒷모습 금지, 시대 소품 |
 | 그리기 | make_episode (관문을 통과해야 시작한다) | 컷마다 그린 직후 그림 검수: 인원·팔다리·독자 시선·마주 보기·현실 논리·소품·시대. 걸리면 걸린 점을 지시에 붙여 스스로 다시 그린다 |
 | 이어짐 | make_episode 안에서 | 같은 장면 앞뒤 컷 비교: 자세·소품·옷·얼굴·그림체·좌우 |
@@ -29,21 +29,21 @@
 - 처음 나오는 인물·장소는 add_to_series 로 더한다(옛 작품은 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄).
 
 ## 4. 긴 작업과 대화
-- 파일이 길면(콘티 16KB 안팎) start_file → append_file(4천 자 안팎씩) → check_file 로 나눠 쓴다. 일부만 고칠 땐 edit_file.
+- 파일이 길면(콘티 16KB 안팎) write_file 을 part="first" → part="more"(4천 자 안팎씩) → part="last" 로 나눠 쓴다(last 에서 문법 검사). 일부만 고칠 땐 edit_file.
 - 한 번의 답에서 도구를 30번 넘게 부르지 않는다(사내 모델이 마지막 답을 시간 안에 못 시작한다). 콘티·컷 설명이 끝나면 답을 끝내고, 그리기는 다음 답에서.
 - prepare_episode·make_episode·vast_draw·compose·export 는 모두 작업이다(긴 한 화는 몇 분에서 몇 시간): state 가 running 이면 panels_done/panels_total·eta_s 를 알리고 답을 끝낸다. 작업은 대화·턴 제한과 상관없이 이어 도니 기다리며 도구를 되풀이하지 않는다. 작업 번호를 잃었거나 새 대화면 list_jobs 로 이어 본다. stalled 가 true 면 멈춘 것이니 그대로 사용자에게 알린다.
-- make_episode·vast_draw 는 job_id 를 돌려준다. 기다리지 말고 작업 번호와 예상 시간을 알리고 답을 끝낸다. 사용자가 "다 됐어?" 하면 job_status 한 번.
+- make_episode·vast_draw 는 job_id 를 돌려준다. 기다리지 말고 작업 번호와 예상 시간을 알리고 답을 끝낸다. 사용자가 "다 됐어?" 하면 job_status 한 번. 컷 몇 장처럼 짧은 작업만 job_status(wait=50) 로 기다린다(최대 4번).
 - job_status 는 JSON 이다. state 가 needs_review 면 실패가 아니라 사람 확인 차례다: review(컷·issues·note)나 candidates 를 사용자에게 보여 주고 답을 끝낸다. links 가 있으면 그 링크를 준다.
-- 판(Qwen UC·Anima·MOSS·NoctQ …)은 고르지 않아도 된다: vast_draw·make_episode 가 컷마다 자동으로 고른다(vast/router.py). 작품 그림체 갈래(series.json style_family: webtoon·anime·realistic, 없으면 webtoon)와 같은 판 중 참고 그림을 받는 판이 바탕이고, 작품 그림체 LoRA 를 학습했으면 그 판, 이름 있는 인물이 나오는 컷인데 바탕 판이 글로만 그리면 같은 그림체에서 참고 그림을 받는 판으로 옮긴다(그림체가 다른 판으로는 옮기지 않는다). 고른 판과 이유는 작업 로그에 컷마다 남는다. 역할(그리기·부분 고치기·에셋·시안·학습)도 도구가 그 판의 역할 워크플로우를 고른다. 사용자가 판을 말했을 때만 vast_draw(model=...)·set_model 을 쓴다. 쓸 수 있는 판·역할·모델 파일 상태는 draw_models(). 컷이 흐리거나 얼굴 선이 거칠면 vast_draw(refine=True)(컷당 약 2배 시간, 클로즈업·표지에만).
-- **이미 그린 컷은 통째로 다시 그리지 말고 틀린 곳만 고친다**(크레딧 0, 컷당 30초~1분, 다시 그리기는 다른 곳까지 바뀐다). 고르는 순서: ① 예전 판이 더 나았으면 panel_versions → revert_panel ② 일부만 틀림(소품, 사람 하나 지우기·넣기, 입, 손, 물건 크기)은 edit_panel(지시는 영어로 'In <image1>, … Keep everything else exactly the same') ③ 사람 자리·테이블·배경이 같은 장면의 다른 컷과 어긋나면 잘 된 컷에서 잘라 derive_panel ④ 얼굴이 다른 사람 같으면 fix_faces(얼굴 거리를 재서 가까워질 때만 남긴다) ⑤ 구도·카메라가 통째로 틀리면 set_panels 로 컷 설명을 고치고 vast_draw. 고친 뒤에는 compare_panel 로 전/후 그림을 직접 보고(지시한 곳이 고쳐졌나, 얼굴·옷·사람 수가 바뀌지 않았나), 나빠졌으면 되돌린다. 자동 검수(review_panels·job 의 review)는 놓치는 게 많다: 넘기기 전에 contact_sheet 로 장면 단위 모아보기를 직접 보고, 떠난 사람이 남아 있나·같은 장면에서 자리가 바뀌나·소품 크기와 시대가 맞나를 본다. 컷을 다 고친 뒤 compose 는 한 번만. 어떤 판·역할 워크플로우가 있는지는 draw_models().
-- 인물 얼굴이 컷마다 흔들리면 인물 LoRA 를 쓴다: loras(series) 로 등록 상태·학습할 수 있는 인물을 보고, lora_train(series, character) 로 학습한다(작업으로 돈다, 데이터·캡션은 도구가 만든다. loras 에 training_disabled 가 있으면 지금 서버에선 학습하지 않고 그 대안을 사용자에게 알린다). 학습이 끝나면 그 판으로 그리는 그 인물 컷에 자동으로 붙는다. 몇 컷 그려 보고 얼굴이 굳거나 그림체가 무너지면 set_lora 로 강도를 내리거나 끈다. 다른 판(예: Anima)으로 그리는 컷에는 붙지 않는다.
+- 판(Qwen UC·Anima·MOSS·NoctQ …)은 고르지 않아도 된다: vast_draw·make_episode 가 컷마다 자동으로 고른다(vast/router.py). 작품 그림체 갈래(series.json style_family: webtoon·anime·realistic, 없으면 webtoon)와 같은 판 중 참고 그림을 받는 판이 바탕이고, 작품 그림체 LoRA 를 학습했으면 그 판, 이름 있는 인물이 나오는 컷인데 바탕 판이 글로만 그리면 같은 그림체에서 참고 그림을 받는 판으로 옮긴다(그림체가 다른 판으로는 옮기지 않는다). 고른 판과 이유는 작업 로그에 컷마다 남는다. 역할(그리기·부분,벗기기, 고치기·에셋·시안·학습)도 도구가 그 판의 역할 워크플로우를 고른다. 사용자가 판을 말했을 때만 vast_draw(model=...) 를 쓴다(작품 전체를 바꿀 땐 series.json 의 model). 쓸 수 있는 판·역할·모델 파일 상태는 draw_models(). 컷이 흐리거나 얼굴 선이 거칠면 vast_draw(refine=True)(컷당 약 2배 시간, 클로즈업·표지에만).
+- **이미 그린 컷은 통째로 다시 그리지 말고 틀린 곳만 고친다**(크레딧 0, 컷당 30초~1분, 다시 그리기는 다른 곳까지 바뀐다). 고르는 순서: ① 예전 판이 더 나았으면 panel_versions → revert_panel ② 일부만 틀림(소품, 사람 하나 지우기·넣기, 입, 손, 물건 크기)은 edit_panel(지시는 영어로 'In <image1>, … Keep everything else exactly the same') ③ 사람 자리·테이블·배경이 같은 장면의 다른 컷과 어긋나면 잘 된 컷에서 잘라 derive_panel ④ 얼굴이 다른 사람 같으면 fix_faces(얼굴 거리를 재서 가까워질 때만 남긴다) ⑤ 구도·카메라가 통째로 틀리면 set_panels 로 컷 설명을 고치고 vast_draw(본편은 그대로, compare_panel(what="redraw") 로 본편과 나란히 보고 고르면 vast_adopt). 고친 뒤에는 compare_panel 로 전/후 그림을 직접 보고(지시한 곳이 고쳐졌나, 얼굴·옷·사람 수가 바뀌지 않았나), 나빠졌으면 되돌린다. 자동 검수(review_panels·job 의 review)는 놓치는 게 많다: 넘기기 전에 contact_sheet 로 장면 단위 모아보기를 직접 보고, 떠난 사람이 남아 있나·같은 장면에서 자리가 바뀌나·소품 크기와 시대가 맞나를 본다. 컷을 다 고친 뒤 compose 는 한 번만. 어떤 판·역할 워크플로우가 있는지는 draw_models().
+- 인물 얼굴이 컷마다 흔들리면 인물 LoRA 를 쓴다: loras(series) 로 등록 상태·학습할 수 있는 인물을 보고, lora_train(series, character) 로 학습한다(작업으로 돈다, 데이터·캡션은 도구가 만든다. loras 에 training_disabled 가 있으면 지금 서버에선 학습하지 않고 그 대안을 사용자에게 알린다). 학습이 끝나면 그 판으로 그리는 그 인물 컷에 자동으로 붙는다. 몇 컷 그려 보고 얼굴이 굳거나 그림체가 무너지면 loras(series, character, strength=…, on="false") 로 강도를 내리거나 끈다. 다른 판(예: Anima)으로 그리는 컷에는 붙지 않는다.
 - 찾아볼 때는 파일을 읽어 짐작하지 말고 도구로 묻는다: find(컷 번호·낱말·인물 이름 → 작품·회차·컷과 status), panel_info(컷 하나의 콘티·컷 설명·그림 위치), list_panels(회차의 컷 목록), list_jobs(돌았거나 도는 작업), draw_models(그릴 수 있는 판). 컷 번호는 p22·22·p022 어느 꼴로 줘도 도구가 실제 번호로 풀어 준다. 같은 번호가 여러 회차(ep002 · ep002_v2 · _vast 복사본)에 있으면 find 결과의 episode 를 보고 사용자가 말한 회차를 고른다.
 - 도구 오류는 JSON 이다: error(종류) · given(내가 준 값) · reason · candidates(실제로 있는 값)가 있으면 그 중에서 골라 한 번만 다시 부른다. attempt 는 같은 실패를 몇 번째 보는지다: 2 이상이면 같은 호출을 되풀이하지 말고, 받은 오류를 그대로 사용자에게 알리고 어떻게 할지 묻는다.
-- 도구 오류가 JSON 이면 그 값대로 한다: busy 는 running_job 을 job_wait 로 기다린다(같은 도구를 다시 부르지 않는다). not_found 는 candidates 중 맞는 경로로 한 번 다시 부른다(경로를 짐작해 바꿔 가며 되풀이하지 않는다).
+- 도구 오류가 JSON 이면 그 값대로 한다: busy 는 running_job 을 job_status(wait=50) 로 기다린다(같은 도구를 다시 부르지 않는다). not_found 는 candidates 중 맞는 경로로 한 번 다시 부른다(경로를 짐작해 바꿔 가며 되풀이하지 않는다).
 - 그림·모아보기·PDF 를 사용자에게 보여 줄 때는 결과의 link·drawn·links 주소를 준다. 이 MCP 의 파일은 작업실 PC 에 있어 agent app 작업 공간의 ShareFile·Bash·Read 로는 열리지 않는다. 이미 있는 그림은 file_link 로 주소를 받는다. 그림을 직접 봐야 하면 contact_sheet: 결과에 그림이 같이 온다(링크는 잠겨 있어 WebFetch 로는 안 열린다). 한 번 보고 판단한다.
 - 같은 입력(같은 명령·같은 콘티·컷 설명)으로 같은 작업을 다시 부르면 도구가 repeated_job 오류와 이전 작업을 돌려준다. 같은 걸 다시 돌려도 같은 결과다: 사용자와 무엇을 바꿀지 정해 컷 설명을 고치거나 seed 를 바꾼 뒤 부른다.
 
 ## 5. 돈·장비·내용
-- vast(회사 공용 GPU, 크레딧 0)가 기본이다. 인스턴스를 켜고 끄거나 만들고 지우지 않는다(도구도 없다).
-- 힉스필드는 사용자 개인 결제다: estimate_draw 로 비용을 보여 주고 확인받은 뒤에만 draw_panels(confirm_credits=비용). 끝나면 남은 크레딧을 알린다.
+- 그리기는 GPU 서버(ComfyUI, 크레딧 0) 하나로 한다: vast_draw·make_episode 가 쓰는 서버는 state/comfy_url.txt 가 가리키는 곳(지금은 RunPod 파드)이고 guide 첫 줄에 지금 주소가 나온다. 인스턴스를 켜고 끄거나 만들고 지우지 않는다(도구도 없다).
+- 한 컷을 바꿔 보여 줄 때: 일부만 바꾸면 preview_panel(디자인이면 preview_design) → compare_panel(what="preview") → 고르면 adopt_preview, 통째로 다시 그려 보려면 vast_draw(ids=그 컷) → compare_panel(what="redraw") → 고르면 vast_adopt. 둘 다 고르기 전까지 본편은 안 바뀐다.
 - 인물은 모두 성인. 실존 인물·실제 회사 이름·상표는 쓰지 않는다. 원작이 있는 글은 이름·직함·호칭을 원작대로 둔다.
