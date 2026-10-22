@@ -30,7 +30,23 @@
  "stale_stopped_days": 14,
  "name_prefix": "webtoon-qwen",
  "upload_models": [],
- "custom_nodes": [],
+ "custom_nodes": [
+  {
+   "dir": "ComfyUI-Anima_IP-Adapter",
+   "url": "https://github.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter.git",
+   "ref": "6b77cd0c367d76402174ace2be50d3cb6aa77855"
+  },
+  {
+   "dir": "ComfyUI-Cosmos-Reference",
+   "url": "https://github.com/Mirumo0u0/ComfyUI-Cosmos-Reference.git",
+   "ref": "6fd6b27e7c72847d69ad74f4c9cb68ce91b319df"
+  },
+  {
+   "dir": "ComfyUI-AnimaFastTrain",
+   "url": "https://github.com/quinteroac/ComfyUI-AnimaFastTrain.git",
+   "ref": "722a49178ca97930a8e867d3593b86d2cc3dcfe6"
+  }
+ ],
  "extra_files": {
   "custom_nodes/webtoon_train_lora/__init__.py": "vast/server_nodes/webtoon_train_lora/__init__.py",
   "patches/qwen_image21_gated_residual_pr16654.diff": "vast/server_patches/qwen_image21_gated_residual_pr16654.diff"
@@ -48,11 +64,6 @@
    "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
    "file": "qwen-image-2.1-uncensored-lora.safetensors",
    "dest": "loras/qwen-image-2.1-uncensored-lora.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/Qwen-Image-2.1",
-   "file": "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
-   "dest": "text_encoders/qwen3vl_8b_int8_convrot.safetensors"
   },
   {
    "repo": "Comfy-Org/Qwen-Image-2.1",
@@ -88,6 +99,121 @@
    "repo": "SimpleTuner/Qwen-Image-2.1-training-assistant-v3",
    "file": "pytorch_lora_weights.safetensors",
    "dest": "loras/qwen21_training_assistant_v3.safetensors"
+  },
+  {
+   "repo": "NidAll/Qwen3VL-8B-Abliterated-INT8-ConvRot",
+   "file": "qwen3vl_8b_abliterated_int8_convrot.safetensors",
+   "dest": "text_encoders/qwen3vl_8b_abliterated_int8_convrot.safetensors"
+  },
+  {
+   "repo": "Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1",
+   "file": "NoctQ_V4_int8_convrot.safetensors",
+   "dest": "diffusion_models/NoctQ_V4_int8_convrot.safetensors"
+  },
+  {
+   "repo": "chatrlabs/Qwen-Image-2.1-Uncensored-Omni-LoRA-v0.1",
+   "file": "chatrlabs-omni-lora-v0.1-bf16.safetensors",
+   "dest": "loras/chatrlabs-omni-lora-v0.1-bf16.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/MOSS-Image",
+   "file": "diffusion_models/moss_image_sft_bf16.safetensors",
+   "dest": "diffusion_models/moss_image_sft_bf16.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/MOSS-Image",
+   "file": "text_encoders/qwen3.5_9b_int8_convrot.safetensors",
+   "dest": "text_encoders/qwen3.5_9b_int8_convrot.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/MOSS-Image",
+   "file": "vae/flux2-vae_small.safetensors",
+   "dest": "vae/flux2-vae_small.safetensors"
+  },
+  {
+   "repo": "lodestones/MOSS-Image-SFT-8-steps-dmd",
+   "file": "lora.safetensors",
+   "dest": "loras/moss-image-sft-8step-dmd-lora.safetensors"
+  },
+  {
+   "repo": "axiomofmind/Moss-image-nsfw-uncensored-lora",
+   "file": "MOSS-Image-NSFW-Uncensored-LoRA-ComfyUI.safetensors",
+   "dest": "loras/moss-image-uncensored-lora-comfy.safetensors"
+  },
+  {
+   "repo": "circlestone-labs/Anima",
+   "file": "split_files/diffusion_models/anima-base-v1.0.safetensors",
+   "dest": "diffusion_models/anima-base-v1.0.safetensors"
+  },
+  {
+   "repo": "circlestone-labs/Anima",
+   "file": "split_files/text_encoders/qwen_3_06b_base.safetensors",
+   "dest": "text_encoders/qwen_3_06b_base.safetensors"
+  },
+  {
+   "repo": "circlestone-labs/Anima",
+   "file": "split_files/vae/qwen_image_vae.safetensors",
+   "dest": "vae/qwen-image/qwen_image_vae.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/Anima-LLLite",
+   "file": "model_patches/anima-lllite-inpainting-v2.safetensors",
+   "dest": "model_patches/anima-lllite-inpainting-v2.safetensors"
+  },
+  {
+   "repo": "kohya-ss/Anima-LLLite",
+   "file": "anima-lllite-exp-change-2-000007.safetensors",
+   "dest": "model_patches/anima-lllite-exp-change-2-000007.safetensors"
+  },
+  {
+   "repo": "LuciferTC/Anima-IP-Adapter",
+   "file": "ip_adapter-Character_Reference-10.safetensors",
+   "dest": "ipadapter/ip_adapter-Character_Reference-10.safetensors"
+  },
+  {
+   "repo": "CabalResearch/Anima-Canny-Scribble-Adjustable-Control-LoRA",
+   "file": "Anima Scribble+Canny Variable Control LoRA.safetensors",
+   "dest": "loras/anima-scribble-canny-control-lora.safetensors"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "config.json",
+   "dest": "siglip2/siglip2-base-patch16-512/config.json"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "model.safetensors",
+   "dest": "siglip2/siglip2-base-patch16-512/model.safetensors"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "preprocessor_config.json",
+   "dest": "siglip2/siglip2-base-patch16-512/preprocessor_config.json"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "special_tokens_map.json",
+   "dest": "siglip2/siglip2-base-patch16-512/special_tokens_map.json"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "tokenizer.json",
+   "dest": "siglip2/siglip2-base-patch16-512/tokenizer.json"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "tokenizer.model",
+   "dest": "siglip2/siglip2-base-patch16-512/tokenizer.model"
+  },
+  {
+   "repo": "google/siglip2-base-patch16-512",
+   "file": "tokenizer_config.json",
+   "dest": "siglip2/siglip2-base-patch16-512/tokenizer_config.json"
+  },
+  {
+   "url": "https://civitai.com/api/download/models/2979642?fileId=2859181",
+   "dest": "loras/anima-turbo-lora-v0.2.safetensors",
+   "sha256": "1B55E40BDB1D0E5A78CB498F245FCCFDAAE97823265DB957D2AABDCF4CD3CAF1"
   }
  ],
  "ports": [
@@ -102,5 +228,6 @@
   "vllm_version": "0.31.0",
   "gpu_util": 0.4,
   "max_len": 16384
- }
+ },
+ "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용."
 }

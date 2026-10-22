@@ -55,6 +55,11 @@ def base_model(series: Path, m: dict | None = None) -> tuple:
     st = registry(series).get(STYLE) or {}
     if st.get("on") and st.get("file") and str(st.get("model") or "").lower() in ok:
         return st["model"].lower(), "작품 그림체 LoRA 를 학습한 판"
+    # 기본 판의 모델 파일이 서버에 없으면 다른 판으로 몰래 옮기지 않고 멈춘다. 2026-10-22 개항 1화를 그리는 중에 서버의 옛 인코더를 지우자
+    # UC 가 '준비 안 됨'이 되어 p049~p064 를 글만 받는 MOSS 로 그렸다(얼굴이 컷마다 달라짐)
+    need = want if want and want != "auto" and want in m else default_model()
+    if need in m and need not in ok:
+        raise RuntimeError(f"판 {need} 의 모델 파일이 서버에 없다: {m[need]['missing']}")
     fam = series_style(series)
     same = [k for k, v in ok.items() if model_style(v) == fam]
     pick = sorted(same, key=lambda k: (not ok[k].get("refs"), not ok[k].get("default"), k))
@@ -75,7 +80,8 @@ def route(series, p: dict, forced: str | None = None) -> tuple:
     base, why = base_model(series, m)
     fam = model_style(ok.get(base) or m[base])
     chars = p.get("chars") or []
-    if chars and not (ok.get(base) or {}).get("refs"):
+    # 캐릭터 참고 판(refs "character", Anima IP-Adapter)은 인물 그림 한 장으로 얼굴을 맞추니 옮기지 않는다
+    if chars and not (ok.get(base) or {}).get("refs") and ((ok.get(base) or {}).get("meta") or {}).get("refs") != "character":
         from lora import registry
         reg = registry(series)
         if not all(str((reg.get(c) or {}).get("model") or "").lower() == base and (reg.get(c) or {}).get("on") for c in chars):

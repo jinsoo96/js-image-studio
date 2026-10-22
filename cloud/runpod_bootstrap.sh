@@ -182,9 +182,20 @@ fi
 if [ "${MODE:-comfy}" != "agent" ] && { [ "${CUSTOM_NODES:-[]}" != "[]" ] || [ "${EXTRA_MODELS:-[]}" != "[]" ]; }; then
   $PY -m pip install --no-cache-dir -q huggingface_hub hf_transfer
   COMFY_DIR="$COMFY_DIR" HF_HUB_ENABLE_HF_TRANSFER=1 $PY - <<'PY'
-import json, os, shutil, subprocess
+import hashlib, json, os, shutil, subprocess, urllib.request
 from huggingface_hub import hf_hub_download
 base = os.environ["COMFY_DIR"]
+def fetch(m, dest):  # url 항목(Civitai 등): 받아서 sha256 이 맞을 때만 둔다
+    tmp = dest + ".part"
+    h = hashlib.sha256()
+    with urllib.request.urlopen(urllib.request.Request(m["url"], headers={"User-Agent": "webtoon-studio/1.0"}), timeout=120) as r, open(tmp, "wb") as f:
+        for chunk in iter(lambda: r.read(1 << 22), b""):
+            f.write(chunk)
+            h.update(chunk)
+    if m.get("sha256") and h.hexdigest().lower() != m["sha256"].lower():
+        os.remove(tmp)
+        raise RuntimeError(f"sha256 mismatch {m['dest']}")
+    os.replace(tmp, dest)
 for n in json.loads(os.environ.get("CUSTOM_NODES") or "[]"):
     d = f"{base}/custom_nodes/{n['dir']}"
     if not os.path.isdir(d):
@@ -195,7 +206,10 @@ for m in json.loads(os.environ.get("EXTRA_MODELS") or "[]"):
     dest = f"{base}/models/{m['dest']}"
     if not (os.path.exists(dest) and os.path.getsize(dest) > 0):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.move(hf_hub_download(m["repo"], m["file"], local_dir="/workspace/hf_tmp"), dest)
+        if m.get("url"):
+            fetch(m, dest)
+        else:
+            shutil.move(hf_hub_download(m["repo"], m["file"], local_dir="/workspace/hf_tmp"), dest)
     print(f"[boot] model {m['dest']} ok", flush=True)
 PY
 fi

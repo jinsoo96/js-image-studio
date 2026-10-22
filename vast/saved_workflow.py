@@ -94,7 +94,7 @@ def models(refresh: bool = False) -> dict:
             if folder and isinstance(v, str) and v and n.get("mode", 0) != 2:
                 used.setdefault(folder, []).append(v)
         unet = (used.get("diffusion_models") or ["?"])[0]
-        out[mid] = {"gen": d["roles"]["vertical"], "roles": dict(d["roles"]), "refs": bool(meta.get("refs", True)), "label": meta.get("label") or unet,
+        out[mid] = {"gen": d["roles"]["vertical"], "roles": dict(d["roles"]), "refs": meta.get("refs", True) is True, "label": meta.get("label") or unet,
                     "use_for": meta.get("use_for") or "", "default": bool(meta.get("default")), "models": used, "meta": meta,
                     "missing": [f"{k}/{v}" for k, vs in used.items() for v in vs if v not in have.get(k, set())]}
     if out:
@@ -136,9 +136,15 @@ def pick(series=None) -> tuple:
     return (name, m[name]["gen"], m[name]["edit"])
 
 
+def ref_mode(ui: dict):
+    """워크플로우의 extra.webtoon.refs 그대로: true(없음)=참고 그림을 <image> 로 받는다 · false=글만 · "character"=글 + 인물 그림 한 장
+    (Anima 캐릭터 참고 IP-Adapter. 2026-10-22 사용자 "anima 도 그림 보고 같은 캐릭터로 맞추는 게 있다던데")."""
+    return ((ui.get("extra") or {}).get("webtoon") or {}).get("refs", True)
+
+
 def takes_refs(ui: dict) -> bool:
-    """이 워크플로우가 참고 그림을 받는가(워크플로우의 extra.webtoon.refs, 없으면 받는다고 본다)."""
-    return bool(((ui.get("extra") or {}).get("webtoon") or {}).get("refs", True))
+    """이 워크플로우가 참고 그림을 <image> 로 받는가(extra.webtoon.refs, 없으면 받는다고 본다). "character" 판은 글로 그리니 받지 않는다고 본다."""
+    return ref_mode(ui) is True
 
 
 def refs_model() -> str:
@@ -358,6 +364,26 @@ def fill(g: dict, prompt: str, ref_names: list, w: int, h: int, seed: int, steps
     if g.get("5", {}).get("class_type") != "TextEncodeQwenImage21":
         pos = g["7"]["inputs"]["positive"][0]
         g[pos]["inputs"]["text"] = prompt
+        # 캐릭터 참고 판(refs "character"): 첫 참고 그림을 인물 그림으로. 없으면(사람 없는 컷) 참고 단계를 건너뛴다
+        # (IP-Adapter: 적용 노드가 모델을 바꾼다 · AnimaFastTrain: 학습 노드 → 덧씌우기 노드가 모델을 바꾼다)
+        for k, v in list(g.items()):
+            if v["class_type"] == "AnimaIPAdapterApply":
+                src, patch, drop = v["inputs"]["ref_image"][0], k, [k, v["inputs"]["ip_adapter"][0]]
+            elif v["class_type"] == "AnimaFastTrainReferenceContext":
+                src = v["inputs"]["reference_image"][0]
+                patch = next(pk for pk, pv in g.items() if pv["class_type"] == "AnimaFastTrainPatchModel" and pv["inputs"].get("context") == [k, 0])
+                drop = [k, patch]
+            else:
+                continue
+            if ref_names:
+                g[src]["inputs"]["image"] = ref_names[0]
+                continue
+            for w in g.values():
+                for key, val in w["inputs"].items():
+                    if val == [patch, 0]:
+                        w["inputs"][key] = g[patch]["inputs"]["model"]
+            for d in drop + [src]:
+                g.pop(d, None)
         if "6" in g:
             g["6"]["inputs"].update(width=w, height=h, batch_size=1)
         g["7"]["inputs"].update(seed=seed, steps=steps)

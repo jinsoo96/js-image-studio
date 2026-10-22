@@ -8,6 +8,7 @@
     python tools/runpod_cloud.py down      우리 파드(이름이 name_prefix 로 시작)를 전부 지운다(멈춰 둔 것까지)
     python tools/runpod_cloud.py status    우리 파드 상태·시간당 비용·멈춘 동안 보관비
     python tools/runpod_cloud.py llm       켜 둔 파드에 LLM(설정 llm, vLLM 포트 8000)을 띄운다(RUNPOD_PROFILE=runpod_qwen)
+    python tools/runpod_cloud.py sync      설정의 custom_nodes·extra_models 중 켜 둔 파드에 없는 것만 받는다(새 노드는 ComfyUI 재시작 뒤)
     python tools/runpod_cloud.py use       모든 도구(MCP·스크립트)가 켜 둔 파드를 쓰게 state/comfy_url.txt·vlm_url.txt 를 적는다(unuse 는 지운다)
 
 "내린다"는 keep_pod(cloud/runpod.json) 에 따라 다르다.
@@ -446,6 +447,45 @@ def main():
                "SCRIPT_B64": base64.b64encode(script.encode()).decode("ascii")}
         print(agent_run(s["pod_id"], "llm", "echo $SCRIPT_B64 | base64 -d > /workspace/llm.sh && bash /workspace/llm.sh", env))
         print(f"로그: {agent_url(s['pod_id'])}/job_llm.log · 주소: https://{s['pod_id']}-8000.proxy.runpod.net/v1 (모델 {llm['name']}, 키는 파드 env AGENT_TOKEN)")
+    elif cmd == "sync":
+        # 설정의 custom_nodes·extra_models 중 켜 둔 파드에 없는 것만 받는다(부트스트랩과 같은 방식). 다 받으면 setup_sha 를 맞춰
+        # 다음 up 이 '설정이 바뀌었다'며 파드를 지우고 새로 만들지 않게 한다. 새 노드는 ComfyUI 를 다시 켜야 붙는다
+        s, c = load_state(), cfg()
+        code = (
+            "import hashlib, json, os, shutil, subprocess, urllib.request\n"
+            "from huggingface_hub import hf_hub_download\n"
+            "base = '/workspace/ComfyUI'\n"
+            "def fetch(m, dest):  # url 항목(Civitai 등): 받아서 sha256 이 맞을 때만 둔다\n"
+            "    tmp = dest + '.part'\n"
+            "    req = urllib.request.Request(m['url'], headers={'User-Agent': 'webtoon-studio/1.0'})\n"
+            "    h = hashlib.sha256()\n"
+            "    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, 'wb') as f:\n"
+            "        for chunk in iter(lambda: r.read(1 << 22), b''):\n"
+            "            f.write(chunk); h.update(chunk)\n"
+            "    if m.get('sha256') and h.hexdigest().lower() != m['sha256'].lower():\n"
+            "        os.remove(tmp); raise RuntimeError(f\"sha256 mismatch {m['dest']}\")\n"
+            "    os.replace(tmp, dest)\n"
+            "for n in json.loads(os.environ['CUSTOM_NODES']):\n"
+            "    d = f\"{base}/custom_nodes/{n['dir']}\"\n"
+            "    if not os.path.isdir(d):\n"
+            "        subprocess.run(['git', 'clone', '-q', n['url'], d], check=True)\n"
+            "        subprocess.run(['git', '-C', d, 'checkout', '-q', n['ref']], check=True)\n"
+            "    print(f\"[sync] node {n['dir']} ok\", flush=True)\n"
+            "for m in json.loads(os.environ['EXTRA_MODELS']):\n"
+            "    dest = f\"{base}/models/{m['dest']}\"\n"
+            "    if not (os.path.exists(dest) and os.path.getsize(dest) > 0):\n"
+            "        os.makedirs(os.path.dirname(dest), exist_ok=True)\n"
+            "        if m.get('url'):\n"
+            "            fetch(m, dest)\n"
+            "        else:\n"
+            "            shutil.move(hf_hub_download(m['repo'], m['file'], local_dir='/workspace/hf_tmp'), dest)\n"
+            "    print(f\"[sync] model {m['dest']} {os.path.getsize(dest) >> 20}MB\", flush=True)\n"
+            "print('[sync] done', flush=True)\n")
+        env = {"CUSTOM_NODES": json.dumps(c.get("custom_nodes", [])), "EXTRA_MODELS": json.dumps(c.get("extra_models", [])),
+               "HF_HUB_ENABLE_HF_TRANSFER": "1", "SYNC_B64": base64.b64encode(code.encode()).decode("ascii")}
+        print(agent_run(s["pod_id"], "sync", "echo $SYNC_B64 | base64 -d > /workspace/sync.py && /workspace/venv/bin/python /workspace/sync.py", env))
+        print(f"로그: {agent_url(s['pod_id'])}/job_sync.log")
+        save_state(setup_sha=setup_sha())
     elif cmd in ("use", "unuse"):
         # comfy_client(state/comfy_url.txt)·judge_ep(state/vlm_url.txt '주소|모델|키')가 읽는 스위치. 키는 화면에 찍지 않는다
         st = ROOT / "state"

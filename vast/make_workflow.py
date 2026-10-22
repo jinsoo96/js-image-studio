@@ -19,6 +19,7 @@ from saved_workflow import save_ui  # noqa: E402
 from comfy_panel import CLIP, SIZES, TURBO, UNET, VAE, upload  # noqa: E402
 
 HF = "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main"
+CLIP_URL = f"https://huggingface.co/NidAll/Qwen3VL-8B-Abliterated-INT8-ConvRot/resolve/main/{CLIP}"  # 무검열 텍스트 인코더(2026-10-22)
 GUIDE = """# 세로 웹툰 컷 (Qwen Image 2.1)
 webtoon-studio 의 컷 그리기와 같은 구성. 기준선 image_anima_base_v1 은 그대로 두고 따로 만든 것.
 
@@ -36,7 +37,7 @@ webtoon-studio 의 컷 그리기와 같은 구성. 기준선 image_anima_base_v1
 
 **모델**(models/ 에 받아 둠, Model Manager Neo · HuggingFace Comfy-Org/Qwen-Image-2.1)
 - diffusion_models/qwen-image-2.1-UC-fp8.safetensors (Uncensored 판)
-- text_encoders/qwen3vl_8b_int8_convrot.safetensors
+- text_encoders/qwen3vl_8b_abliterated_int8_convrot.safetensors(무검열 판, NidAll/Qwen3VL-8B-Abliterated-INT8-ConvRot. 2026-10-22 전엔 공식 qwen3vl_8b_int8_convrot)
 - vae/qwen_image_2.1_vae_bf16.safetensors
 
 글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
@@ -92,7 +93,7 @@ def build(prompt, ref_names, aspect="2:3", steps=40, seed=0, turbo=False, size=N
     unet = g.node("UNETLoader", (20, 50), (340, 82), [UNET, "default"], outputs=[("MODEL", "MODEL")],
                   models=[{"name": UNET, "url": f"{HF}/diffusion_models/{UNET}", "directory": "diffusion_models"}])
     clip = g.node("CLIPLoader", (20, 160), (340, 106), [CLIP, "qwen_image", "default"], outputs=[("CLIP", "CLIP")],
-                  models=[{"name": CLIP, "url": f"{HF}/text_encoders/{CLIP}", "directory": "text_encoders"}])
+                  models=[{"name": CLIP, "url": CLIP_URL, "directory": "text_encoders"}])
     vae = g.node("VAELoader", (20, 295), (340, 58), [VAE], outputs=[("VAE", "VAE")],
                  models=[{"name": VAE, "url": f"{HF}/vae/{VAE}", "directory": "vae"}])
     # 터보: 기본은 우회(꺼짐). 켜면(Ctrl+B) KSampler steps 를 8 로
@@ -170,7 +171,7 @@ def build_edit(prompt, image_name, guide, steps=8, seed=0, prefix="webtoon_studi
     unet = g.node("UNETLoader", (20, 50), (340, 82), [UNET, "default"], outputs=[("MODEL", "MODEL")],
                   models=[{"name": UNET, "url": f"{HF}/diffusion_models/{UNET}", "directory": "diffusion_models"}])
     clip = g.node("CLIPLoader", (20, 160), (340, 106), [CLIP, "qwen_image", "default"], outputs=[("CLIP", "CLIP")],
-                  models=[{"name": CLIP, "url": f"{HF}/text_encoders/{CLIP}", "directory": "text_encoders"}])
+                  models=[{"name": CLIP, "url": CLIP_URL, "directory": "text_encoders"}])
     vae = g.node("VAELoader", (20, 295), (340, 58), [VAE], outputs=[("VAE", "VAE")],
                  models=[{"name": VAE, "url": f"{HF}/vae/{VAE}", "directory": "vae"}])
     lora = g.node("LoraLoaderModelOnly", (20, 380), (340, 82), [TURBO, 1.0], inputs=[("model", "MODEL")], outputs=[("MODEL", "MODEL")],
@@ -281,16 +282,20 @@ webtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1
 
 **터보**: "터보 LoRA" 켜고 steps 8 · cfg 1(기본). 끄면 steps 30 · cfg 4(기준선 값). 작업실 도구가 켜고 끌 때 cfg 도 같이 바꾼다(extra.webtoon).
 
-**모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2
+**모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2(Civitai 2560840. 예비: anima-turbo-v1.0-extracted-r64, Turbo v1.0 에서 Base 를 뺀 LoRA)
 
 글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
 ANIMA_NEGATIVE = ("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands, "
                  "text, speech bubble, caption, comic page, multiple panels, collage, split screen, panel border")  # 기준선의 네거티브 + 한 컷용(글만 받는 모델은 '한 컷, 글자 없음' 지시를 안 따라 말풍선 있는 4분할 페이지를 그렸다, 2026-10-19)
 
 
-def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix="webtoon_studio/panel"):
+def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefix="webtoon_studio/panel", ref=None, method="ipadapter"):
     """Anima 판 생성 워크플로우(화면 형식). 참고 그림 없이 글로만 그린다. extra.webtoon 에 터보·일반 판 cfg 와 refs=False 를 적어
-    작업실 도구(saved_workflow)가 읽는다."""
+    작업실 도구(saved_workflow)가 읽는다.
+    ref 를 주면(인물 그림 이름) 캐릭터 참고 판: 글 + 그 인물 그림 한 장으로 얼굴·옷을 맞춘다(refs "character", 도구가 컷의 첫 인물 상반신을 꽂는다.
+    2026-10-22 사용자 "anima 도 그림 보고 같은 캐릭터로 맞추는 게 있다던데"). method:
+    ipadapter = anima_ref(IP-Adapter, SigLIP2, LuciferTC Character_Reference) · fasttrain = anima_ft(AnimaFastTrain: 그 그림으로 문맥 토큰을
+    80스텝 학습해 덧씌움, 파일은 안 남김)."""
     w, h = size
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 640), [ANIMA_GUIDE], title="사용법")
@@ -313,7 +318,39 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     dec = g.node("VAEDecode", (1290, 50), (200, 46), None, inputs=[("samples", "LATENT"), ("vae", "VAE")], outputs=[("IMAGE", "IMAGE")])
     save = g.node("SaveImage", (1290, 130), (320, 360), [prefix], inputs=[("images", "IMAGE")])
     g.link(unet, 0, lora, "model")
-    g.link(lora, 0, ks, "model")
+    if ref is None:
+        g.link(lora, 0, ks, "model")
+    elif method == "fasttrain":
+        g.group("1b. 캐릭터 참고 (AnimaFastTrain)", 0, 540, 920, 420, "#4a8a5c")
+        img = g.node("LoadImage", (20, 590), (340, 240), [ref, "image"], outputs=[("IMAGE", "IMAGE"), ("MASK", "MASK")], title="인물 그림")
+        # 작성자 기본값(80스텝 · lr 0.02 · 512 · 토큰 16) · 덧씌우기 0.45
+        ft = g.node("AnimaFastTrainReferenceContext", (420, 590), (480, 300),
+                    ["masterpiece, best quality, score_7, safe, same character, solo, clean white background, clean anime illustration",
+                     0, "fixed", 80, 0.02, 512, 16, 0.02, "bf16"],
+                    inputs=[("model", "MODEL"), ("clip", "CLIP"), ("vae", "VAE"), ("reference_image", "IMAGE")],
+                    outputs=[("context", "ANIMA_REFERENCE_CONTEXT"), ("info", "STRING")], title="그림으로 잠깐 학습")
+        patch = g.node("AnimaFastTrainPatchModel", (420, 910), (480, 106), [0.45, "positive"],
+                       inputs=[("model", "MODEL"), ("context", "ANIMA_REFERENCE_CONTEXT")], outputs=[("model", "MODEL")], title="캐릭터 맞추기")
+        g.link(lora, 0, ft, "model")
+        g.link(clip, 0, ft, "clip")
+        g.link(vae, 0, ft, "vae")
+        g.link(img, 0, ft, "reference_image")
+        g.link(lora, 0, patch, "model")
+        g.link(ft, 0, patch, "context")
+        g.link(patch, 0, ks, "model")
+    else:
+        g.group("1b. 캐릭터 참고 (IP-Adapter)", 0, 540, 920, 420, "#4a8a5c")
+        ipl = g.node("AnimaIPAdapterLoader", (20, 590), (340, 82), ["ip_adapter-Character_Reference-10.safetensors", False],
+                     outputs=[("ip_adapter", "ANIMA_IP_ADAPTER")], title="IP-Adapter")
+        img = g.node("LoadImage", (20, 700), (340, 240), [ref, "image"], outputs=[("IMAGE", "IMAGE"), ("MASK", "MASK")], title="인물 그림")
+        # 강도 0.8 · 참고 512 · 마지막 층 · IP CFG 4 를 따로(터보는 cfg 1 이라 글 CFG 에 묶으면 IP CFG 가 꺼진다)
+        ipa = g.node("AnimaIPAdapterApply", (420, 590), (480, 300), [0.8, 512, -1, 4.0, True, False, True],
+                     inputs=[("model", "MODEL"), ("ip_adapter", "ANIMA_IP_ADAPTER"), ("ref_image", "IMAGE")], outputs=[("model", "MODEL")],
+                     title="캐릭터 맞추기")
+        g.link(lora, 0, ipa, "model")
+        g.link(ipl, 0, ipa, "ip_adapter")
+        g.link(img, 0, ipa, "ref_image")
+        g.link(ipa, 0, ks, "model")
     g.link(clip, 0, pos, "clip")
     g.link(clip, 0, neg, "clip")
     g.link(pos, 0, ks, "positive")
@@ -325,6 +362,12 @@ def build_anima(prompt="", size=(1184, 1760), steps=8, seed=0, turbo=True, prefi
     wf = g.dump()
     wf["extra"]["webtoon"] = {"name": "anima", "label": "Anima (애니메이션 그림체, 글만 받아 인물·장소를 글로 맞춘다)", "refs": False, "style": "anime",
                               "cfg": {"turbo": 1.0, "full": 4.0}, "steps": {"turbo": 8, "full": 30}}
+    if ref is not None and method == "fasttrain":
+        wf["extra"]["webtoon"].update(name="anima_ft", refs="character",
+                                      label="Anima + 캐릭터 참고 (글 + 컷 첫 인물의 상반신 그림 한 장을 AnimaFastTrain 으로 잠깐 학습, 애니메이션 그림체)")
+    elif ref is not None:
+        wf["extra"]["webtoon"].update(name="anima_ref", refs="character",
+                                      label="Anima + 캐릭터 참고 (글 + 컷 첫 인물의 상반신 그림 한 장을 IP-Adapter 로, 애니메이션 그림체)")
     return wf
 
 
@@ -630,6 +673,11 @@ def main():
         c = Comfy()
         name = "webtoon_vertical_moss.json"
         name = save_ui(name, wf)
+        return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
+    if sys.argv[1:2] in (["anima_ref"], ["anima_ft"]):  # Anima 캐릭터 참고 판. 서버에 그 노드(ComfyUI-Anima_IP-Adapter · ComfyUI-AnimaFastTrain)가 있어야 돈다
+        ft = sys.argv[1] == "anima_ft"
+        wf = build_anima(ref="example.png", method="fasttrain" if ft else "ipadapter")
+        name = save_ui(f"webtoon_vertical_{sys.argv[1]}.json", wf)
         return print("서버 저장", name, "노드", len(wf["nodes"]), "연결", len(wf["links"]))
     if sys.argv[1:2] == ["anima"]:  # Anima 판 생성 워크플로우를 서버에 저장(2026-10-19 사용자 "anima 버전 하나 만들어주라")
         wf = build_anima()

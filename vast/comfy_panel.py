@@ -5,7 +5,7 @@
 
 먼저 한 번: .venv/Scripts/python vast/sheet_refs.py <series_hf_dir>  (시트에서 인물 머리 참고 그림을 잘라 둔다)
 모델(서버 models/ 에 Model Manager Neo 로 받아 둠, 없으면 comfy_client.py fetch):
-  diffusion_models/qwen-image-2.1-UC-fp8.safetensors · text_encoders/qwen3vl_8b_int8_convrot.safetensors · vae/qwen_image_2.1_vae_bf16.safetensors
+  diffusion_models/qwen-image-2.1-UC-fp8.safetensors · text_encoders/qwen3vl_8b_abliterated_int8_convrot.safetensors(무검열, NidAll) · vae/qwen_image_2.1_vae_bf16.safetensors
   loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors(--turbo)
 참고 그림은 프롬프트에서 <image1>…<image10> 으로 부른다(Qwen Image 2.1 규칙, 10장까지). 프롬프트·참고 그림을 고른 이유는 qwen_refs 설명.
 RTX 5090 기준 한 컷: 40스텝 약 100~160초, --turbo(8스텝) 약 30~50초.
@@ -27,7 +27,8 @@ sys.path.insert(0, str(ROOT / "vast"))
 from comfy_client import Comfy  # noqa: E402
 
 # 저장 워크플로우를 못 불러 코드로 짤 때의 Qwen 판(UC). 일반 판은 2026-10-19 사용자 요청으로 지웠다(saved_workflow.MODELS)
-UNET, CLIP, VAE = "qwen-image-2.1-UC-fp8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
+# 텍스트 인코더는 무검열(abliterated) 판: 같은 시드로 견줘 구도·얼굴·그림체가 거의 같았다(2026-10-22 사용자 "싹 다 UC 로", exports/2026-10-22/비교)
+UNET, CLIP, VAE = "qwen-image-2.1-UC-fp8.safetensors", "qwen3vl_8b_abliterated_int8_convrot.safetensors", "qwen_image_2.1_vae_bf16.safetensors"
 TURBO = "qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"  # 공식 Turbo LoRA: 8스텝 cfg 1(시안용, 모델 카드)
 # 약 2MP(모델 기본 1MP, 최대 2048x2048), 32 배수. 합성 폭 1600 보다 크게
 SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": (1440, 1440),
@@ -91,10 +92,11 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
     넘기면(인물 시트 시안처럼 본보기가 꼭 필요한 일) 참고 그림을 받는 UC 판으로 그린다."""
     global _SAVED_WARNED
     try:
-        from saved_workflow import fill, load_ui, models, pick, refs_model, takes_refs, to_api, workflow_for
+        from saved_workflow import fill, load_ui, models, pick, ref_mode, refs_model, takes_refs, to_api, workflow_for
         mid, gen, ed = pick(series)
         ui = load_ui(workflow_for(role, series) if role else (ed if edit else gen))
-        if ref_names and not edit and not takes_refs(ui):
+        # 캐릭터 참고 판(Anima IP-Adapter)은 컷 그리기에서 인물 그림 한 장을 받는다(에셋·시안처럼 <image> 가 필요한 일은 UC 판으로)
+        if ref_names and not edit and not takes_refs(ui) and not (ref_mode(ui) == "character" and role is None):
             mid = refs_model()
             ui = load_ui(models()[mid]["gen"])
         mp = ((ui.get("extra") or {}).get("webtoon") or {}).get("max_pixels")  # 판이 학습된 크기(Anima 는 약 100만 화소). 더 큰 캔버스는 같은 장면을 타일처럼 반복해 그렸다(2026-10-19 외출 p112 4분할)
@@ -296,6 +298,15 @@ def continuity(series, ep: Path, out: Path, p: dict, mid: str, closeups: bool = 
             if time_cut(q["id"]):  # 이 컷부터가 이 장면: 더 앞으로 가지 않는다
                 break
     return None
+
+
+def gen_ref_mode(series):
+    """이 작품 생성 판의 참고 그림 방식(saved_workflow.ref_mode: True · False · "character"). 못 불러오면 True."""
+    try:
+        from saved_workflow import load_ui, pick, ref_mode
+        return ref_mode(load_ui(pick(series)[1]))
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def gen_takes_refs(series) -> bool:
@@ -538,6 +549,8 @@ def main():
         text_only = not gen_takes_refs(series)  # 고른 판이 글만 받으면(Anima·MOSS) 장소·인물을 글로, 편집은 참고 그림을 받는 판
         print(f"{p['id']}: 판 {mid} ({why})", flush=True)
         prompt, refs = qwen_refs(series, p, expr=args.expr and not text_only, text_only=text_only)
+        if text_only and p.get("chars") and gen_ref_mode(series) == "character":  # Anima 캐릭터 참고: 첫 인물의 상반신 그림 한 장(IP-Adapter)
+            refs = [series / "assets" / "vast_refs" / f"{p['chars'][0]}_bust.png"]
         if any(not r.exists() for r in refs):
             print(f"{p['id']}: 참고 그림 없음 {[str(r) for r in refs if not r.exists()]}")
             failed.append(p["id"])
