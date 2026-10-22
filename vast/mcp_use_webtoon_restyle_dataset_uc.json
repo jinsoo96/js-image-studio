@@ -1,7 +1,7 @@
 {
  "id": "d969ed77-4ca7-4194-b01e-db0bca33468f",
  "revision": 0,
- "last_node_id": 8,
+ "last_node_id": 7,
  "last_link_id": 8,
  "nodes": [
   {
@@ -24,7 +24,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "## Restyle 학습 데이터\n\n같은 장면의 **Qwen UC 판(입력)** 과 **정본(목표)** 짝으로 '그 작품 그림체로 바꾸기' 편집 LoRA 를 학습한다.\n\n- 목표 폴더: input/ 아래 정본 그림 + 같은 이름 .txt(캡션 'Convert image 1 to <그림체>.')\n- 입력 폴더: 같은 이름의 Qwen UC 판\n- 만든 뒤 webtoon_train_lora_uc_base 로 학습(도구: vast/restyle.py train)"
+    "## Restyle 학습 데이터\n\n같은 장면의 **Qwen UC 판(입력)** 과 **정본(목표)** 짝으로 '그 작품 그림체로 바꾸기' 편집 LoRA 를 학습한다.\n\n- 목표 폴더: input/ 아래 정본 그림 + 같은 이름 .txt(캡션 'Convert image 1 to <그림체>.')\n- 입력 폴더: 같은 이름의 Qwen UC 판\n- 짝 노드가 이름으로 짝을 맞추고 두 그림을 같은 크기(32 배수)로 맞춘다. 편집 조건 resolution 은 0(참고 = 목표 크기)\n- 만든 뒤 webtoon_train_lora_uc_base 로 학습(도구: vast/restyle.py train)"
    ],
    "title": "사용법"
   },
@@ -97,14 +97,14 @@
   },
   {
    "id": 4,
-   "type": "LoadImageTextDataSetFromFolder",
+   "type": "WebtoonPairDataset",
    "pos": [
     420,
     50
    ],
    "size": [
     340,
-    82
+    130
    ],
    "flags": {},
    "order": 3,
@@ -112,7 +112,7 @@
    "inputs": [],
    "outputs": [
     {
-     "name": "images",
+     "name": "targets",
      "type": "IMAGE",
      "links": [
       1
@@ -120,57 +120,34 @@
      "slot_index": 0
     },
     {
-     "name": "texts",
+     "name": "captions",
      "type": "STRING",
      "links": [
       6
      ],
      "slot_index": 1
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "LoadImageTextDataSetFromFolder"
-   },
-   "widgets_values": [
-    "restyle_out"
-   ],
-   "title": "목표: 정본 폴더 (그림 + 캡션)"
-  },
-  {
-   "id": 5,
-   "type": "LoadImageDataSetFromFolder",
-   "pos": [
-    420,
-    170
-   ],
-   "size": [
-    340,
-    82
-   ],
-   "flags": {},
-   "order": 4,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
+    },
     {
-     "name": "images",
+     "name": "inputs",
      "type": "IMAGE",
      "links": [
       5
      ],
-     "slot_index": 0
+     "slot_index": 2
     }
    ],
    "properties": {
-    "Node name for S&R": "LoadImageDataSetFromFolder"
+    "Node name for S&R": "WebtoonPairDataset"
    },
    "widgets_values": [
-    "restyle_in"
+    "restyle_out",
+    "restyle_in",
+    32
    ],
-   "title": "입력: Qwen UC 판 폴더 (같은 이름)"
+   "title": "짝: 목표(정본 + 캡션) · 입력(Qwen UC 판), 같은 이름"
   },
   {
-   "id": 6,
+   "id": 5,
    "type": "VAEEncode",
    "pos": [
     800,
@@ -181,7 +158,7 @@
     60
    ],
    "flags": {},
-   "order": 5,
+   "order": 4,
    "mode": 0,
    "inputs": [
     {
@@ -212,7 +189,7 @@
    "title": "목표 잠재"
   },
   {
-   "id": 7,
+   "id": 6,
    "type": "TextEncodeQwenImage21",
    "pos": [
     800,
@@ -223,7 +200,7 @@
     200
    ],
    "flags": {},
-   "order": 6,
+   "order": 5,
    "mode": 0,
    "inputs": [
     {
@@ -278,12 +255,12 @@
    "widgets_values": [
     "",
     "",
-    1024
+    0
    ],
-   "title": "편집 조건 (image1 = Qwen UC 판)"
+   "title": "편집 조건 (image1 = Qwen UC 판, resolution 0)"
   },
   {
-   "id": 8,
+   "id": 7,
    "type": "SaveTrainingDataset",
    "pos": [
     1200,
@@ -294,7 +271,7 @@
     106
    ],
    "flags": {},
-   "order": 7,
+   "order": 6,
    "mode": 0,
    "inputs": [
     {
@@ -324,7 +301,7 @@
    1,
    4,
    0,
-   6,
+   5,
    0,
    "IMAGE"
   ],
@@ -332,7 +309,7 @@
    2,
    3,
    0,
-   6,
+   5,
    1,
    "VAE"
   ],
@@ -340,7 +317,7 @@
    3,
    2,
    0,
-   7,
+   6,
    0,
    "CLIP"
   ],
@@ -348,15 +325,15 @@
    4,
    3,
    0,
-   7,
+   6,
    1,
    "VAE"
   ],
   [
    5,
-   5,
-   0,
-   7,
+   4,
+   2,
+   6,
    2,
    "IMAGE"
   ],
@@ -364,23 +341,23 @@
    6,
    4,
    1,
-   7,
+   6,
    3,
    "STRING"
   ],
   [
    7,
-   6,
+   5,
    0,
-   8,
+   7,
    0,
    "LATENT"
   ],
   [
    8,
-   7,
+   6,
    0,
-   8,
+   7,
    1,
    "CONDITIONING"
   ]

@@ -544,31 +544,32 @@ def build_lora_dataset(folder="3d", model="uc"):
 def build_restyle_dataset(fin="restyle_in", fout="restyle_out", name="webtoon/restyle", model="uc"):
     """Restyle 학습 데이터(화면 형식, vast/restyle.py dataset 이 폴더·이름만 바꿔 돌린다): 정본(목표 그림 + 캡션) → VAEEncode(목표 잠재),
     Qwen UC 판(입력) → TextEncodeQwenImage21 images.image_1(편집 조건) + 캡션 'Convert image 1 to <그림체>.' → SaveTrainingDataset.
-    목록 노드라 짝마다 한 번씩 돈다(두 폴더의 파일 이름 순서가 짝)."""
+    짝은 WebtoonPairDataset(서버 webtoon_train_lora 노드)이 이름으로 맞춰 같은 크기·32 배수로 내주고, 인코더는 resolution 0(짝 크기 그대로)이라
+    참고 잠재와 목표 잠재가 같은 격자다. 코어 폴더 노드 둘로 읽던 판은 os.listdir 순서라 짝이 어긋날 수 있었다(2026-10-22)."""
     tm = TRAIN_MODELS[model]
     g = G()
     g.node("MarkdownNote", (-470, 0), (420, 300), [
         "## Restyle 학습 데이터\n\n같은 장면의 **Qwen UC 판(입력)** 과 **정본(목표)** 짝으로 '그 작품 그림체로 바꾸기' 편집 LoRA 를 학습한다.\n\n"
         "- 목표 폴더: input/ 아래 정본 그림 + 같은 이름 .txt(캡션 'Convert image 1 to <그림체>.')\n- 입력 폴더: 같은 이름의 Qwen UC 판\n"
+        "- 짝 노드가 이름으로 짝을 맞추고 두 그림을 같은 크기(32 배수)로 맞춘다. 편집 조건 resolution 은 0(참고 = 목표 크기)\n"
         "- 만든 뒤 webtoon_train_lora_uc_base 로 학습(도구: vast/restyle.py train)"], title="사용법")
     clip = g.node("CLIPLoader", (20, 50), (340, 106), [tm["clip"][0], tm["clip"][1], "default"], outputs=[("CLIP", "CLIP")])
     vae = g.node("VAELoader", (20, 180), (340, 58), [tm["vae"]], outputs=[("VAE", "VAE")])
-    out = g.node("LoadImageTextDataSetFromFolder", (420, 50), (340, 82), [fout], outputs=[("images", "IMAGE"), ("texts", "STRING")],
-                 title="목표: 정본 폴더 (그림 + 캡션)")
-    inp = g.node("LoadImageDataSetFromFolder", (420, 170), (340, 82), [fin], outputs=[("images", "IMAGE")], title="입력: Qwen UC 판 폴더 (같은 이름)")
+    pair = g.node("WebtoonPairDataset", (420, 50), (340, 130), [fout, fin, 32],
+                  outputs=[("targets", "IMAGE"), ("captions", "STRING"), ("inputs", "IMAGE")], title="짝: 목표(정본 + 캡션) · 입력(Qwen UC 판), 같은 이름")
     enc = g.node("VAEEncode", (800, 50), (240, 60), [], inputs=[("pixels", "IMAGE"), ("vae", "VAE")], outputs=[("LATENT", "LATENT")], title="목표 잠재")
-    cond = g.node("TextEncodeQwenImage21", (800, 150), (360, 200), ["", "", 1024],
+    cond = g.node("TextEncodeQwenImage21", (800, 150), (360, 200), ["", "", 0],
                   inputs=[("clip", "CLIP"), ("vae", "VAE"), ("images.image_1", "IMAGE"), ("prompt", "STRING")],
-                  outputs=[("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent", "LATENT")], title="편집 조건 (image1 = Qwen UC 판)")
+                  outputs=[("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent", "LATENT")], title="편집 조건 (image1 = Qwen UC 판, resolution 0)")
     cond["inputs"][3]["widget"] = {"name": "prompt"}
     save = g.node("SaveTrainingDataset", (1200, 50), (340, 106), [name, 1000], inputs=[("latents", "LATENT"), ("conditioning", "CONDITIONING")],
                   title="학습 데이터 저장 (datasets/ 아래)")
-    g.link(out, 0, enc, "pixels")
+    g.link(pair, 0, enc, "pixels")
     g.link(vae, 0, enc, "vae")
     g.link(clip, 0, cond, "clip")
     g.link(vae, 0, cond, "vae")
-    g.link(inp, 0, cond, "images.image_1")
-    g.link(out, 1, cond, "prompt")
+    g.link(pair, 2, cond, "images.image_1")
+    g.link(pair, 1, cond, "prompt")
     g.link(enc, 0, save, "latents")
     g.link(cond, 0, save, "conditioning")
     wf = g.dump()

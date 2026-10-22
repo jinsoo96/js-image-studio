@@ -132,9 +132,36 @@ def _small(d: Path, res: int) -> Path:
     return out
 
 
+def _pair_graph(api: dict, fin: str, fout: str) -> bool:
+    """학습 데이터 그래프의 짝 읽기를 WebtoonPairDataset(서버 webtoon_train_lora 노드) 하나로, 편집 조건 인코더는 resolution 0 으로.
+    (2026-10-22 Restyle 이 입력을 무시한 원인) 코어 폴더 노드 둘(목표 LoadImageTextDataSetFromFolder · 입력 LoadImageDataSetFromFolder)은
+    os.listdir 순서라 두 폴더의 i 번째가 같은 컷이라는 보장이 없었고, resolution 1024 는 참고 그림을 목표와 다른 크기로 늘렸다(768 짝은 1.33배).
+    서버에 저장된 옛 워크플로우도 이 자리에서 고쳐 돌린다. 바꿨으면 True."""
+    pair = next((k for k, v in api.items() if v["class_type"] == "WebtoonPairDataset"), None)
+    changed = pair is None
+    if pair is None:
+        tgt = next(k for k, v in api.items() if v["class_type"] == "LoadImageTextDataSetFromFolder")
+        src = next(k for k, v in api.items() if v["class_type"] == "LoadImageDataSetFromFolder")
+        pair = "pair"
+        remap = {(tgt, 0): [pair, 0], (tgt, 1): [pair, 1], (src, 0): [pair, 2]}  # 출력: 목표 그림 · 캡션 · 입력 그림
+        for v in api.values():
+            for kk, x in v["inputs"].items():
+                if isinstance(x, list) and len(x) == 2 and (x[0], x[1]) in remap:
+                    v["inputs"][kk] = remap[(x[0], x[1])]
+        del api[tgt], api[src]
+        api[pair] = {"class_type": "WebtoonPairDataset", "inputs": {}}
+    api[pair]["inputs"].update({"target_folder": fout, "input_folder": fin, "multiple": 32})
+    for v in api.values():
+        if v["class_type"] == "TextEncodeQwenImage21":
+            changed |= v["inputs"].get("resolution") != 0
+            v["inputs"]["resolution"] = 0  # 참고 그림을 짝 크기 그대로(32 배수): 참고 잠재 = 목표 잠재 격자
+    return changed
+
+
 def dataset(series: Path, log=print, name: str = "", res: int = 0) -> str:
-    """짝을 서버 input/restyle_<작품>_{in,out} 에 올리고 학습 데이터를 만든다. 목록 노드라 짝마다 한 번씩 돈다:
-    정본 → VAEEncode(목표 잠재) · Qwen 판 → TextEncodeQwenImage21 images.image_1(편집 조건, 캡션은 'Convert image 1 to …').
+    """짝을 서버 input/restyle_<작품>_{in,out} 에 올리고 학습 데이터를 만든다. 짝 노드(WebtoonPairDataset)가 이름으로 짝을 맞춰
+    같은 크기·32 배수로 내주고, 목록이라 짝마다 한 번씩 돈다: 정본 → VAEEncode(목표 잠재) · Qwen 판 → TextEncodeQwenImage21
+    images.image_1(편집 조건, resolution 0 = 짝 크기 그대로, 캡션은 'Convert image 1 to …').
     res 를 주면 짝을 긴 변 res 로 줄여 올린다(데이터 이름 끝에 res, 학습도 같은 res 로 부른다)."""
     from concurrent.futures import ThreadPoolExecutor
     from comfy_client import Comfy
@@ -155,11 +182,10 @@ def dataset(series: Path, log=print, name: str = "", res: int = 0) -> str:
         from saved_workflow import load_ui, to_api
         ui = load_ui(wf)
         api = to_api(ui)
-        lora._set(api, "LoadImageTextDataSetFromFolder", folder=fout)
-        lora._set(api, "LoadImageDataSetFromFolder", folder=fin)
+        fixed = _pair_graph(api, fin, fout)
         lora._set(api, "SaveTrainingDataset", folder_name=name)
-        log(f"학습 데이터 만들기({wf}) → datasets/{name} (짝 {len(have)})")
-        h = c.wait(c.queue(api, ui), 3600)
+        log(f"학습 데이터 만들기({wf}{', 짝 노드·resolution 0 으로 고쳐' if fixed else ''}) → datasets/{name} (짝 {len(have)})")
+        h = c.wait(c.queue(api, None if fixed else ui), 3600)  # 고친 그래프면 화면용 옛 워크플로우는 기록에 싣지 않는다
         st = h.get("status", {})
         if st.get("status_str") == "error":
             raise RuntimeError(next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), "?"))
@@ -167,11 +193,10 @@ def dataset(series: Path, log=print, name: str = "", res: int = 0) -> str:
     api = {
         "1": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "qwen_image", "device": "default"}},
         "2": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
-        "3": {"class_type": "LoadImageTextDataSetFromFolder", "inputs": {"folder": fout}},
-        "4": {"class_type": "LoadImageDataSetFromFolder", "inputs": {"folder": fin}},
+        "3": {"class_type": "WebtoonPairDataset", "inputs": {"target_folder": fout, "input_folder": fin, "multiple": 32}},
         "5": {"class_type": "VAEEncode", "inputs": {"pixels": ["3", 0], "vae": ["2", 0]}},
-        "6": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["1", 0], "prompt": ["3", 1], "negative_prompt": "", "resolution": 1024,
-                                                                "vae": ["2", 0], "images.image_1": ["4", 0]}},
+        "6": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["1", 0], "prompt": ["3", 1], "negative_prompt": "", "resolution": 0,
+                                                                "vae": ["2", 0], "images.image_1": ["3", 2]}},
         "7": {"class_type": "SaveTrainingDataset", "inputs": {"latents": ["5", 0], "conditioning": ["6", 0], "folder_name": name, "shard_size": 1000}},
     }
     log(f"학습 데이터 만들기 → datasets/{name} (짝 {len(list((d / 'in').glob('*.png')))})")

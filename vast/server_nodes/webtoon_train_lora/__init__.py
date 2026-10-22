@@ -1,4 +1,5 @@
-"""WebtoonTrainLora: ComfyUI 기본 'Train LoRA'(comfy_extras/nodes_train.py TrainLoraNode)를 그대로 부르되 세 가지만 바꾼 학습 노드.
+"""WebtoonTrainLora: ComfyUI 기본 'Train LoRA'(comfy_extras/nodes_train.py TrainLoraNode)를 그대로 부르되 몇 가지만 바꾼 학습 노드
++ 편집 LoRA 짝 데이터를 이름으로 맞춰 읽는 WebtoonPairDataset.
 코어 파일은 고치지 않는다(공용 서버). 학습이 도는 동안만 nodes_train 의 함수 셋을 바꿔 끼우고 끝나면 되돌린다(ComfyUI 는 한 번에 한 작업).
 
 왜(2026-10-21 webtoon-studio 조사, worklogs/2026-10-21-uc-optimize.md): 기본 노드로 학습한 그림체 LoRA 가 거의 안 배워지고 얼룩이 났다.
@@ -15,13 +16,26 @@
      → 묶음 잠재를 학습 전에 process_latent_in. 상류 nodes_train 이 정규화를 하게 되면(소스에 process_latent_in) 건너뛴다.
   5. 편집 조건(참고 그림 reference_latents)이 든 학습 데이터에서 process_cond_list 가 목록 속 텐서를 목록처럼 순회해
      0차원 텐서에서 'iteration over a 0-d tensor' 로 멈춘다(2026-10-21 무대 뒤 Restyle 짝 학습) → 텐서는 잎으로 두는 판으로 바꿔 끼운다.
+     (2026-10-22 다시 봄: 이 판은 참고 잠재를 지우지 않는다. 짝마다 model_conds 의 ref_latents 가 그대로 모델 forward 까지 간다)
+
+Restyle(편집 LoRA)이 입력 그림을 무시하던 진짜 원인(2026-10-22, ComfyUI 0.42.1 소스 대조):
+  6. 짝을 두 폴더 노드(LoadImageTextDataSetFromFolder = 목표, LoadImageDataSetFromFolder = 입력)로 읽었는데 둘 다 os.listdir 순서 그대로다
+     (정렬도 이름 맞추기도 없음). 폴더마다 순서가 다르면 목표 i 와 입력 i 가 다른 컷이라, 입력을 따르지 말라고 배운다
+     → 이름(확장자 뺀 것)으로 짝을 맞추는 WebtoonPairDataset 노드.
+  7. 참고 그림을 TextEncodeQwenImage21 resolution 1024 로 늘려 넣어, 768 짝은 참고 잠재가 목표보다 1.33배 컸다(1024 짝도 73/118 이 한 칸 차이).
+     Qwen Image 2.1 은 참고와 목표 격자를 둘 다 가운데 기준 같은 좌표(RoPE)에 두므로 크기가 다르면 위치가 어긋난 편집을 배운다
+     (그릴 때는 같은 크기) → 짝 노드가 두 그림을 같은 크기·32 배수로 맞추고 인코더는 resolution 0(그 크기 그대로). 학습 전에 크기를 점검한다.
+  8. batch_size 가 2 이상이면 코어 샘플러가 묶음 안 조건 하나하나를 묶음 전체에 돌려 평균한다(짝마다의 참고 잠재·글이 섞임)
+     → 묶음 1 + 같은 수의 기울기 누적으로 바꿔 돈다.
 """
 import inspect
 import logging
+import os
 
 import torch
 
 import comfy_extras.nodes_train as NT
+import folder_paths
 from comfy_api.latest import ComfyExtension, io
 
 
@@ -141,6 +155,28 @@ def _velocity_fwd_bwd(orig):
     return fwd_bwd
 
 
+def _check_conds(latents, positive, bucket_mode):
+    """학습 조건 점검(6·7). 묶음 모드는 코어가 조건 수를 안 보고 잠재 순번으로 조건을 집으므로 수가 다르면 멈춘다.
+    편집 조건이 든 학습이면 짝마다 참고 잠재가 그 목표 잠재와 같은 격자인지 보고, 전부 다르면 멈춘다(돈만 쓰고 참고를 안 따르는 LoRA)."""
+    lat = [s[i] for s in (d["samples"] for d in latents) for i in range(s.shape[0])]
+    conds = NT._process_conditioning(positive)
+    if bucket_mode and len(conds) != len(lat):
+        raise ValueError(f"[WebtoonTrainLora] 학습 잠재 {len(lat)}개와 조건 {len(conds)}개의 수가 다르다(묶음 모드는 순번으로 짝을 짓는다)")
+    refs = [c[1].get("reference_latents") if len(c) > 1 and isinstance(c[1], dict) else None for c in conds]
+    n_ref = sum(1 for r in refs if r)
+    if not n_ref:
+        logging.info(f"[WebtoonTrainLora] 학습 조건 {len(conds)}개, 참고 잠재 없음(글 → 그림 학습)")
+        return
+    bad = [(tuple(x.shape[-2:]), tuple(r[0].shape[-2:])) for x, r in zip(lat, refs) if r and tuple(r[0].shape[-2:]) != tuple(x.shape[-2:])] \
+        if len(conds) == len(lat) else []
+    logging.info(f"[WebtoonTrainLora] 학습 조건 {len(conds)}개 중 참고 잠재(편집 조건) {n_ref}개, 목표와 격자가 다른 참고 {len(bad)}개")
+    if bad and len(bad) == n_ref:
+        raise ValueError(f"[WebtoonTrainLora] 참고 잠재 {n_ref}개가 전부 목표 잠재와 크기가 다르다(예: 목표 {bad[0][0]} ↔ 참고 {bad[0][1]}). "
+                         "그대로 배우면 참고 위치가 어긋난 편집을 배운다 → 짝을 같은 크기로(WebtoonPairDataset) + TextEncodeQwenImage21 resolution 0 으로 다시 만들 것")
+    if bad:
+        logging.warning(f"[WebtoonTrainLora] 목표와 크기가 다른 참고 {len(bad)}/{n_ref}개(예: 목표 {bad[0][0]} ↔ 참고 {bad[0][1]})")
+
+
 class WebtoonTrainLora(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -163,6 +199,12 @@ class WebtoonTrainLora(io.ComfyNode):
     @classmethod
     def execute(cls, alpha_mode, blocks_only, loss_mode, init=("peft",), **kw):
         alpha_mode, blocks_only, loss_mode, init = alpha_mode[0], blocks_only[0], loss_mode[0], init[0]
+        _check_conds(kw["latents"], kw["positive"], kw.get("bucket_mode", [False])[0])
+        bs = kw.get("batch_size", [1])[0]
+        if bs > 1:  # 8: 같은 표본 수를 묶음 1 × 기울기 누적으로(손실 평균·스텝 수 같음)
+            kw["grad_accumulation_steps"] = [kw["grad_accumulation_steps"][0] * bs]
+            kw["batch_size"] = [1]
+            logging.warning(f"[WebtoonTrainLora] batch_size {bs} → 1, grad_accumulation_steps ×{bs}(코어가 묶음 안 조건을 섞는다)")
         if kw.get("bucket_mode", [False])[0] and "process_latent_in" not in inspect.getsource(NT):
             proc = kw["model"][0].model.process_latent_in
             kw["latents"] = [{**d, "samples": proc(d["samples"])} for d in kw["latents"]]
@@ -181,9 +223,98 @@ class WebtoonTrainLora(io.ComfyNode):
             NT.process_cond_list = saved_pcl
 
 
+_IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _pil_rgb(path):
+    """코어 데이터 노드(load_and_process_images)와 같은 열기: 잘린 파일 허용, 16비트 회색은 0~1 로."""
+    import node_helpers
+    from PIL import Image
+    img = node_helpers.pillow(Image.open, path)
+    if img.mode == "I":
+        img = img.point(lambda i: i * (1 / 255))
+    return img.convert("RGB")
+
+
+def _to_tensor(img):
+    import numpy as np
+    return torch.from_numpy(np.array(img).astype(np.float32) / 255.0)[None,]
+
+
+def _pair_images(target, inp, multiple: int):
+    """입력을 목표 크기로 맞추고(다르면 Lanczos) 두 그림을 같은 자리에서 multiple 배수로 가운데 자른다. (목표, 입력, 바꿨나)."""
+    from PIL import Image
+    changed = False
+    if inp.size != target.size:
+        inp = inp.resize(target.size, Image.LANCZOS)
+        changed = True
+    w, h = target.size
+    m = max(1, int(multiple))
+    w2, h2 = max(m, w // m * m), max(m, h // m * m)
+    if (w2, h2) != (w, h):
+        box = ((w - w2) // 2, (h - h2) // 2, (w - w2) // 2 + w2, (h - h2) // 2 + h2)
+        target, inp = target.crop(box), inp.crop(box)
+        changed = True
+    return target, inp, changed
+
+
+class WebtoonPairDataset(io.ComfyNode):
+    """짝 데이터(6·7): 목표 폴더(그림 + 같은 이름 .txt 캡션)와 입력 폴더의 같은 이름 그림을 이름순으로 짝짓는다.
+    코어 폴더 노드 둘은 os.listdir 순서라 폴더끼리 순서가 같다는 보장이 없다. 두 그림은 같은 크기·multiple 배수로 맞춘다."""
+
+    @classmethod
+    def define_schema(cls):
+        folders = folder_paths.get_input_subfolders()
+        return io.Schema(
+            node_id="WebtoonPairDataset", display_name="Load Image Pairs (webtoon: 이름으로 짝 · 같은 크기)", category="model/training",
+            is_experimental=True,
+            inputs=[
+                io.Combo.Input("target_folder", options=folders, tooltip="목표(정답) 폴더: input/ 아래 그림 + 같은 이름 .txt 캡션"),
+                io.Combo.Input("input_folder", options=folders, tooltip="입력(편집 조건) 폴더: 목표와 같은 이름의 그림"),
+                io.Int.Input("multiple", default=32, min=1, max=256,
+                             tooltip="두 그림을 같은 크기로 맞추고 이 배수로 가운데를 자른다. 32 면 TextEncodeQwenImage21 resolution 0 에서 "
+                                     "참고 잠재가 목표 잠재와 같은 격자가 된다"),
+            ],
+            outputs=[
+                io.Image.Output(display_name="targets", is_output_list=True, tooltip="목표 그림 목록(이름순)"),
+                io.String.Output(display_name="captions", is_output_list=True, tooltip="목표 캡션 목록(.txt, 없으면 빈 글)"),
+                io.Image.Output(display_name="inputs", is_output_list=True, tooltip="같은 순번의 입력 그림 목록(목표와 같은 크기)"),
+            ])
+
+    @classmethod
+    def execute(cls, target_folder, input_folder, multiple=32):
+        from comfy_extras.nodes_dataset import secure_subfolder_path
+        base = folder_paths.get_input_directory()
+        tdir, idir = secure_subfolder_path(base, target_folder), secure_subfolder_path(base, input_folder)
+
+        def stems(d):
+            return {os.path.splitext(f)[0]: f for f in os.listdir(d) if f.lower().endswith(_IMG_EXT)}
+
+        ts, ins = stems(tdir), stems(idir)
+        names = sorted(set(ts) & set(ins))
+        if not names:
+            raise ValueError(f"[WebtoonPairDataset] 짝이 없다: {target_folder} {len(ts)}장 · {input_folder} {len(ins)}장, 같은 이름 0")
+        only_t, only_i = sorted(set(ts) - set(ins)), sorted(set(ins) - set(ts))
+        targets, captions, inputs, changed = [], [], [], 0
+        for n in names:
+            t, i, ch = _pair_images(_pil_rgb(os.path.join(tdir, ts[n])), _pil_rgb(os.path.join(idir, ins[n])), multiple)
+            changed += ch
+            targets.append(_to_tensor(t))
+            inputs.append(_to_tensor(i))
+            cap = os.path.join(tdir, n + ".txt")
+            if os.path.exists(cap):
+                with open(cap, "r", encoding="utf-8") as f:
+                    captions.append(f.read().strip())
+            else:
+                captions.append("")
+        logging.info(f"[WebtoonPairDataset] 짝 {len(names)}개({names[0]}…{names[-1]}), 크기 맞춤 {changed}, 짝 없는 목표 {len(only_t)} {only_t[:5]} · "
+                     f"짝 없는 입력 {len(only_i)} {only_i[:5]}, 캡션 없음 {captions.count('')}")
+        return io.NodeOutput(targets, captions, inputs)
+
+
 class WebtoonTrainExtension(ComfyExtension):
     async def get_node_list(self):
-        return [WebtoonTrainLora]
+        return [WebtoonTrainLora, WebtoonPairDataset]
 
 
 async def comfy_entrypoint():
