@@ -107,11 +107,16 @@ def get_pod(pod_id):
 TOKENS = {}  # 파드 id -> 에이전트 토큰(이 프로세스가 만든 파드)
 
 
-def create_pod(mode="comfy", image=None):
-    """mode: comfy(ComfyUI 를 띄움) | agent(ComfyUI 없이 에이전트만, 학습 등). image 를 주면 runpod.json 의 image 대신 쓴다."""
+def hard_sha():
+    """새 파드를 만들어야만 바뀌는 것(이미지·디스크·볼륨 크기). 나머지(부트스트랩·노드·모델·놀면 멈춤 등)는 env 만 바꿔 다시 켜면 된다."""
     c = cfg()
-    token = secrets.token_hex(16)
-    env = {
+    return hashlib.sha256(json.dumps({k: c.get(k) for k in ("image", "container_disk_gb", "volume_gb", "keep_pod")}, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def pod_env(mode, token):
+    """파드 env(부트스트랩이 읽는 값). 만들 때와, 설정이 바뀐 멈춘 파드를 다시 켤 때 같이 쓴다."""
+    c = cfg()
+    return {
         "MODE": mode,
         "AGENT_TOKEN": token,
         "BOOTSTRAP_B64": base64.b64encode(bootstrap_script()).decode("ascii"),
@@ -126,6 +131,13 @@ def create_pod(mode="comfy", image=None):
         "MAX_HOURS": str(c["max_hours"]),
         "ON_IDLE": "stop" if c["keep_pod"] else "terminate",
     }
+
+
+def create_pod(mode="comfy", image=None):
+    """mode: comfy(ComfyUI 를 띄움) | agent(ComfyUI 없이 에이전트만, 학습 등). image 를 주면 runpod.json 의 image 대신 쓴다."""
+    c = cfg()
+    token = secrets.token_hex(16)
+    env = pod_env(mode, token)
     errors = []
     # 싼 커뮤니티 클라우드부터, GPU 는 목록 순서대로 빈 곳을 찾는다.
     # RunPod 가 잠깐씩 500("Something went wrong", "machine does not have the resources")을 내서 30초 간격으로 4바퀴 돈다(2026-10-07)
@@ -161,7 +173,7 @@ def create_pod(mode="comfy", image=None):
         print(f"파드 생성: {pod['id']} ({cloud_type}, {mode}, 시간당 ${pod.get('costPerHr', '?')})", flush=True)
         TOKENS[pod["id"]] = token
         if mode == "comfy":
-            save_state(pod_id=pod["id"], setup_sha=setup_sha(), created=time.strftime("%Y-%m-%d %H:%M"), stopped_at=None)
+            save_state(pod_id=pod["id"], setup_sha=setup_sha(), hard_sha=hard_sha(), created=time.strftime("%Y-%m-%d %H:%M"), stopped_at=None)
         return pod["id"]
     raise RuntimeError("빈 GPU 를 못 찾았다:\n" + "\n".join(errors))
 
@@ -369,9 +381,25 @@ def ensure_pod(mode="comfy", image=None):
     # (2026-10-07 두 묶음을 동시에 돌리자 두 번째가 첫 번째 파드를 지워 첫 번째가 502 로 끊겼다)
     pod = get_pod(s["pod_id"]) if c["keep_pod"] and s.get("pod_id") else None
     if pod and s.get("setup_sha") != setup_sha():
-        print("파드 설정(부트스트랩·이미지·체크포인트)이 바뀌어 기존 파드를 지우고 새로 만든다", flush=True)
-        terminate(pod["id"])
-        pod = None
+        # 예전엔 무엇이 바뀌든 파드를 지우고 새로 만들어, 볼륨에 받아 둔 모델(약 190GB)·학습 자료까지 날아갔다
+        # (2026-10-22 놀면 멈춤 60→30분만 바꿨는데 켜져 있던 파드가 지워짐). 이미지·디스크가 그대로면 지우지 않는다:
+        # 켜져 있으면 다른 작업이 쓰는 중일 수 있어 그대로 쓰고, 멈춰 있으면 env(부트스트랩 등)만 새 값으로 바꿔 다시 켠다.
+        if s.get("hard_sha", hard_sha()) != hard_sha():
+            print("파드 이미지·디스크 설정이 바뀌어 기존 파드를 지우고 새로 만든다", flush=True)
+            terminate(pod["id"])
+            pod = None
+        elif pod.get("desiredStatus") == "RUNNING":
+            print("파드 설정이 바뀌었지만 켜져 있는 파드라 그대로 쓴다(멈춘 뒤 다음에 켤 때 새 설정을 넣는다)", flush=True)
+        else:
+            token = (pod.get("env") or {}).get("AGENT_TOKEN") or secrets.token_hex(16)
+            try:
+                # RunPod 가 넣은 값(PUBLIC_KEY 등)은 남기고 우리 값만 새로
+                api("PATCH", f"/pods/{pod['id']}", {"env": {**(pod.get("env") or {}), **pod_env("comfy", token)}})
+                save_state(setup_sha=setup_sha(), hard_sha=hard_sha())
+                print(f"파드 설정만 새로 넣었다(볼륨 그대로): {pod['id']}", flush=True)
+                pod = get_pod(pod["id"]) or pod
+            except Exception as e:  # noqa: BLE001  못 바꾸면 옛 설정 그대로 켠다(지우지 않는다)
+                print(f"파드 설정을 못 바꿨다({str(e)[:200]}). 옛 설정 그대로 켠다", flush=True)
     if pod:
         try:
             if pod.get("desiredStatus") != "RUNNING":

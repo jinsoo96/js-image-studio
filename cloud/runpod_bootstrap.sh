@@ -87,7 +87,7 @@ http.server.ThreadingHTTPServer(("0.0.0.0", 8189), H).serve_forever()
 PY
 $SYSPY /workspace/pod_agent.py > /workspace/logs/agent.err 2>&1 &
 
-# 안전장치: 로컬 스크립트가 죽어도 GPU 과금이 이어지지 않게 한다. ComfyUI 큐가 IDLE_MIN 분 동안 비어 있거나
+# 안전장치: 로컬 스크립트가 죽어도 GPU 과금이 이어지지 않게 한다. ComfyUI 큐가 비어 있고 LLM(vLLM)도 요청이 없는 채로 IDLE_MIN 분이 지나거나
 # 이번 기동 후 MAX_HOURS 가 지나면 파드를 멈춘다(ON_IDLE=terminate 면 지운다). 설치 중(ComfyUI 응답 없음)은 idle 로 세지 않는다.
 cat > /workspace/watchdog.py <<'PY'
 import json, os, subprocess, time, urllib.request
@@ -95,6 +95,27 @@ idle, start = 0, time.time()
 idle_min, max_min = int(os.environ.get("IDLE_MIN", 15)), int(os.environ.get("MAX_HOURS", 4)) * 60
 pod, key, action = os.environ.get("RUNPOD_POD_ID", ""), os.environ.get("RUNPOD_API_KEY", ""), os.environ.get("ON_IDLE", "terminate")
 agent_mode = os.environ.get("MODE") == "agent"
+llm_tok = [None]
+
+
+def llm_busy():
+    """같은 GPU 의 vLLM(8000, runpod_llm.sh)이 요청을 처리 중이거나 지난 1분 사이에 요청을 받았으면 일하는 중.
+    ComfyUI 큐만 보던 때 미사일 스튜디오 대화 도중에 파드가 멈춰 LLM 이 404 를 냈다(2026-10-22 D+18 3화 콘티를 쓰다 끊김)."""
+    try:
+        t = urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=5).read().decode("utf-8", "replace")
+    except Exception:
+        return False  # LLM 을 안 띄운 파드면 셀 것이 없다
+    run = tok = 0.0
+    for ln in t.splitlines():
+        if ln.startswith(("vllm:num_requests_running{", "vllm:num_requests_waiting{")):
+            run += float(ln.rsplit(" ", 1)[-1])
+        elif ln.startswith("vllm:prompt_tokens_total{"):
+            tok += float(ln.rsplit(" ", 1)[-1])
+    moved = llm_tok[0] is not None and tok > llm_tok[0]
+    llm_tok[0] = tok
+    return run > 0 or moved
+
+
 while True:
     time.sleep(60)
     try:
@@ -105,7 +126,8 @@ while True:
             idle = idle + 1 if not busy else 0
         else:
             q = json.loads(urllib.request.urlopen("http://127.0.0.1:8188/queue", timeout=5).read())
-            idle = idle + 1 if not q.get("queue_running") and not q.get("queue_pending") else 0
+            busy = q.get("queue_running") or q.get("queue_pending") or llm_busy()
+            idle = idle + 1 if not busy else 0
     except Exception:
         idle = 0
     age = (time.time() - start) / 60
