@@ -71,10 +71,17 @@ def subtle_list(series: Path) -> list:
     return SUBTLE
 
 
-def subtle_prompt(ex):
+# 일부러 못생기게 만든 조연(생김새 글에 ugly·homely): '매력적으로 유지'를 빼고 생김새를 지키라고 쓴다.
+# 그 문장 때문에 표정 칸마다 딸기코·뻐드렁니가 지워져 조연이 미남이 됐다(2026-10-23 개항 재헌·도경)
+HOMELY = re.compile(r"\b(ugly|homely)\b", re.I)
+KEEP_HOMELY = ("Keep all of the face's homely features exactly as they are (small eyes, nose, teeth, skin, face shape): do not make it prettier, "
+               "no chibi.")
+
+
+def subtle_prompt(ex, homely=False):
     return (f"Change only the facial expression of the person in <image1> to: {ex}. Subtle, natural, film-like acting for a quiet drama: "
             "small but clearly readable changes in the eyebrows, eyelids, eyes and mouth, no exaggerated webtoon marks. Keep exactly the same "
-            "person, face shape, age, hairstyle, hair color, outfit, framing, plain background and art style.")
+            "person, face shape, age, hairstyle, hair color, outfit, framing, plain background and art style." + (" " + KEEP_HOMELY if homely else ""))
 
 
 def source_face(vr: Path, cid: str) -> Path:
@@ -95,11 +102,11 @@ BASE = ("Change only the clothes of the person in <image1>: a plain fitted heath
         "proportions, height, standing pose, framing, plain background and art style. Neutral face.")
 
 
-def expr_prompt(ex):
+def expr_prompt(ex, homely=False):
     return (f"Change only the facial expression of the person in <image1> to: {ex}. Strong, instantly readable Korean webtoon acting: "
             "eyebrows, eyelids, eyes, mouth and cheeks all change together; webtoon expression marks are welcome when they fit. Keep exactly "
-            "the same person, face shape, hairstyle, hair color, outfit, framing, plain background and art style. Keep the face attractive "
-            "and on-model (no chibi, no gag face).")
+            "the same person, face shape, hairstyle, hair color, outfit, framing, plain background and art style. "
+            + (KEEP_HOMELY if homely else "Keep the face attractive and on-model (no chibi, no gag face)."))
 
 
 TURN = ("turn this photo into a character reference sheet: a 3x2 grid on a plain grey background with a close-up portrait of {pr} face, then {pr} full "
@@ -140,8 +147,9 @@ def split_turnaround(src: Path, vr: Path, cid: str) -> list:
     made.append(f"{cid}_view_face.png")
     k = 0
     for y0, y1 in bands[1:]:
-        cols = runs([x for x in range(a.shape[1]) if white[y0:y1, x].mean() > 0.6])
-        mid = (cols[0][0] + cols[0][1]) // 2 if cols else im.width // 2
+        # 가장자리에 붙은 흰 열은 구분선이 아니다: 첫 덩어리가 왼쪽 끝(0)이면 mid=0 이 돼 빈 그림을 저장하다 멈췄다(2026-10-23 개항 하루키)
+        cols = [c for c in runs([x for x in range(a.shape[1]) if white[y0:y1, x].mean() > 0.6]) if c[0] > 0 and c[1] < im.width - 1]
+        mid = min(((c[0] + c[1]) // 2 for c in cols), key=lambda m: abs(m - im.width // 2)) if cols else im.width // 2
         for x0, x1 in ((0, mid), (mid + 3, im.width)):
             f = vr / f"{cid}_view_{VIEWS[k]}.png"
             im.crop((x0, y0, x1, y1)).save(f)
@@ -150,9 +158,18 @@ def split_turnaround(src: Path, vr: Path, cid: str) -> list:
     return made
 
 
+def _homely(vr: Path, cid: str) -> bool:
+    from lora import person
+    try:
+        return bool(HOMELY.search(person(vr.parents[1], cid).get("who", "")))
+    except SystemExit:  # 설정에 없는 인물
+        return False
+
+
 def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
     """(출발 그림, 프롬프트, 결과 경로, 시드, 크기, 표정 이름) 목록. 이미 있는 결과는 건너뛴다(끊겼다 다시 돌려도 이어짐)."""
     out = []
+    homely = what in ("subtle", "expr", "both") and _homely(vr, cid)
     if what == "subtle":
         src = source_face(vr, cid)
         if not src.exists():
@@ -162,7 +179,7 @@ def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
             f = vr / f"{cid}_xs_{k:02d}.png"
             if (only and k not in only) or f.exists():
                 continue
-            out.append((src, subtle_prompt(ex), f, seed + 100 + k, res, ex.split(":")[0]))
+            out.append((src, subtle_prompt(ex, homely), f, seed + 100 + k, res, ex.split(":")[0]))
         return out
     if what == "turn":  # 캐릭터 시트(얼굴 + 앞·뒤·옆·3/4 전신): 뒷모습·옆모습 참고 그림(2026-10-20 보조 도구 시험)
         src = vr / f"{cid}_front.png"
@@ -188,7 +205,7 @@ def jobs_for(vr: Path, cid: str, what: str, only, seed: int, res: int):
             f = vr / f"{cid}_xp_{k:02d}.png"
             if (only and k not in only) or f.exists():
                 continue
-            out.append((src, expr_prompt(ex), f, seed + k, res, ex.split(":")[0]))
+            out.append((src, expr_prompt(ex, homely), f, seed + k, res, ex.split(":")[0]))
     return out
 
 

@@ -46,7 +46,7 @@ def one_person(img: Image.Image) -> Image.Image:
     return img.crop((0, 0, cut, h))
 
 
-def crop_refs(sheet: Path):
+def crop_refs(sheet: Path, bust: float = 0.19):
     im = Image.open(sheet).convert("RGB")
     a = np.asarray(im).astype(np.int16)
     h, w, _ = a.shape
@@ -73,7 +73,9 @@ def crop_refs(sheet: Path):
     front = one_person(im.crop(box(fx0, fx1)))
     # 머리(정면 전신의 위 19%): 표정이 늘 무표정이라 얼굴 참고로 쓴다. 얼굴 칸 첫 장은 인물마다 웃음·화남이라 그 표정을 따라 그렸다(p045 우는 컷이 웃음).
     # 30% 상반신은 시트의 기본 옷(우빈 파란 셔츠)이 보여 그 옷을 입은 사람이 한 명 더 생겼다(p003)
-    bust = front.crop((0, 0, front.width, int(front.height * 0.19)))
+    # 모자를 쓴 인물은 19% 면 눈 밑에서 잘려 코·입이 빠진다(2026-10-23 개항 재헌: 시트의 뻐드렁니·딸기코가 컷에서 사라져 미남이 됐다)
+    # → series.json cast 의 "bust"(전신 높이 비율)로 인물마다 늘린다
+    bust = front.crop((0, 0, front.width, int(front.height * bust)))
     # 얼굴 칸: 전신은 위아래로 한 덩어리, 얼굴 칸 열은 위아래로 여러 덩어리(칸이 2~3줄). 전신끼리 붙어 한 덩어리로 잡혀도 세지 않아도 된다
     def bands(x0, x1):
         return runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=6, min_len=int(0.12 * h))
@@ -95,7 +97,7 @@ def crop_refs(sheet: Path):
     return front, face, bust
 
 
-def turn_head(sheet: Path):
+def turn_head(sheet: Path, bust: float = 0.19):
     """시트 두 번째 전신(3/4 측면)의 머리. 정면 머리·정면 표정 칸만 넣으면 인물이 독자를 쳐다봤다(2026-10-18 추몽 p016)
     → 독자를 봐서 다시 그릴 때 이 머리를 넣는다. 전신 열은 위아래 한 덩어리, 표정 칸 열은 여러 덩어리라 그걸로 가른다."""
     im = Image.open(sheet).convert("RGB")
@@ -120,7 +122,7 @@ def turn_head(sheet: Path):
     rr = runs(ink[:, x0:x1].mean(axis=1) > 0.004, min_gap=6)
     ya, yb = rr[0] if rr else (0, h)
     body = one_person(im.crop((max(0, x0 - 24), max(0, ya - 24), min(w, x1 + 24), min(h, yb + 24))))
-    return body.crop((0, 0, body.width, int(body.height * 0.19)))
+    return body.crop((0, 0, body.width, int(body.height * bust)))
 
 
 def expr_tiles(series: Path, out: Path):
@@ -150,12 +152,15 @@ def main():
     out = series / "assets" / "vast_refs"
     out.mkdir(parents=True, exist_ok=True)
     expr_tiles(series, out)
+    sj = series / "series.json"
+    cast = (json.loads(sj.read_text(encoding="utf-8-sig")).get("cast") or {}) if sj.exists() else {}
     for s in sorted((series / "assets").glob("*_sheet.png")):
         cid = s.name[: -len("_sheet.png")]
         if want and cid not in want:
             continue
+        ratio = float((cast.get(cid) or {}).get("bust") or 0.19)
         try:
-            front, face, bust = crop_refs(s)
+            front, face, bust = crop_refs(s, ratio)
         except Exception as e:
             print(cid, "실패", e)
             continue
@@ -163,7 +168,7 @@ def main():
         face.save(out / f"{cid}_face.png")
         bust.save(out / f"{cid}_bust.png")
         try:
-            turn_head(s).save(out / f"{cid}_turn.png")
+            turn_head(s, ratio).save(out / f"{cid}_turn.png")
         except Exception as e:
             print(cid, "3/4 머리 실패", e)
         print(cid, "전신", front.size, "얼굴", face.size)
