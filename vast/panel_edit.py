@@ -7,6 +7,9 @@
     .venv/Scripts/python vast/panel_edit.py faces    <작품> <회차> p061:eunyoung,p496
     .venv/Scripts/python vast/panel_edit.py versions <작품> <회차> <컷>
     .venv/Scripts/python vast/panel_edit.py revert   <작품> <회차> <컷> <판 이름(versions 의 name)>
+    .venv/Scripts/python vast/panel_edit.py preview  <작품> <회차> <컷> "<지시>" [--refs …]      본편은 그대로, review/previews/ 에만
+    .venv/Scripts/python vast/panel_edit.py design   <작품> <회차> <컷> "<바꿀 디자인>" --who <인물>   그 인물 디자인을 바꾼 모습 미리 보기
+    .venv/Scripts/python vast/panel_edit.py adopt    <작품> <회차> <컷> <미리 보기 이름>          미리 보기를 본편에
 
 - 고치는 그림은 지금 본편(panels_hf/<컷>.png). 결과는 vast 판(panels_hf_vast)에 쓰고 본편에 넣는다(옛 본편은 panels_hf/_rejected/).
 - 고칠 때마다 전/후 나란히 그림을 <회차>/review/edits/<컷>_<시각>.jpg 에 남긴다(사람·에이전트가 눈으로 확인).
@@ -16,6 +19,7 @@
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -107,6 +111,44 @@ def edit(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: in
     return {"panel": pid, "how": "edit", "compare": str(compare(ep, pid, before, v, prompt))}
 
 
+def preview(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: int = 0, how: str = "") -> dict:
+    """본편을 건드리지 않고 고친 모습만 본다(2026-10-22 사용자 "한 컷만 고쳐서 보여주는 것, 디자인 바꾸면 어떻게 될지도 궁금하다").
+    결과는 <회차>/review/previews/<컷>_<시각>.png(+ 전/후 나란히 .jpg). 마음에 들면 adopt 로 본편에 넣는다."""
+    main, v = ep / "panels_hf" / f"{pid}.png", ep / "panels_hf_vast" / f"{pid}.png"
+    src = main if main.exists() else v
+    if not src.exists():
+        raise SystemExit(f"{pid} 그림이 없다")
+    d = ep / "review" / "previews"
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / f"{pid}_{time.strftime('%m%d-%H%M%S')}.png"
+    _run_edit(series, src, _refs(series, refs), prompt, seed or int(time.time()) % 100000, out)
+    cmp = compare(ep, pid, src.read_bytes(), out, f"미리 보기: {how or prompt}")
+    shutil.move(str(cmp), str(out.with_suffix(".jpg")))  # 고치기 기록(review/edits)과 섞이지 않게 미리 보기 옆에
+    return {"panel": pid, "how": "preview", "preview": out.stem, "image": str(out), "compare": str(out.with_suffix(".jpg"))}
+
+
+def design(series: Path, ep: Path, pid: str, who: str, change: str, seed: int = 0) -> dict:
+    """인물 디자인(머리·옷·소품 등)을 바꾸면 어떻게 보일지 그 인물이 나오는 한 컷으로 미리 본다. 시트·본편은 그대로."""
+    from hf_panel import names
+    name = re.sub(r"\s*\(.*?\)", "", names(series).get(who, who))
+    prompt = (f"In <image1>, change {name}'s design: {change}. Keep {name}'s face, expression, pose and hands, and keep everything else "
+              "(the other people, the place, the light, the framing and the art style) exactly the same.")
+    return preview(series, ep, pid, prompt, seed=seed, how=f"{name} 디자인: {change}")
+
+
+def adopt(ep: Path, pid: str, name: str) -> dict:
+    """미리 보기(preview 의 이름, 예 p020_1022-151233)를 본편에 넣는다. 옛 본편은 panels_hf/_rejected/ 로(place 와 같은 길)."""
+    f = ep / "review" / "previews" / f"{name}.png"
+    if not f.exists():
+        raise SystemExit(f"미리 보기가 없다: {f.name}")
+    v = ep / "panels_hf_vast" / f"{pid}.png"
+    v.parent.mkdir(exist_ok=True)
+    before = (ep / "panels_hf" / f"{pid}.png").read_bytes() if (ep / "panels_hf" / f"{pid}.png").exists() else f.read_bytes()
+    shutil.copy2(f, v)
+    place(ep, pid)
+    return {"panel": pid, "how": "adopt", "from": name, "compare": str(compare(ep, pid, before, v, f"미리 보기 {name} 를 본편에"))}
+
+
 def derive(series: Path, ep: Path, pid: str, src_pid: str, box: str, prompt: str, refs: str = "", seed: int = 0) -> dict:
     anchor = ep / "panels_hf" / f"{src_pid}.png"
     if not anchor.exists():
@@ -176,7 +218,7 @@ def revert(ep: Path, pid: str, name: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["edit", "derive", "faces", "versions", "revert"])
+    ap.add_argument("cmd", choices=["edit", "derive", "faces", "versions", "revert", "preview", "design", "adopt"])
     ap.add_argument("series")
     ap.add_argument("episode")
     ap.add_argument("panel")
@@ -185,6 +227,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--from", dest="src")
     ap.add_argument("--box")
+    ap.add_argument("--who", default="", help="design: 디자인을 바꿀 인물 id")
     a = ap.parse_args()
     series = Path(a.series).resolve()
     ep = _ep(series, a.episode)
@@ -196,6 +239,14 @@ def main():
         r = derive(series, ep, a.panel, a.src, a.box, a.text, a.refs, a.seed)
     elif a.cmd == "faces":
         r = faces(series, ep, a.panel)
+    elif a.cmd == "preview":
+        r = preview(series, ep, a.panel, a.text, a.refs, a.seed)
+    elif a.cmd == "design":
+        if not a.who:
+            raise SystemExit("design 은 --who <인물 id> 가 필요하다")
+        r = design(series, ep, a.panel, a.who, a.text, a.seed)
+    elif a.cmd == "adopt":
+        r = adopt(ep, a.panel, a.text)
     elif a.cmd == "versions":
         r = versions(ep, a.panel)
     else:

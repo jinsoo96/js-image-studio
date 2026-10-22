@@ -1491,6 +1491,68 @@ def compare_panel(series: str, episode: str, panel: str) -> list:
             McpImage(data=buf.getvalue(), format="jpeg")]
 
 
+@mcp.tool()
+def preview_panel(series: str, episode: str, panel: str, instruction: str, refs: str = "", seed: int = -1) -> str:
+    """본편은 그대로 두고 한 컷을 고친 모습만 미리 본다(크레딧 0, 약 30초). 사용자가 '이 컷 이렇게 바꾸면 어때, 보여줘'라고 할 때.
+    instruction 은 edit_panel 과 같은 영어 지시('무엇을 어떻게 바꾸고 나머지는 그대로'). 결과는 <회차>/review/previews/ 에만 쌓인다.
+    끝나면 show_preview 로 전/후를 그림으로 보여 주고, 사용자가 고르면 adopt_preview 로 본편에 넣는다."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    if not (instruction or "").strip():
+        return _fail("empty_instruction")
+    cmd = [PY, str(VAST / "panel_edit.py"), "preview", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
+    cmd += ["--seed", str(seed)] if seed >= 0 else []
+    job = _start_job("preview_panel", ep, [{"label": f"{pid} 미리 보기", "cmd": cmd}], instruction[:120])
+    return f"작업 시작 {job}(약 30초~1분, 본편은 그대로). job_status('{job}') → 끝나면 show_preview('{series}', '{episode}', '{pid}')"
+
+
+@mcp.tool()
+def preview_design(series: str, episode: str, panel: str, character: str, change: str, seed: int = -1) -> str:
+    """인물 디자인(머리 색·머리 모양·옷·안경·소품 등)을 바꾸면 어떻게 보일지 그 인물이 나오는 한 컷으로 미리 본다(본편·시트는 그대로).
+    character: 인물 id. change: 영어로 바꿀 디자인(예 "short silver-white hair instead of black hair", "a burgundy three-piece suit").
+    끝나면 show_preview 로 본다. 마음에 들어 작품 전체에 쓰려면 시트·series.json 의 그 인물 설명을 바꾸는 일이 따로 필요하다(사용자에게 묻는다)."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    if not (change or "").strip() or not (character or "").strip():
+        return _fail("empty_instruction")
+    cmd = [PY, str(VAST / "panel_edit.py"), "design", str(_series(series)), ep.name, pid, change, "--who", character]
+    cmd += ["--seed", str(seed)] if seed >= 0 else []
+    job = _start_job("preview_design", ep, [{"label": f"{pid} {character} 디자인 미리 보기", "cmd": cmd}], change[:120])
+    return f"작업 시작 {job}(약 30초~1분, 본편·시트는 그대로). job_status('{job}') → 끝나면 show_preview('{series}', '{episode}', '{pid}')"
+
+
+@mcp.tool()
+def show_preview(series: str, episode: str, panel: str) -> list:
+    """그 컷의 미리 보기(preview_panel·preview_design 결과) 중 마지막 것의 전/후 나란히 그림을 그림 자체로 돌려준다. 미리 보기 이름 목록도 준다."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    d = ep / "review" / "previews"
+    cands = sorted(d.glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if d.exists() else []
+    if not cands:
+        return "이 컷의 미리 보기가 없다(preview_panel·preview_design 먼저)"
+    im = Image.open(cands[-1]).convert("RGB")
+    im.thumbnail((1400, 1400))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=82)
+    return [json.dumps({"panel": pid, "latest": cands[-1].stem, "all": [f.stem for f in cands], "link": _link(cands[-1])}, ensure_ascii=False),
+            McpImage(data=buf.getvalue(), format="jpeg")]
+
+
+@mcp.tool()
+def adopt_preview(series: str, episode: str, panel: str, preview: str = "") -> str:
+    """미리 보기를 본편에 넣는다(사용자가 고른 것만). preview: show_preview 가 준 이름(비우면 마지막 것). 옛 본편은 panels_hf/_rejected/ 로,
+    되돌리기는 panel_versions → revert_panel."""
+    ep = _episode(series, episode)
+    pid = _pids(ep, panel, "any")[0]
+    d = ep / "review" / "previews"
+    name = preview or next((f.stem for f in sorted(d.glob(f"{pid}_*.png"), key=lambda f: f.stat().st_mtime, reverse=True)), "") if d.exists() else preview
+    if not name:
+        return "이 컷의 미리 보기가 없다"
+    r = subprocess.run([PY, str(VAST / "panel_edit.py"), "adopt", str(_series(series)), ep.name, pid, name], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=ENV)
+    return (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout + r.stderr).strip() else f"종료 {r.returncode}"
+
+
 
 
 

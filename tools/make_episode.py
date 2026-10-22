@@ -107,7 +107,9 @@ def export(series: Path, ep: Path):
     run([PY, TOOLS / "to_epub.py", ep], "epub", capture=True)
     b = json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))
     title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
-    name = f"{b.get('title', series.name)}_{title}".replace(" ", "") + ("_vast판" if ep.name.endswith("_vast") else "")
+    # 본편 내보내기를 덮지 않게 판 이름을 붙인다(<회차>_vast = GPU 서버판, <회차>_restyle = UC 로 그리고 Restyle LoRA 로 정본 그림체를 입힌 판)
+    name = f"{b.get('title', series.name)}_{title}".replace(" ", "") + {"_vast": "_vast판", "_restyle": "_리스타일판"}.get(
+        next((s for s in ("_vast", "_restyle") if ep.name.endswith(s)), ""), "")
     day = ROOT / "exports" / time.strftime("%Y-%m-%d")
     day.mkdir(parents=True, exist_ok=True)
     for src, ext in ((next(ep.glob("out/*.pdf"), None), ".pdf"), (next(ep.glob("out/*.epub"), None), ".epub"),
