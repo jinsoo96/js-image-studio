@@ -456,6 +456,20 @@ def set_entry(series: Path, who: str, entry: dict) -> dict:
     return cur
 
 
+_on_server = {}
+
+
+def on_server(refresh: bool = False):
+    """지금 ComfyUI 서버에 있는 LoRA 파일 이름(한 번 읽어 둔다, refresh 면 다시). 못 읽으면 None(거르지 않는다)."""
+    if refresh or "names" not in _on_server:
+        try:
+            info = Comfy().req("/object_info/LoraLoaderModelOnly")
+            _on_server["names"] = set(info["LoraLoaderModelOnly"]["input"]["required"]["lora_name"][0])
+        except Exception:  # noqa: BLE001
+            _on_server["names"] = None
+    return _on_server["names"]
+
+
 def for_panel(series, chars, model: str, edit: bool = False) -> list:
     """이 컷에 붙일 LoRA [{who, file, strength, trigger}]: 컷에 나오는 인물 중 켜진(on) LoRA 가 있고 그 LoRA 의 판이 지금 그리는 판인 것.
     다른 판(예: UC 로 학습한 것을 Anima 로 그릴 때)에는 붙이지 않는다. 두 명 이상이면 각 항목의 multi 강도(없으면 strength)."""
@@ -481,6 +495,14 @@ def for_panel(series, chars, model: str, edit: bool = False) -> list:
         # 인물 LoRA 와 겹치면 multi 강도: D+18 그림체 0.8 + 재민 0.55 를 겹치자 그림이 초록·보라 얼룩으로 깨졌다(2026-10-20 p003·p008·p025, 0.45 는 멀쩡)
         st = e.get("multi", e.get("strength", 0.8)) if out else e.get("strength", 0.8)
         out.insert(0, {"who": STYLE, "file": e["file"], "trigger": e.get("trigger") or "", "strength": float(st)})
+    # 서버에 없는 LoRA 는 뺀다(켜 둔 채 서버를 옮기면 컷마다 '값이 목록에 없음'으로 실패. 2026-10-22 vast 가 꺼져 RunPod 로 옮기며 학습한 LoRA 를 잃었다)
+    have = on_server()
+    if have is not None and any(x["file"] not in have for x in out):
+        have = on_server(refresh=True)  # 이 프로세스에서 방금 학습한 LoRA 일 수 있다
+    if have is not None and any(x["file"] not in have for x in out):
+        gone = [x["file"] for x in out if x["file"] not in have]
+        print(f"  서버에 없는 LoRA 는 빼고 그린다: {', '.join(gone)}", flush=True)
+        out = [x for x in out if x["file"] in have]
     return out
 
 

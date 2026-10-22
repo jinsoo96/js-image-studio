@@ -3,15 +3,20 @@
 
     VLM_URL=https://.../v1  VLM_MODEL=qwen3.8-27b  VLM_API_KEY=(필요하면)
     VLM_FALLBACK="http://localhost:12361/v1|Qwen3-VL-8B-FP8,https://other/v1|model|key"   쉼표로 여럿, 각 '주소|모델[|키]'
+state/vlm_url.txt('주소|모델', 한 줄)가 있으면 VLM_URL 다음 후보로 둔다(2026-10-22 사내 게이트웨이·vast 가 함께 꺼져 RunPod 파드의 Qwen 3.8 무검열을 씀).
 아무 곳에도 닿지 않으면 JudgeDown 을 던진다(부르는 쪽이 '검사 못 함'으로 처리, 통과로 넘기지 않는다).
 """
 import json
 import re
 import os
 import urllib.request
+from pathlib import Path
 
 DEFAULT_URL = "https://judge-gateway.invalid/v1"
 DEFAULT_MODEL = "qwen3.8-27b"
+POD_FILE = Path(__file__).resolve().parents[1] / "state" / "vlm_url.txt"
+# RunPod 프록시 앞의 Cloudflare 가 파이썬 기본 User-Agent 를 403(1010)으로 막는다
+UA = {"User-Agent": "webtoon-studio/1.0"}
 
 
 class JudgeDown(RuntimeError):
@@ -23,6 +28,10 @@ _picked = None
 
 def candidates() -> list:
     out = [(os.environ.get("VLM_URL", DEFAULT_URL), os.environ.get("VLM_MODEL", DEFAULT_MODEL), os.environ.get("VLM_API_KEY", "EMPTY"))]
+    if POD_FILE.exists():
+        parts = [x.strip() for x in POD_FILE.read_text(encoding="utf-8").strip().split("|")]
+        if len(parts) >= 2 and parts[0]:
+            out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))
     # 대체 후보를 안 줬으면 이 작업실의 사내 VL 터널(agent app 로컬 MCP 가 쓰는 localhost:12361)을 둔다. 사내 judge 가 502 로 반나절 죽었을 때
     # 대체가 없어 모든 검사가 '검사불가'로 끝났다(2026-10-20 외출). 대체 모델(8B)은 약해서 job 로그에 고른 주소가 남는다(endpoint)
     for item in (os.environ.get("VLM_FALLBACK") or "http://localhost:12361/v1|Qwen3-VL-8B-FP8").split(","):
@@ -40,7 +49,7 @@ def endpoint(refresh: bool = False) -> tuple:
     tried = []
     for url, model, key in candidates():
         try:
-            req = urllib.request.Request(url + "/models", headers={"Authorization": f"Bearer {key}"})
+            req = urllib.request.Request(url + "/models", headers={**UA, "Authorization": f"Bearer {key}"})
             with urllib.request.urlopen(req, timeout=8) as r:
                 ids = [m.get("id") for m in json.loads(r.read().decode()).get("data", [])]
             if model in ids or not ids:
@@ -64,7 +73,7 @@ def chat(content: list, max_tokens: int = 600, temperature: float = 0.0, timeout
         body = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": content}], **body_extra(model)}
         req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+                                     headers={**UA, "Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 # 본문이 비어 None 으로 오는 때가 있다(생각만 하고 끝난 답). 부르는 쪽 re·json 이 None 에서 터져 컷이 '실패'로 빠졌다(2026-10-19 p054)

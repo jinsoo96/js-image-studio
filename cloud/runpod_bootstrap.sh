@@ -157,6 +157,27 @@ else
 fi
 cd "$COMFY_DIR"
 
+# 파드에 넣을 파일(우리 노드·상류 패치, env EXTRA_FILES = {ComfyUI 안 경로: base64})과 패치 적용(env PATCHES = [경로]). 이미 붙은 패치는 건너뛴다
+if [ "${MODE:-comfy}" != "agent" ] && [ -n "${EXTRA_FILES:-}" ] && [ "${EXTRA_FILES}" != "{}" ]; then
+  COMFY_DIR="$COMFY_DIR" $SYSPY - <<'PY'
+import base64, json, os
+base = os.environ["COMFY_DIR"]
+for rel, b in json.loads(os.environ["EXTRA_FILES"]).items():
+    p = os.path.join(base, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(base64.b64decode(b))
+    print(f"[boot] file {rel}", flush=True)
+PY
+  for pf in $(echo "${PATCHES:-[]}" | $SYSPY -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
+    if git -C "$COMFY_DIR" apply --check "$COMFY_DIR/$pf" 2>/dev/null; then
+      git -C "$COMFY_DIR" apply "$COMFY_DIR/$pf" && echo "[boot] patch $pf applied"
+    else
+      echo "[boot] patch $pf skipped (already applied or does not fit)"
+    fi
+  done
+fi
+
 # 커스텀 노드(IP-Adapter 등)와 그 모델. 목록이 비어 있으면 건너뛴다(cloud/runpod.json 의 custom_nodes·extra_models)
 if [ "${MODE:-comfy}" != "agent" ] && { [ "${CUSTOM_NODES:-[]}" != "[]" ] || [ "${EXTRA_MODELS:-[]}" != "[]" ]; }; then
   $PY -m pip install --no-cache-dir -q huggingface_hub hf_transfer
@@ -182,8 +203,8 @@ fi
 # 체크포인트: 16개 연결로 나눠 받는다(한 줄 wget 은 기계에 따라 10분 넘게 걸렸다)
 CK_DIR="${CK_DIR:-models/checkpoints}"
 mkdir -p "$CK_DIR"
-CK="$CK_DIR/${CKPT_NAME}"
-if [ ! -s "$CK" ]; then
+CK="$CK_DIR/${CKPT_NAME:-none}"
+if [ -n "${CKPT_URL:-}" ] && [ ! -s "$CK" ]; then
   $SYSPY - "$CKPT_URL" "$CK" <<'PY' || wget -q -O "$CK.part" "$CKPT_URL" && [ -s "$CK.part" ] && mv "$CK.part" "$CK"
 import concurrent.futures as cf, os, sys, threading, time, urllib.request
 url, out = sys.argv[1], sys.argv[2]
@@ -227,7 +248,7 @@ with cf.ThreadPoolExecutor(n) as ex:
 os.replace(tmp, out)
 PY
 fi
-echo "[boot] checkpoint ready $(ls -la "$CK") $(date -u)"
+echo "[boot] checkpoint ready $( [ -n "${CKPT_URL:-}" ] && ls -la "$CK" || echo 'none (models from extra_models)') $(date -u)"
 echo "[boot] driver $(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>&1 | head -1)"
 
 if [ "${MODE:-comfy}" = "agent" ]; then

@@ -7,6 +7,8 @@
     python tools/runpod_cloud.py stop      켜져 있는 파드를 내린다(keep_pod 면 멈추고, 아니면 지운다)
     python tools/runpod_cloud.py down      우리 파드(이름이 name_prefix 로 시작)를 전부 지운다(멈춰 둔 것까지)
     python tools/runpod_cloud.py status    우리 파드 상태·시간당 비용·멈춘 동안 보관비
+    python tools/runpod_cloud.py llm       켜 둔 파드에 LLM(설정 llm, vLLM 포트 8000)을 띄운다(RUNPOD_PROFILE=runpod_qwen)
+    python tools/runpod_cloud.py use       모든 도구(MCP·스크립트)가 켜 둔 파드를 쓰게 state/comfy_url.txt·vlm_url.txt 를 적는다(unuse 는 지운다)
 
 "내린다"는 keep_pod(cloud/runpod.json) 에 따라 다르다.
 - false(기본): 지운다. 보관비 0, 다음엔 새 파드(2~4.5분). 커뮤니티 GPU 는 멈추면 바로 남이 가져가서 다시 켜기가 자주 실패한다.
@@ -15,6 +17,8 @@
 파드 안에도 안전장치가 있다: 큐가 idle_min 분 비거나 이번 기동 후 max_hours 가 지나면 스스로 내린다.
 
 API 키는 환경변수 RUNPOD_API_KEY. 파드 안 설치·실행은 cloud/runpod_bootstrap.sh, 지금 쓰는 파드 id 는 cloud/pod_state.json.
+설정은 RUNPOD_PROFILE(기본 runpod → cloud/runpod.json). runpod_qwen 이면 vast 와 같은 Qwen Image 2.1 UC 구성(cloud/runpod_qwen.json,
+2026-10-22 회사 vast 가 꺼져 옮김), 파드 상태는 cloud/pod_state_runpod_qwen.json.
 """
 import base64
 import secrets
@@ -31,9 +35,10 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "cloud" / "runpod.json"
+PROFILE = os.environ.get("RUNPOD_PROFILE", "runpod")
+CONFIG = ROOT / "cloud" / f"{PROFILE}.json"
 BOOTSTRAP = ROOT / "cloud" / "runpod_bootstrap.sh"
-STATE = ROOT / "cloud" / "pod_state.json"
+STATE = ROOT / "cloud" / ("pod_state.json" if PROFILE == "runpod" else f"pod_state_{PROFILE}.json")
 API = "https://rest.runpod.io/v1"
 # RunPod API·프록시 앞의 Cloudflare 가 파이썬 기본 User-Agent 를 403(error code 1010)으로 막는다
 UA = {"User-Agent": "webtoon-studio/1.0"}
@@ -79,8 +84,14 @@ def setup_sha():
     """파드에 구워 넣는 것(부트스트랩·이미지·체크포인트·볼륨)이 바뀌었는지 보는 값. 바뀌면 멈춘 파드를 버리고 새로 만든다."""
     c = cfg()
     baked = {k: c.get(k) for k in ("image", "container_disk_gb", "volume_gb", "checkpoint", "comfyui_ref", "custom_nodes",
-                                   "extra_models", "idle_min", "max_hours", "keep_pod")}
-    return hashlib.sha256(bootstrap_script() + json.dumps(baked, sort_keys=True).encode()).hexdigest()[:12]
+                                   "extra_models", "idle_min", "max_hours", "keep_pod", "patches")}
+    return hashlib.sha256(bootstrap_script() + json.dumps(baked, sort_keys=True).encode() + extra_files_b64().encode()).hexdigest()[:12]
+
+
+def extra_files_b64() -> str:
+    """runpod.json extra_files({ComfyUI 안 경로: 로컬 파일})를 파드 env 로 넘길 JSON(내용은 base64). 우리 노드·상류 패치를 파드에 넣는다."""
+    files = {dest: base64.b64encode((ROOT / src).read_bytes().replace(b"\r\n", b"\n")).decode("ascii") for dest, src in cfg().get("extra_files", {}).items()}
+    return json.dumps(files, sort_keys=True)
 
 
 def get_pod(pod_id):
@@ -105,6 +116,8 @@ def create_pod(mode="comfy", image=None):
         "BOOTSTRAP_B64": base64.b64encode(bootstrap_script()).decode("ascii"),
         "CKPT_URL": c["checkpoint"]["url"],
         "CKPT_NAME": c["checkpoint"]["name"],
+        "EXTRA_FILES": extra_files_b64(),
+        "PATCHES": json.dumps(c.get("patches", [])),
         "COMFY_REF": c["comfyui_ref"],
         "CUSTOM_NODES": json.dumps(c.get("custom_nodes", [])),
         "EXTRA_MODELS": json.dumps(c.get("extra_models", [])),
@@ -125,18 +138,20 @@ def create_pod(mode="comfy", image=None):
             "imageName": image or c["image"],
             "gpuTypeIds": c["gpu_types"],
             "gpuCount": 1,
-            # 이미지가 CUDA 12.8 이라 드라이버가 낮은 기계에 붙으면 ComfyUI 가 뜨지 못한다(2026-10-07 30분 대기 후 실패)
-            "allowedCudaVersions": c["allowed_cuda"],
             "cloudType": cloud_type,
             "containerDiskInGb": c["container_disk_gb"],
             "volumeInGb": c["volume_gb"] if c["keep_pod"] else 0,
             "volumeMountPath": "/workspace",
-            "ports": ["8188/http", "8189/http"],
+            "ports": c.get("ports", ["8188/http", "8189/http"]),
             "env": env,
             # RunPod 는 이 배열을 공백으로 이었다 다시 쪼개는 듯해서(2026-10-06 첫 시험: "bash -c '...'" 가 갈라져 빈 스크립트로 즉시 종료·재시작 반복)
             # 공백 없이 ${IFS} 로 쓴다. 그대로 넘어가도, 쪼개져도 같은 한 덩어리다
             "dockerStartCmd": ["bash", "-c", "echo${IFS}$BOOTSTRAP_B64|base64${IFS}-d>/bootstrap.sh&&bash${IFS}/bootstrap.sh"],
         }
+        # 이미지가 CUDA 12.8 이라 드라이버가 낮은 기계에 붙으면 ComfyUI 가 뜨지 못한다(2026-10-07 30분 대기 후 실패).
+        # 비우면 거르지 않는다: 2026-10-22 RTX PRO 6000 재고가 많은데도 ["12.8","12.9","13.0"] 이면 늘 "no instances currently available"
+        if c.get("allowed_cuda"):
+            body["allowedCudaVersions"] = c["allowed_cuda"]
         try:
             pod = api("POST", "/pods", body)
         except RuntimeError as e:
@@ -209,6 +224,8 @@ def agent_url(pod_id):
 
 
 def _agent(pod_id, method, path, data=None, timeout=300):
+    if pod_id not in TOKENS:  # 다른 프로세스가 만든 파드(up 으로 켜 둔 것): 토큰은 파드 env 에 있다
+        TOKENS[pod_id] = (get_pod(pod_id) or {}).get("env", {}).get("AGENT_TOKEN", "")
     req = urllib.request.Request(agent_url(pod_id) + path, data=data, method=method,
                                  headers={**UA, "X-Token": TOKENS[pod_id], "Content-Type": "application/octet-stream"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -420,6 +437,32 @@ def main():
         pod_id, url = ensure_pod()
         print(url)
         print("다 쓰면: python tools/runpod_cloud.py stop")
+    elif cmd == "llm":
+        # 켜 둔 파드에 LLM(vLLM, 포트 8000)을 띄운다. 설정은 runpod_*.json 의 llm. 파드를 다시 켜면 다시 부른다
+        s, llm = load_state(), cfg()["llm"]
+        script = (ROOT / "cloud" / "runpod_llm.sh").read_text(encoding="utf-8").replace("\r\n", "\n")
+        env = {"LLM_REPO": llm["repo"], "LLM_NAME": llm["name"], "VLLM_VERSION": llm["vllm_version"],
+               "GPU_UTIL": str(llm["gpu_util"]), "MAX_LEN": str(llm["max_len"]),
+               "SCRIPT_B64": base64.b64encode(script.encode()).decode("ascii")}
+        print(agent_run(s["pod_id"], "llm", "echo $SCRIPT_B64 | base64 -d > /workspace/llm.sh && bash /workspace/llm.sh", env))
+        print(f"로그: {agent_url(s['pod_id'])}/job_llm.log · 주소: https://{s['pod_id']}-8000.proxy.runpod.net/v1 (모델 {llm['name']}, 키는 파드 env AGENT_TOKEN)")
+    elif cmd in ("use", "unuse"):
+        # comfy_client(state/comfy_url.txt)·judge_ep(state/vlm_url.txt '주소|모델|키')가 읽는 스위치. 키는 화면에 찍지 않는다
+        st = ROOT / "state"
+        st.mkdir(exist_ok=True)
+        if cmd == "unuse":
+            for f in ("comfy_url.txt", "vlm_url.txt"):
+                (st / f).unlink(missing_ok=True)
+            print("스위치를 지웠다(도구가 다시 COMFY_URL·vast·사내 게이트웨이를 쓴다)")
+        else:
+            pod_id = load_state()["pod_id"]
+            (st / "comfy_url.txt").write_text(proxy_url(pod_id) + "\n", encoding="utf-8")
+            print("ComfyUI:", proxy_url(pod_id))
+            llm = cfg().get("llm")
+            if llm:
+                key = (get_pod(pod_id) or {}).get("env", {}).get("AGENT_TOKEN", "")
+                (st / "vlm_url.txt").write_text(f"https://{pod_id}-8000.proxy.runpod.net/v1|{llm['name']}|{key}\n", encoding="utf-8")
+                print(f"LLM: https://{pod_id}-8000.proxy.runpod.net/v1 ({llm['name']}, 키 {len(key)}자)")
     elif cmd == "stop":
         pods = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
         for p in pods:

@@ -1,5 +1,7 @@
 """ComfyUI 서버 도우미(어느 ComfyUI 든). 어디에 붙을지는 환경변수로 정한다(comfy-workflow-mcp 와 같은 이름):
 - COMFY_URL 이 있으면 그 서버(로컬·사내·다른 클라우드). 인증은 COMFY_USER+COMFY_PASSWORD(기본 인증) · COMFY_TOKEN(Bearer) · COMFY_HEADERS(JSON).
+- COMFY_URL 이 없고 state/comfy_url.txt 가 있으면 그 주소(MCP·스크립트를 한 번에 옮기는 스위치. 지우면 vast 로 돌아간다).
+  2026-10-22 회사 vast 가 꺼져 RunPod(tools/runpod_cloud.py, RUNPOD_PROFILE=runpod_qwen)로 옮길 때 생김.
 - 없으면 vast.ai: 키는 VAST_KEY(또는 VAST_API_KEY) 또는 D:\\.claude\\CREDENTIALS.local.md(vast.ai 절), 출력하지 않는다. VAST_INSTANCE_ID 로 고른다.
   접속 = 기본 인증(vastai / 인스턴스 jupyter_token). 토큰·주소는 vast.ai API 로 매번 읽는다(인스턴스를 다시 만들면 바뀐다).
 (2026-10-18 사용자 "vast 의존이 있나, 비하드코딩으로": 전에는 vast 에만 붙었다)
@@ -26,6 +28,7 @@ import uuid
 from pathlib import Path
 
 CRED = Path(r"D:\.claude\CREDENTIALS.local.md")
+TARGET = Path(__file__).resolve().parents[1] / "state" / "comfy_url.txt"
 
 
 def vast_key() -> str:
@@ -82,8 +85,9 @@ class Comfy:
 
     def __init__(self):
         e = os.environ
-        if e.get("COMFY_URL"):
-            self.base = e["COMFY_URL"].rstrip("/")
+        url = e.get("COMFY_URL") or (TARGET.read_text(encoding="utf-8").strip() if TARGET.exists() else "")
+        if url:
+            self.base = url.rstrip("/")
             self.headers = json.loads(e["COMFY_HEADERS"]) if e.get("COMFY_HEADERS") else {}
             if e.get("COMFY_TOKEN"):
                 self.headers["Authorization"], self.secret = f"Bearer {e['COMFY_TOKEN']}", e["COMFY_TOKEN"]

@@ -35,7 +35,8 @@ SIZES = {"9:16": (1088, 1920), "2:3": (1184, 1760), "3:4": (1248, 1664), "1:1": 
 MAX_REFS = 10
 
 
-PEOPLE_WORDS = re.compile(r"\b(eyes?|hair|faces?|blush|chest|adults?|lash(es)?|chibi|proportions?|skin|body|bodies|lips|nose)\b", re.I)
+# seductive·sensual·alluring: 사람 없는 장소에 그 분위기를 맡을 여자를 불러냈다(2026-10-22 개항 긴자 거리·테라스 시안, 다크 로맨스 그림체 글)
+PEOPLE_WORDS = re.compile(r"\b(eyes?|hair|faces?|blush|chest|adults?|lash(es)?|chibi|proportions?|skin|body|bodies|lips|nose|seductive|sensual|alluring)\b", re.I)
 
 
 def strip_people(text: str) -> str:
@@ -198,13 +199,10 @@ def pick_expr(series, cid, name, text):
              "restrained acting choose a matching quiet expression if the list has one, never a strong or exaggerated one; otherwise answer 0.")
     # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069). 2026-10-19 외출: 센 표정만 있어 "calm and confident" 에
     # 우쭐한 미소(smug smirk)가 골라졌다 → 잔잔한 표정 묶음(make_assets.py subtle)이 있으면 그걸 고르게 했다
-    body = {"model": LLM_MODEL, "temperature": 0.0, "max_tokens": 8, "chat_template_kwargs": {"enable_thinking": False},
-            "messages": [{"role": "user", "content": ask}]}
-    req = urllib.request.Request(LLM_URL + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    # 주소는 judge_ep 가 고른다(사내가 죽으면 RunPod 파드 등 대체 후보로. 2026-10-22 전엔 사내 주소만 불러 표정 고르기가 조용히 빠졌다)
+    from judge_ep import chat
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            m = re.search(r"\d+", json.loads(r.read().decode())["choices"][0]["message"].get("content") or "")
+        m = re.search(r"\d+", chat([{"type": "text", "text": ask}], max_tokens=8, timeout=60))
     except Exception as e:
         print(f"  표정 고르기 실패({cid}): {str(e)[:80]}")
         return None

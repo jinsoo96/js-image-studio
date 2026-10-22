@@ -1,0 +1,106 @@
+{
+ "_why": "2026-10-22 회사 공용 vast(5090)가 꺼져 사용자 개인 RunPod 로 옮김. vast 와 같은 구성(ComfyUI 0.42.1 + Qwen Image 2.1 UC + 우리 학습 노드·패치 + mcp_use_ 워크플로우). RUNPOD_PROFILE=runpod_qwen 으로 고른다. allowed_cuda 는 비움: 걸면 재고가 있어도 파드가 안 잡혔다(2026-10-22). RTX PRO 6000(Blackwell)은 드라이버가 늘 12.8 이상.",
+ "image": "runpod/pytorch:1.4.1-cu1281-torch2121-ubuntu2404",
+ "gpu_types": [
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "NVIDIA A100-SXM4-80GB",
+  "NVIDIA H100 80GB HBM3",
+  "NVIDIA H100 NVL"
+ ],
+ "cloud_types": [
+  "SECURE"
+ ],
+ "allowed_cuda": [],
+ "comfyui_ref": "v0.42.1",
+ "comfy_start_timeout_min": 20,
+ "download_timeout_min": 30,
+ "container_disk_gb": 60,
+ "keep_pod": true,
+ "volume_gb": 200,
+ "stopped_storage_usd_per_gb_month": 0.2,
+ "checkpoint": {
+  "name": "",
+  "url": ""
+ },
+ "idle_min": 60,
+ "max_hours": 14,
+ "ready_timeout_min": 60,
+ "resume_timeout_min": 15,
+ "stale_stopped_days": 14,
+ "name_prefix": "webtoon-qwen",
+ "upload_models": [],
+ "custom_nodes": [],
+ "extra_files": {
+  "custom_nodes/webtoon_train_lora/__init__.py": "vast/server_nodes/webtoon_train_lora/__init__.py",
+  "patches/qwen_image21_gated_residual_pr16654.diff": "vast/server_patches/qwen_image21_gated_residual_pr16654.diff"
+ },
+ "patches": [
+  "patches/qwen_image21_gated_residual_pr16654.diff"
+ ],
+ "extra_models": [
+  {
+   "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
+   "file": "qwen-image-2.1-UC-fp8.safetensors",
+   "dest": "diffusion_models/qwen-image-2.1-UC-fp8.safetensors"
+  },
+  {
+   "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
+   "file": "qwen-image-2.1-uncensored-lora.safetensors",
+   "dest": "loras/qwen-image-2.1-uncensored-lora.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/Qwen-Image-2.1",
+   "file": "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+   "dest": "text_encoders/qwen3vl_8b_int8_convrot.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/Qwen-Image-2.1",
+   "file": "vae/qwen_image_2.1_vae_bf16.safetensors",
+   "dest": "vae/qwen_image_2.1_vae_bf16.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/Qwen-Image-2.1",
+   "file": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+   "dest": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"
+  },
+  {
+   "repo": "Comfy-Org/Qwen-Image-2.1",
+   "file": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors",
+   "dest": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+  },
+  {
+   "repo": "akhaliq/Qwen-Image-2.1-Next-Scene-LoRA",
+   "file": "next_scene_step2500.safetensors",
+   "dest": "loras/qwen21_next_scene_step2500.safetensors"
+  },
+  {
+   "repo": "houseofboern/character-sheet-qwen-image-2.1-edit-lora",
+   "file": "character-sheet-qwen-image-2.1-edit-lora-e9.safetensors",
+   "dest": "loras/qwen21_character_sheet_edit_e9.safetensors"
+  },
+  {
+   "repo": "Alissonerdx/BFS-Best-Face-Swap",
+   "file": "bfs_head_v1.1_qwen_2.1.safetensors",
+   "dest": "loras/bfs_head_v1.1_qwen_2.1.safetensors"
+  },
+  {
+   "repo": "SimpleTuner/Qwen-Image-2.1-training-assistant-v3",
+   "file": "pytorch_lora_weights.safetensors",
+   "dest": "loras/qwen21_training_assistant_v3.safetensors"
+  }
+ ],
+ "ports": [
+  "8188/http",
+  "8189/http",
+  "8000/http"
+ ],
+ "llm": {
+  "_why": "사내 Qwen 게이트웨이(qwen3.8-27b)를 대신하는 무검열 Qwen 3.8 27B. 원본 huihui-ai 무검열판의 FP8(29GB, 그림 보는 부분 유지). vLLM 0.32 는 나온 지 2주가 안 돼 0.31.",
+  "repo": "munekazu/Huihui-Qwen3.8-27B-abliterated-FP8",
+  "name": "qwen3.8-27b",
+  "vllm_version": "0.31.0",
+  "gpu_util": 0.4,
+  "max_len": 16384
+ }
+}
