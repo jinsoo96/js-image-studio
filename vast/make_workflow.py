@@ -285,7 +285,7 @@ webtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1
 **모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2(Civitai 2560840. 예비: anima-turbo-v1.0-extracted-r64, Turbo v1.0 에서 Base 를 뺀 LoRA)
 
 글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."""
-ANIMA_NEGATIVE = ("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, naked, extra toes, mutated hands, "
+ANIMA_NEGATIVE = ("worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts, sepia, extra toes, mutated hands, "
                  "text, speech bubble, caption, comic page, multiple panels, collage, split screen, panel border")  # 기준선의 네거티브 + 한 컷용(글만 받는 모델은 '한 컷, 글자 없음' 지시를 안 따라 말풍선 있는 4분할 페이지를 그렸다, 2026-10-19)
 
 

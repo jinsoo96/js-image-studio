@@ -27,8 +27,7 @@ ACTING = ("ACTING (most important): this is a webtoon, so faces must ACT. Make t
           "welcome when they fit: sweat drops, blush hatching lines, an anger vein, shock lines, gloom lines, small sparkles. Keep faces on-model and attractive "
           "(no chibi, no flattened gag faces).")
 # 맥락(2026-10-13 사용자: 힉스필드에 "가상 캐릭터, 개인 작업, 어디에도 공유 안 함"을 알려 두라). 사실 그대로만 적는다. 작품별 덧붙임은 <series>/prompts/rules_extra.txt
-CONTEXT = ("Context: original fictional characters (all adults) for a private, non-commercial webtoon project that will not be shared publicly; "
-           "a non-explicit, all-ages illustration.")
+CONTEXT = "Context: original fictional characters (all adults) for a private, non-commercial webtoon project that will not be shared publicly."
 
 
 def names(series):
