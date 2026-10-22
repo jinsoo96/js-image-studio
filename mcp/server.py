@@ -178,9 +178,14 @@ def _fingerprint(kind: str, ep: Path, steps: list) -> str:
     """작업의 지문 = 종류 + 명령 + 그 작업이 읽는 입력 파일(콘티·컷 설명) 내용. 입력이 바뀌면(컷 설명 수정·시드 변경) 다른 작업이다."""
     import hashlib
     h = hashlib.sha1(json.dumps([kind, [s.get("cmd") for s in steps]], ensure_ascii=False, default=str).encode())
-    for name in ("make_storyboard.py", "build_panels.py", "storyboard.json", "panels.json", "panels_spec.json"):
+    for name in ("make_storyboard.py", "build_panels.py", "storyboard.json", "panels.json", "panels_spec.json", "series.json"):
         if (ep / name).exists():
             h.update((ep / name).read_bytes())
+    # 작품 단위 작업(시안 다시 그리기 등)은 그림체·인물 글(prompts/*.txt)이 입력이다. 글을 고쳐 다시 그리게 했는데 명령이 같다고
+    # repeated_job 으로 막혔다(2026-10-22 개항 그림체를 씹덕풍으로 바꾼 직후 시트 3장)
+    if (ep / "prompts").is_dir():
+        for f in sorted((ep / "prompts").glob("*.txt")):
+            h.update(f.read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -948,11 +953,13 @@ def redo_candidate(series: str, kind: str, name: str) -> str:
         return "kind 는 sheet 또는 location"
     cand = s / "assets" / "_candidates" / (f"locations/{name}.png" if kind == "location" else f"{name}_sheet.png")
     _ensure_idle(s)
+    # 작업이 실제로 시작된 뒤에 지난 시안을 옮긴다(먼저 옮기면 repeated_job 으로 막혔을 때 시안만 사라졌다, 2026-10-22).
+    # 새 시안은 그리는 데 1분 넘게 걸려 마지막에 저장되니, 시작 직후 옮겨도 겹치지 않는다
+    job = _start_job("redo_candidate", s, [{"label": f"시안 다시 그리기({kind} {name})", "cmd": [PY, str(VAST / "new_assets.py"), str(s), kind, name]}])
     if cand.exists():
         rej = s / "assets" / "_candidates" / "_rejected"
         rej.mkdir(parents=True, exist_ok=True)
         shutil.move(str(cand), str(rej / f"{cand.stem}_{time.strftime('%m%d%H%M%S')}.png"))
-    job = _start_job("redo_candidate", s, [{"label": f"시안 다시 그리기({kind} {name})", "cmd": [PY, str(VAST / "new_assets.py"), str(s), kind, name]}])
     return f"작업 시작 {job}: 시안 {cand.relative_to(ROOT)} 를 다시 그린다(약 2~4분). job_status('{job}', wait=50)"
 
 
@@ -1042,7 +1049,7 @@ def prepare_episode(series: str, episode: str) -> str:
             return json.dumps({"error": "missing_file", "file": name, "hint": "new_episode 로 앞 회차를 본떠 먼저 만든다"}, ensure_ascii=False)
     steps.append({"label": "관문(콘티·컷 설명 채점)", "cmd": [PY, str(TOOLS / "gates.py"), str(ep), "all"], "allow_fail": True})
     job = _start_job("prepare", ep, steps)
-    return _wait_job(job, 40, 80)
+    return job_status(job, wait=40, tail_lines=80)  # 옛 _wait_job(job_wait 와 함께 job_status 로 합침, 2026-10-22)
 
 
 # ── vast.ai 공용 GPU(크레딧 0) ───────────────────────────────
