@@ -7,6 +7,7 @@
     python tools/runpod_cloud.py stop      켜져 있는 파드를 내린다(keep_pod 면 멈추고, 아니면 지운다)
     python tools/runpod_cloud.py down      우리 파드(이름이 name_prefix 로 시작)를 전부 지운다(멈춰 둔 것까지)
     python tools/runpod_cloud.py status    우리 파드 상태·시간당 비용·멈춘 동안 보관비
+    python tools/runpod_cloud.py guard     예산 지킴이: 잔액이 설정 min_balance_usd 밑이면 켜진 우리 파드를 멈춘다(파드를 켤 때도 이 바닥을 본다)
     python tools/runpod_cloud.py llm       켜 둔 파드에 LLM(설정 llm, vLLM 포트 8000)을 띄운다(RUNPOD_PROFILE=runpod_qwen)
     python tools/runpod_cloud.py sync      설정의 custom_nodes·extra_models 중 켜 둔 파드에 없는 것만 받는다(새 노드는 ComfyUI 재시작 뒤)
     python tools/runpod_cloud.py use       모든 도구(MCP·스크립트)가 켜 둔 파드를 쓰게 state/comfy_url.txt·vlm_url.txt 를 적는다(unuse 는 지운다)
@@ -36,7 +37,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = os.environ.get("RUNPOD_PROFILE", "runpod")
+# 예약작업처럼 환경변수를 넣기 번거로운 곳은 --profile <이름> 으로도 고른다
+PROFILE = sys.argv[sys.argv.index("--profile") + 1] if "--profile" in sys.argv[:-1] else os.environ.get("RUNPOD_PROFILE", "runpod")
 CONFIG = ROOT / "cloud" / f"{PROFILE}.json"
 BOOTSTRAP = ROOT / "cloud" / "runpod_bootstrap.sh"
 STATE = ROOT / "cloud" / ("pod_state.json" if PROFILE == "runpod" else f"pod_state_{PROFILE}.json")
@@ -58,8 +60,43 @@ def save_state(**kw):
     STATE.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def api_key() -> str:
+    """RUNPOD_API_KEY. 예약작업(놀면 멈춤·예산 지킴이)은 사용자 환경변수를 못 받을 때가 있어 Windows 사용자 환경(레지스트리)도 본다."""
+    key = os.environ.get("RUNPOD_API_KEY", "")
+    if not key and os.name == "nt":
+        with contextlib.suppress(OSError):
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+                key = winreg.QueryValueEx(k, "RUNPOD_API_KEY")[0]
+    return key
+
+
+def balance() -> dict:
+    """계정 잔액·시간당 지출(GraphQL). {"balance": 달러, "per_hr": 달러}. 못 읽으면 RuntimeError."""
+    req = urllib.request.Request("https://api.runpod.io/graphql", method="POST",
+                                 data=json.dumps({"query": "query { myself { clientBalance currentSpendPerHr } }"}).encode(),
+                                 headers={**UA, "Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            me = json.loads(r.read())["data"]["myself"]
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"RunPod 잔액을 못 읽음: {str(e)[:200]}") from e
+    return {"balance": float(me["clientBalance"]), "per_hr": float(me["currentSpendPerHr"])}
+
+
+def budget_ok(need_hours: float = 0.5) -> bool:
+    """설정 min_balance_usd(예산 바닥) 위에서 need_hours 시간을 더 쓸 수 있으면 True. 설정이 없으면 늘 True.
+    (2026-10-23 사용자 "60달러까지만 쓰고 더 쓰면 나 파산": 바닥을 설정에 두고 파드를 켤 때·지킴이가 본다)"""
+    floor = cfg().get("min_balance_usd")
+    if floor is None:
+        return True
+    b = balance()
+    per_hr = max(b["per_hr"], float(cfg().get("expected_usd_per_hr", 0) or 0))
+    return b["balance"] - per_hr * need_hours > float(floor)
+
+
 def api(method, path, body=None):
-    key = os.environ.get("RUNPOD_API_KEY")
+    key = api_key()
     if not key:
         sys.exit("환경변수 RUNPOD_API_KEY 가 없다")
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -406,6 +443,10 @@ def ensure_pod(mode="comfy", image=None):
     """쓸 수 있는 파드를 하나 켜서 (pod_id, url) 을 돌려준다. 멈춘 파드가 있으면 다시 켜고, 안 되면 새로 만든다.
     mode=agent 면 늘 새로 만들고 에이전트 주소를 돌려준다."""
     c, s = cfg(), load_state()
+    if not budget_ok():
+        b = balance()
+        raise SystemExit(f"예산 바닥: 잔액 ${b['balance']:.2f} 이 설정 min_balance_usd ${c['min_balance_usd']} 에 가까워 파드를 켜지 않는다"
+                         " (사용자에게 알리고, 바닥을 바꿀지는 사용자가 정한다)")
     if mode == "agent":
         s = {}
     # 지우는 모드(keep_pod false)에선 남의 파드를 건드리지 않는다. 켜져 있는 파드는 다른 작업이 쓰는 중일 수 있다
@@ -488,6 +529,9 @@ def our_pods():
 
 def main():
     args = sys.argv[1:]
+    if "--profile" in args[:-1]:
+        i = args.index("--profile")
+        args = args[:i] + args[i + 2:]
     if not args:
         sys.exit(__doc__)
     cmd = args[0]
@@ -582,6 +626,24 @@ def main():
         STATE.unlink(missing_ok=True)
         if not pods:
             print("지울 파드 없음")
+    elif cmd == "guard":
+        # 예산 지킴이(예약작업 WEBTOON-budget-guard 가 10분마다): 잔액이 min_balance_usd 밑이면 켜진 우리 파드를 멈춘다(볼륨은 남김)
+        c = cfg()
+        if c.get("min_balance_usd") is None:
+            print("min_balance_usd 설정 없음: 지킬 바닥이 없다")
+            return
+        b = balance()
+        running = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
+        line = f"{time.strftime('%Y-%m-%d %H:%M')} 잔액 ${b['balance']:.2f} 바닥 ${c['min_balance_usd']} 켜진 파드 {len(running)} 시간당 ${b['per_hr']:.2f}"
+        if b["balance"] <= float(c["min_balance_usd"]) and running:
+            for p in running:
+                stop(p["id"])
+            line += " → 바닥이라 파드를 멈춤"
+        print(line, flush=True)
+        log = ROOT / "state" / "logs" / "budget_guard.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
     elif cmd == "status":
         c, s = cfg(), load_state()
         pods = our_pods()

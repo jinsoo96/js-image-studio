@@ -11,6 +11,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -46,14 +47,15 @@ def models(refresh: bool = False) -> dict:
     try:
         from concurrent.futures import ThreadPoolExecutor
         c = _c()
-        names = [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
-        # 옛 이름을 먼저, mcp_use_ 를 나중에 읽어 같은 판·역할이면 mcp_use_ 가 덮는다
-        files = sorted((n for n in names if re.fullmatch(r"(mcp_use_)?webtoon_.+\.json", n)), key=lambda n: (n.startswith(MCP_PREFIX), n))
         folders = ("diffusion_models", "loras", "text_encoders", "vae")
         with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(agent app 호출 한도 60초)
             futs = {f: ex.submit(lambda f=f: set(c.req(f"/models/{f}") or [])) for f in folders}
-            uis = {n: ex.submit(load_ui, n) for n in files}
+            names = _list_workflows(c)
             have = {f: fu.result() for f, fu in futs.items()}
+            names += _push_local(c, set(names), have)
+            # 옛 이름을 먼저, mcp_use_ 를 나중에 읽어 같은 판·역할이면 mcp_use_ 가 덮는다
+            files = sorted((n for n in names if re.fullmatch(r"(mcp_use_)?webtoon_.+\.json", n)), key=lambda n: (n.startswith(MCP_PREFIX), n))
+            uis = {n: ex.submit(load_ui, n) for n in files}
             loaded = {}
             for n, fu in uis.items():
                 try:
@@ -84,15 +86,7 @@ def models(refresh: bool = False) -> dict:
         ui, meta = d["ui"], d["meta"]
         if ui is None:  # 생성 워크플로우가 없으면 판이 아니다
             continue
-        nodes = ui.get("nodes", []) + [n for sg in (ui.get("definitions") or {}).get("subgraphs", []) for n in sg.get("nodes", [])]
-        used = {}
-        for n in nodes:
-            v = (n.get("widgets_values") or [None])[0]
-            folder = {"UNETLoader": "diffusion_models", "LoraLoaderModelOnly": "loras", "CLIPLoader": "text_encoders", "VAELoader": "vae"}.get(n.get("type"))
-            if str(n.get("title", "")).startswith(LORA_SLOT):  # 인물 LoRA 칸은 비어 있는 게 기본(그 컷 인물 것을 도구가 넣는다)
-                continue
-            if folder and isinstance(v, str) and v and n.get("mode", 0) != 2:
-                used.setdefault(folder, []).append(v)
+        used = _used_models(ui)
         unet = (used.get("diffusion_models") or ["?"])[0]
         out[mid] = {"gen": d["roles"]["vertical"], "roles": dict(d["roles"]), "refs": meta.get("refs", True) is True, "label": meta.get("label") or unet,
                     "use_for": meta.get("use_for") or "", "default": bool(meta.get("default")), "models": used, "meta": meta,
@@ -108,6 +102,57 @@ def models(refresh: bool = False) -> dict:
         _models, _models_at = out, time.time()
     return _models or {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}
                        for k, (g, e) in OFFLINE.items()}
+
+
+def _used_models(ui: dict) -> dict:
+    """워크플로우가 불러오는 모델 파일 {폴더: [파일]}(꺼 둔 노드·비워 둔 인물 LoRA 칸은 뺌)."""
+    nodes = ui.get("nodes", []) + [n for sg in (ui.get("definitions") or {}).get("subgraphs", []) for n in sg.get("nodes", [])]
+    used = {}
+    for n in nodes:
+        v = (n.get("widgets_values") or [None])[0]
+        folder = {"UNETLoader": "diffusion_models", "LoraLoaderModelOnly": "loras", "CLIPLoader": "text_encoders", "VAELoader": "vae"}.get(n.get("type"))
+        if str(n.get("title", "")).startswith(LORA_SLOT):  # 인물 LoRA 칸은 비어 있는 게 기본(그 컷 인물 것을 도구가 넣는다)
+            continue
+        if folder and isinstance(v, str) and v and n.get("mode", 0) != 2:
+            used.setdefault(folder, []).append(v)
+    return used
+
+
+def _list_workflows(c) -> list:
+    """서버 workflows/ 의 파일 이름들. 새 서버는 그 폴더가 없어 404 라 빈 목록(예전엔 이 404 로 판 목록 전체가 '서버에 닿지 않음'으로 떨어졌다)."""
+    try:
+        return [x for x in (c.req("/api/userdata?dir=workflows&recurse=true") or []) if isinstance(x, str)]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return []
+        raise
+
+
+LOCAL_DIR = Path(__file__).resolve().parent  # 저장 워크플로우의 작업실 사본(vast/mcp_use_webtoon_*.json)
+
+
+def _push_local(c, names: set, have: dict) -> list:
+    """서버에 없는 우리 저장 워크플로우(작업실 사본)를 올리고 올린 이름을 돌려준다. 그 서버에 모델 파일이 다 있는 것만 올린다(없는 판은 올려도 못 그린다).
+    이미 있는 건 덮지 않는다(화면에서 고친 서버 쪽이 정본). GPU 서버를 갈아끼우면 저장 워크플로우가 없어 그리기가 모두 실패해, 올리는 스크립트를
+    손으로 돌렸다(2026-10-23 RunPod 새 파드마다). 끄려면 WEBTOON_PUSH_WORKFLOWS=0."""
+    if os.environ.get("WEBTOON_PUSH_WORKFLOWS", "1") == "0":
+        return []
+    out = []
+    for f in sorted(LOCAL_DIR.glob(MCP_PREFIX + "webtoon_*.json")):
+        if f.name in names:
+            continue
+        try:
+            ui = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if any(v not in have.get(k, set()) for k, vs in _used_models(ui).items() for v in vs):
+            continue
+        try:
+            c.req("/api/userdata/" + urllib.parse.quote("workflows/" + f.name, safe="") + "?overwrite=false", f.read_bytes())
+            out.append(f.name)
+        except urllib.error.HTTPError:  # 동시에 다른 작업이 올렸으면(409) 그대로 둔다
+            continue
+    return out
 
 
 def workflow_for(role: str, series=None) -> str:

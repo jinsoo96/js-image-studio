@@ -32,12 +32,19 @@ STAGES = ["assets", "draw", "compose", "export"]
 
 def run(cmd, label, allow_fail=False, capture=False):
     print(f"\n== {label}", flush=True)
-    r = subprocess.run([str(x) for x in cmd], cwd=ROOT, stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                       capture_output=capture, env={**__import__("os").environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
-    if capture:
-        print(r.stdout[-6000:], end="", flush=True)
-        if r.stderr.strip():
-            print(r.stderr[-1500:], end="", flush=True)
+    env = {**__import__("os").environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    if not capture:
+        r = subprocess.run([str(x) for x in cmd], cwd=ROOT, stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", env=env)
+    else:
+        # 줄마다 바로 넘기면서 모은다: 끝난 뒤 한꺼번에 찍으면 40컷 그리는 40분 동안 작업 로그가 안 늘어 job_status 의 진행(panels_done)이 0 이었고
+        # 에이전트가 사용자에게 진행을 알릴 수 없었다(2026-10-23 개항 v3)
+        p = subprocess.Popen([str(x) for x in cmd], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, encoding="utf-8", errors="replace", env=env, bufsize=1)
+        lines = []
+        for line in p.stdout:
+            print(line, end="", flush=True)
+            lines.append(line)
+        r = subprocess.CompletedProcess(cmd, p.wait(), "".join(lines), "")
     if r.returncode and not allow_fail:
         raise SystemExit(f"실패: {label} (종료 {r.returncode})")
     return r

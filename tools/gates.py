@@ -16,8 +16,6 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LLM_URL = os.environ.get("VLM_URL", "https://judge-gateway.invalid/v1").rstrip("/")  # comfy_panel 과 같은 사내 모델
-LLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.8-27b")
 CHUNK = 18  # 컷 설명은 이만큼씩 나눠 채점(모델 입력이 길면 뒤쪽을 대충 본다)
 
 

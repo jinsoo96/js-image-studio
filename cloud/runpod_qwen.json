@@ -105,5 +105,7 @@
   "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용.",
   "nvidia_disable_require": true,
   "_cuda_why": "2026-10-23 L40S: 이미지(cu128)의 NVIDIA_REQUIRE_CUDA 때문에 12.8 미만 드라이버 기계에선 컨테이너가 안 뜨고(31분 runtime 없음), allowed_cuda 를 12.8 이상으로 거르면 L40S secure 재고 0. → 검사를 끄고(nvidia_disable_require) 12.4 이상 기계를 받는다(CUDA 12.x 하위 호환). 12.4 이상으로 걸어도 L40S secure 재고 0이라 필터는 비운다(받은 기계의 드라이버는 부팅 로그 '[boot] driver' 줄로 본다).",
-  "_gpu_why": "2026-10-23 저녁: L40S 는 새 기계마다 이미지(cu128) 받기·설치가 25분을 넘겨 컨테이너가 안 뜨는 일이 잦았고(하루 10여 번), 네트워크 볼륨(EUR-IS-2) 파드도 두 번 연속 안 떴다 → 이미지가 캐시된 RTX PRO 6000 을 먼저, L40S 는 뒤로."
+  "_gpu_why": "2026-10-23 저녁: L40S 는 새 기계마다 이미지(cu128) 받기·설치가 25분을 넘겨 컨테이너가 안 뜨는 일이 잦았고(하루 10여 번), 네트워크 볼륨(EUR-IS-2) 파드도 두 번 연속 안 떴다 → 이미지가 캐시된 RTX PRO 6000 을 먼저, L40S 는 뒤로.",
+  "min_balance_usd": 27.5,
+  "_why_budget": "2026-10-23 23:20 사용자 '60달러까지만 쓰도록, 더 쓰면 파산'(그때 잔액 $87.03) → 바닥 $27.5. 파드를 켤 때 거절하고, 예약작업 WEBTOON-budget-guard(runpod_cloud.py guard, 10분마다)가 켜진 파드를 멈춘다."
 }

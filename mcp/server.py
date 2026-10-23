@@ -15,7 +15,12 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
 """
+import contextlib
 import ctypes
+import difflib
+import functools
+import importlib
+import inspect
 import io
 import json
 import os
@@ -29,9 +34,11 @@ import uuid
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont  # 맨 위에서 미리 읽는다(툴 안 첫 import 는 Windows 에서 멈출 수 있다)
+import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp import Image as McpImage
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from starlette.responses import FileResponse, PlainTextResponse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,8 +57,6 @@ SHEETS = ROOT / "exports" / "_sheets"  # 링크(/files/)가 나가는 곳. state
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "WEBTOON_QUEUE_FRONT": "1"}
 COST_PER_PANEL = 1.25  # Seedream 5.0 Pro 1.5k
 MAX_PANELS = 40
-SERIES_ALIAS = {"d-plus-18": "d-plus-18-hf", "d+18": "d-plus-18-hf", "dplus18": "d-plus-18-hf",
-                "mudae-dwi": "mudae-dwi-hf", "무대뒤": "mudae-dwi-hf", "무대 뒤": "mudae-dwi-hf"}
 DOCS = {"CLAUDE": "CLAUDE.md", "README": "README.md", "LESSONS": "LESSONS.md", "OPEN_ISSUES": "worklogs/OPEN-ISSUES.md",
         "ACTING_GUIDE": "worklogs/acting/GUIDE.md"}
 SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md", "ASSETS": "ASSETS.md"}
@@ -65,6 +70,45 @@ mcp = FastMCP("webtoon-studio", instructions=(
     "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 작업 결과는 JSON(state·review·drawn·links)이다. "
     "콘티·컷 설명은 prepare_episode 의 관문(격리 judge)을 통과해야 make_episode 가 그린다. 그린 그림은 검수가 스스로 다시 그린다. "
     "오래 걸리는 일은 job_id 를 돌려주니 기다리지 말고 알린 뒤 답을 끝낸다. 사용자에게는 한국어로 답한다."))
+
+# 도구를 워커 스레드에서 돌린다. 이 SDK(mcp 1.30)의 FastMCP 는 동기 도구를 이벤트 루프에서 바로 불러, 한 호출이 도는 동안 서버 전체가 멈췄다
+# (2026-10-23: job_status(wait=50) 하나가 50초 동안 다른 클라이언트의 initialize 까지 막아 미사일 스튜디오가 TimeoutError 로 이 MCP 를 못 붙였다).
+# 등록은 비동기 껍데기로 하고, 코드 안에서 부르는 도구(job_status 등)는 원래 함수 그대로 쓰게 원래 함수를 돌려준다.
+# 도구 안에서 처음 불러오는 작업실 모듈은 아래에서 미리 불러 둔다(Windows 워커 스레드의 첫 무거운 import 교착, 메모리 fastmcp-windows-thread-import-deadlock).
+_register_tool = mcp.tool
+# 도구 성질을 MCP 표준 annotations 로 알린다: 붙는 쪽(미사일 스튜디오·agent app)이 읽기 도구는 묻지 않고, 덮어쓰기·바깥 게시는 묻게 스스로 정한다.
+# 없을 땐 모든 도구가 '물어봄'이라 이름을 하나씩 허용 목록에 적어야 했고, 새 도구(style_compare)는 비대화 실행에서 막혔다(2026-10-23).
+READ_ONLY = {"guide", "read_doc", "status", "list_panels", "find", "panel_info", "contact_sheet", "file_link", "list_files", "read_file",
+             "draw_models", "panel_versions", "compare_panel", "job_status", "tool_help", "ailism_works"}
+DESTRUCTIVE = {"write_file", "edit_file", "move_file", "copy_file", "adopt_panel", "publish_ailism", "ailism_work", "comfy_server", "loras"}
+OPEN_WORLD = {"publish_ailism", "ailism_work"}
+
+
+def _threaded_tool(*args, **kwargs):
+    def deco(fn):
+        name = kwargs.get("name") or fn.__name__
+        ann = kwargs.get("annotations") or ToolAnnotations(readOnlyHint=name in READ_ONLY, destructiveHint=name in DESTRUCTIVE,
+                                                           idempotentHint=name in READ_ONLY, openWorldHint=name in OPEN_WORLD)
+        return _register_tool(*args, **{**kwargs, "annotations": ann})(fn)
+
+    def wrap(fn):
+        if inspect.iscoroutinefunction(fn):
+            return deco(fn)
+
+        @functools.wraps(fn)
+        async def run(**kw):
+            return await anyio.to_thread.run_sync(functools.partial(fn, **kw))
+
+        deco(run)
+        return fn
+    return wrap
+
+
+mcp.tool = _threaded_tool
+sys.path.insert(0, str(ROOT / "vast"))
+for _m in ("saved_workflow", "lora", "restyle", "comfy_admin"):
+    with contextlib.suppress(Exception):
+        importlib.import_module(_m)
 
 
 # ── 내부 도우미 ───────────────────────────────────────────────
@@ -88,10 +132,38 @@ async def files(request):
     return PlainTextResponse("없음", status_code=404)
 
 
+def _norm_name(s: str) -> str:
+    """작품 이름 비교용: 소문자, +→plus, 한자 괄호·공백·기호 뺌('D+18'·'d-plus-18'·'무대 뒤'·'개항(開肛)' → dplus18·무대뒤·개항)."""
+    s = re.sub(r"\(.*?\)|（.*?）", "", s.strip().lower()).replace("+", "plus")
+    return re.sub(r"[\s\-_·.,'\"「」]+", "", s)
+
+
+def _series_names() -> dict:
+    """정규화한 이름 → 작품 폴더. 폴더 이름(-hf 뺀 것 포함) · series.json 의 slug·title·aliases · README/SERIES.md 첫 제목줄.
+    작품마다 별명을 코드에 적던 표(SERIES_ALIAS: D+18·무대 뒤만)를 없앴다(2026-10-23 사용자: 특정 웹툰만 되게 박지 말 것)."""
+    out = {}
+    for d in sorted((ROOT / "series").iterdir()):
+        if not d.is_dir() or d.name.startswith("_") or not (d / "episodes").is_dir():
+            continue
+        names = [d.name, re.sub(r"-hf$", "", d.name)]
+        sj = _json(d / "series.json", {}) if (d / "series.json").exists() else {}
+        names += [str(sj.get("slug") or ""), str(sj.get("title") or "")] + [str(a) for a in (sj.get("aliases") or [])]
+        for doc in ("SERIES.md", "README.md"):
+            if (d / doc).exists():
+                first = (d / doc).read_text(encoding="utf-8", errors="replace").lstrip().splitlines()[:1]
+                if first and first[0].startswith("# "):
+                    names.append(first[0][2:])
+        names += [m for n in names for m in re.findall(r"\(([一-鿿]+)\)", n)]  # 괄호 속 한자 제목('開肛')도('힉스필드 판' 같은 설명은 아님)
+        for n in names:
+            if _norm_name(n):
+                out.setdefault(_norm_name(n), d.name)
+    return out
+
+
 def _series(name: str) -> Path:
-    key = SERIES_ALIAS.get(name.strip().lower(), name.strip())
-    if not (ROOT / "series" / key).is_dir() and (ROOT / "series" / f"{key}-hf").is_dir():  # new_series 의 slug 로도 부른다
-        key = f"{key}-hf"
+    key = name.strip()
+    if not (ROOT / "series" / key).is_dir() or key.startswith("_"):
+        key = _series_names().get(_norm_name(name), key)
     p = ROOT / "series" / key
     if not (p.is_dir() and (p / "episodes").is_dir()) or key.startswith("_"):
         known = sorted(d.name for d in (ROOT / "series").iterdir() if d.is_dir() and not d.name.startswith("_"))
@@ -100,9 +172,16 @@ def _series(name: str) -> Path:
 
 
 def _episode(series: str, episode: str) -> Path:
-    m = re.fullmatch(r"\s*(?:ep)?\s*0*(\d+)\s*(?:화)?\s*", episode or "", re.I)  # "1화"·"ep2"·"2" 도 받는다(agent app 에이전트가 이렇게 불렀다)
-    episode = f"ep{int(m.group(1)):03d}" if m else (episode or "").strip()
     sd = _series(series)
+    # "1화"·"ep2"·"2" 도 받는다(agent app 에이전트가 이렇게 불렀다). 판 번호도: "1화 v3"·"ep1_v3"·"ep001v3", 판만("v3")은 그 판이 하나뿐일 때
+    # (2026-10-23 미사일 스튜디오 시험: "개항 1화 v3" 를 episode="v3" 로 불러 한 번 헛돌았다)
+    m = re.fullmatch(r"\s*(?:ep)?\s*0*(\d+)\s*(?:화)?\s*[_\s-]*(v\d+)?\s*(?:판)?\s*", episode or "", re.I)
+    if m:
+        episode = f"ep{int(m.group(1)):03d}" + (f"_{m.group(2).lower()}" if m.group(2) else "")
+    else:
+        v = re.fullmatch(r"\s*(v\d+)\s*(?:판)?\s*", episode or "", re.I)
+        hits = [d.name for d in (sd / "episodes").iterdir() if v and d.is_dir() and d.name.endswith("_" + v.group(1).lower())] if v else []
+        episode = hits[0] if len(hits) == 1 else (episode or "").strip()
     p = sd / "episodes" / episode
     if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode) or not p.is_dir():
         have = sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir())
@@ -509,7 +588,7 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
     아무 그림이면 paths(파일·폴더·* 패턴을 쉼표로): 인물 시트·시안·장소·참고 그림·내보낸 쪽 그림을 볼 때.
 
     회차 컷: 비우면 새로 그린 컷 전부, folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast).
-    paths 예: series/gaehang-hf/assets/*_sheet.png · series/gaehang-hf/assets/_candidates · series/gaehang-hf/assets/vast_refs/jaeheon_x*.png.
+    paths 예: series/<작품>/assets/*_sheet.png · series/<작품>/assets/_candidates · series/<작품>/assets/vast_refs/<인물 id>_*.png (이름을 하나씩 적기보다 * 패턴이 오타가 없다).
     한 장에 24개까지(넘으면 앞 24개와 전체 개수를 알린다). 사용자에게는 link 를 준다."""
     if paths.strip():
         # 회차 컷이 아닌 그림(시트·시안·참고 그림)을 볼 도구가 없어 에이전트가 그림체·생김새를 확인하지 못했다(2026-10-23 사용자:
@@ -517,7 +596,7 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
         found = []
         for one in [x.strip() for x in re.split(r"[,\n]+", paths) if x.strip()]:
             try:
-                for p in _matches(one, series):
+                for p in _matches(one, series, fuzzy=True):
                     found += sorted(c for c in p.iterdir() if c.suffix.lower() in IMG_EXT) if p.is_dir() else [p] if p.suffix.lower() in IMG_EXT else []
             except (NotFound, ValueError) as e:
                 return [str(e)]
@@ -588,7 +667,7 @@ def file_link(paths: str, series: str = "") -> str:
     out = {}
     for one in [x.strip() for x in re.split(r"[,\n]+", paths or "") if x.strip()]:
         try:
-            f = _existing(one, series)
+            f = _existing(one, series, fuzzy=True)
             out[one] = _link(f) or "(link unavailable: not under exports/ or series/, or no public URL)"
         except (NotFound, ValueError) as e:
             out[one] = json.loads(str(e)) if str(e).startswith("{") else str(e)
@@ -650,7 +729,7 @@ def _seg_ok(given: str, real: str) -> bool:
     return real == given or real.startswith(given)  # 작품 이름은 앞부분만 줘도 된다(d-plus-18 → d-plus-18-hf)
 
 
-def _existing(rel: str, series: str = "", want_dir: bool = False) -> Path:
+def _existing(rel: str, series: str = "", want_dir: bool = False, fuzzy: bool = False) -> Path:
     """있는 파일·폴더를 찾는다. 작업실 기준 → series 폴더 기준 → 받은 경로의 마디가 순서대로 들어 있는 실제 경로(마디는 앞부분 일치 허용).
     하나로 좁혀지면 그것, 아니면 NotFound(후보 목록). 에이전트가 series/·episodes/·-hf 를 빼고 부르거나 series 를 따로 넘겨,
     '파일 없음'만 받고 경로를 바꿔 가며 수십 번 다시 불렀다(2026-10-19 agent app, build_panels.py 를 18번)."""
@@ -696,6 +775,20 @@ def _existing(rel: str, series: str = "", want_dir: bool = False) -> Path:
             found = top
     if len(found) == 1:
         return found[0]
+    # 이름 오타(jaeheon → jaehon): 같은 폴더에서 비슷한 이름을 후보로. 후보가 비어 에이전트가 같은 오타로 네 번 다시 불렀다
+    # (2026-10-23 미사일 스튜디오 시험). 보기만 하는 도구(fuzzy=True)는 뚜렷이 하나면 그 파일을 쓴다
+    if not found:
+        try:
+            parent = _inside("/".join(parts[:-1])) if len(parts) > 1 else ROOT
+        except ValueError:
+            parent = None
+        if parent is not None and parent.is_dir():
+            sib = [c.name for c in parent.iterdir() if c.is_dir() == want_dir and not c.name.startswith(".")]
+            close = difflib.get_close_matches(name, sib, n=5, cutoff=0.7)
+            ratio = [difflib.SequenceMatcher(None, name.lower(), c.lower()).ratio() for c in close]
+            if fuzzy and close and ratio[0] >= 0.85 and (len(close) == 1 or ratio[1] < ratio[0] - 0.05):
+                return parent / close[0]
+            found = [parent / c for c in close]
     raise NotFound(json.dumps({"error": "not_found", "path": rel, "candidates": [f.relative_to(ROOT).as_posix() for f in found[:8]],
                                "root": "paths are relative to D:/webtoon-studio, e.g. series/<series>/episodes/<episode>/build_panels.py"},
                               ensure_ascii=False))
@@ -722,8 +815,8 @@ def _storable(p: Path) -> bool:
     return bool(STORE_RE.fullmatch(p.resolve().relative_to(ROOT.resolve()).as_posix()))
 
 
-def _matches(src: str, series: str = "") -> list:
-    """src 에 * ? [ 가 있으면 작업실(series 를 주면 그 작품 폴더) 기준 패턴, 아니면 있는 파일 또는 폴더 하나."""
+def _matches(src: str, series: str = "", fuzzy: bool = False) -> list:
+    """src 에 * ? [ 가 있으면 작업실(series 를 주면 그 작품 폴더) 기준 패턴, 아니면 있는 파일 또는 폴더 하나(fuzzy: 뚜렷한 오타는 고쳐 찾음, 보기 도구만)."""
     norm = src.replace("\\", "/").strip().lstrip("/")
     if any(c in norm for c in "*?["):
         base = _series(series) if series else ROOT
@@ -735,10 +828,10 @@ def _matches(src: str, series: str = "") -> list:
                 pass
         return out
     try:
-        return [_existing(norm, series)]
+        return [_existing(norm, series, fuzzy=fuzzy)]
     except NotFound as e:
         try:
-            return [_existing(norm, series, want_dir=True)]
+            return [_existing(norm, series, want_dir=True, fuzzy=fuzzy)]
         except NotFound:
             raise e
 
@@ -766,8 +859,8 @@ def _targets(items: list, dst: str, series: str, pattern: bool = False):
 
 @mcp.tool()
 def list_files(path: str = "series", series: str = "", pattern: str = "") -> str:
-    """작업실 저장소 둘러보기: 폴더 안 파일·폴더 목록(크기·고친 시각). path 는 작업실 기준(예: series/gaehang-hf/assets, exports/2026-10-23),
-    series 를 주면 그 작품 폴더 기준. pattern 을 주면 그 폴더 아래에서 맞는 것만(예: '*.png', '**/p023*.png', 'jaeheon_*').
+    """작업실 저장소 둘러보기: 폴더 안 파일·폴더 목록(크기·고친 시각). path 는 작업실 기준(예: series/<작품>/assets, exports/2026-10-23),
+    series 를 주면 그 작품 폴더 기준. pattern 을 주면 그 폴더 아래에서 맞는 것만(예: '*.png', '**/p023*.png', '<인물 id>_*').
 
     작업실 구조: series/<작품>-hf/ (series.json 설정 · assets/ 인물 시트·locations/ 장소·vast_refs/ 참고 그림·표정 은행·_candidates/ 시안 ·
     episodes/<회차>/ 콘티·컷 설명·panels_hf/ 본편 그림·panels_hf_vast/ 다시 그린 그림·out/ 합성본) · exports/<날짜>/ 내보낸 PDF·epub · worklogs/ 작업 기록."""
@@ -789,7 +882,7 @@ def list_files(path: str = "series", series: str = "", pattern: str = "") -> str
 @mcp.tool()
 def read_file(path: str, offset: int = 0, max_chars: int = 12000, series: str = "") -> str:
     """작업실 안 글 파일 읽기(작업실 기준 경로, series 를 주면 그 작품 폴더 기준). 긴 파일은 offset 으로 이어 읽는다. 콘티(make_storyboard.py)·컷 설명(build_panels.py)·문서를 볼 때."""
-    p = _existing(path, series)
+    p = _existing(path, series, fuzzy=True)
     if p.suffix.lower() not in TEXT_EXT:
         return "글 파일(.py .json .md .txt .html)만 읽는다. 그림은 contact_sheet(paths=…) 로 본다"
     t = p.read_text(encoding="utf-8")
@@ -934,8 +1027,8 @@ def move_file(src: str, dst: str, series: str = "") -> str:
 
     series 를 주면 두 경로 모두 그 작품 폴더 기준. dst 에 같은 이름이 이미 있으면 하나도 옮기지 않는다(먼저 그것을 다른 곳으로 옮긴다).
     그 작품에 도는 작업이 있으면 옮기지 않는다(그리는 중에 시트·참고 그림이 바뀌면 그림이 틀어진다).
-    예: 시안으로 인물 시트 바꾸기 → move_file('assets/jaeheon_sheet.png', 'assets/_old/', series='gaehang') 뒤
-    move_file('assets/_candidates/jaeheon_sheet.png', 'assets/', series='gaehang'). 옛 표정 은행 치우기 → move_file('assets/vast_refs/jaeheon_*', 'assets/_old/refs/', series=…)."""
+    예: 시안으로 인물 시트 바꾸기 → move_file('assets/<id>_sheet.png', 'assets/_old/', series='<작품>') 뒤
+    move_file('assets/_candidates/<id>_sheet.png', 'assets/', series='<작품>'). 옛 표정 은행 치우기 → move_file('assets/vast_refs/<id>_*', 'assets/_old/refs/', series=…)."""
     try:
         pairs = _targets(_matches(src, series), dst, series, pattern=any(c in src for c in "*?["))
     except (NotFound, ValueError) as e:
@@ -1115,19 +1208,40 @@ def redo_candidate(series: str, kind: str, name: str) -> str:
 ASPECTS = ("9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9")  # vast/comfy_panel.SIZES
 
 
+def _named_items(value, text_keys=("text", "prompt", "description", "style"), name_keys=("name", "label", "title", "id")) -> dict:
+    """{이름: 값} 으로 맞춘다. JSON 글·객체·목록([{label, prompt}] · ["글", …]) 어느 꼴로 와도 받는다: 작은 모델이 JSON 안의 JSON 글을
+    이스케이프하다 깨뜨리거나 다른 키 이름(label·prompt)을 썼다(2026-10-23 미사일 스튜디오 시험, style_compare 를 세 번 못 부름)."""
+    if isinstance(value, str):
+        value = json.loads(value) if value.strip()[:1] in "[{" else {"1": value}
+    if isinstance(value, list):
+        out = {}
+        for i, x in enumerate(value, 1):
+            if isinstance(x, dict):
+                k = next((str(x[n]) for n in name_keys if x.get(n)), str(i))
+                out[k] = x
+            else:
+                out[str(i)] = x
+        value = out
+    if not isinstance(value, dict):
+        raise ValueError("객체나 목록이 아니다")
+    return {str(k): (next((v[n] for n in text_keys if v.get(n)), v) if isinstance(v, dict) and "aspect" not in v else v) for k, v in value.items()}
+
+
 @mcp.tool()
-def style_compare(name: str, styles: str, scenes: str, series: str = "", people_rule: str = "", seed: int = -1, full: bool = False) -> str:
+def style_compare(name: str, styles: dict | list | str, scenes: dict | list | str, series: str = "", people_rule: str = "", seed: int = -1,
+                  full: bool = False) -> str:
     """화풍 후보 비교표: 그림체 여러 개 x 장면 몇 개를 같은 시드로 그려, 줄마다 그림체 이름표를 붙인 한 장(compare.jpg)을 만든다(크레딧 0, GPU 서버, 장당 약 10~20초).
     새 작품의 그림체를 정할 때, 사용자가 "그림체를 바꾸자·후보를 골라 보고해" 할 때 쓴다. 결과는 exports/<오늘>/화풍시안_<name>/ 에 남는다.
-    styles: JSON {"이름": "영어 그림체 문단" 또는 "series:<작품>"(그 작품 그림체 그대로, 지금 그림체를 후보에 넣을 때)}, 2~8개.
-    scenes: JSON {"이름": "영어 장면 글"} 또는 {"이름": {"text": "...", "aspect": "3:2"}}, 1~4개(인물 얼굴이 보이는 장면 + 배경 장면 하나가 고르기 좋다).
+    styles: {"이름": "영어 그림체 문단" 또는 "series:<작품>"(그 작품 그림체 그대로, 지금 그림체를 후보에 넣을 때)}, 2~8개. 객체·목록·JSON 글 다 된다.
+    scenes: {"이름": "영어 장면 글"} 또는 {"이름": {"text": "...", "aspect": "3:2"}} 또는 [{"label": "...", "prompt": "..."}], 1~4개(인물 얼굴이 보이는 장면 + 배경 장면 하나가 고르기 좋다).
     series 를 주면 그 작품의 사람 규칙(people_rule)을 쓴다. full=True 면 터보 없이 40스텝(고른 그림체를 품질로 확인할 때, 장당 약 1분).
     끝나면 job_status 의 links 에 compare.jpg, contact_sheet(paths='<그 폴더>/compare.jpg') 로 크게 본다. 고른 그림체는 add_to_series(작품, 'style', 'style', 문단)."""
     if not re.fullmatch(r"[\w가-힣 ·-]{1,40}", name.strip()):
         return _fail("bad_name", given=name, hint="이름은 40자 안의 글자·숫자·공백·-(폴더 이름이 된다)")
     try:
-        st, sc = json.loads(styles), json.loads(scenes)
-    except json.JSONDecodeError as e:
+        st = _named_items(styles)
+        sc = _named_items(scenes, text_keys=("text", "prompt", "description", "scene"))
+    except ValueError as e:
         return _fail("bad_json", detail=str(e), hint='styles = {"이름": "English style paragraph"}, scenes = {"이름": {"text": "...", "aspect": "3:2"}}')
     if not isinstance(st, dict) or not 2 <= len(st) <= 8:
         return _fail("bad_styles", hint="styles 는 그림체 2~8개의 JSON 객체")
@@ -1136,6 +1250,8 @@ def style_compare(name: str, styles: str, scenes: str, series: str = "", people_
     probe_styles = {}
     for k, v in st.items():
         v = str(v).strip()
+        if k.isdigit():  # 이름 없이 목록으로 받은 후보: 비교표 줄 이름이 '1·2·3' 이라 무슨 그림체인지 몰랐다 → 글 앞 몇 낱말
+            k = f"{k} " + (v[7:].strip() if v.startswith("series:") else re.sub(r"[^\w가-힣 -]", "", " ".join(v.split()[:4])))[:32]
         if v.startswith("series:"):
             try:
                 sd = _series(v[7:].strip())
@@ -1151,6 +1267,7 @@ def style_compare(name: str, styles: str, scenes: str, series: str = "", people_
     probe_scenes = {}
     for k, v in sc.items():
         v = {"text": v} if isinstance(v, str) else dict(v)
+        v.setdefault("text", next((v[n] for n in ("prompt", "description", "scene") if v.get(n)), ""))
         if len(str(v.get("text", "")).strip()) < 20:
             return _fail("short_scene", given=k, hint="장면은 영어로: 누가·어디서·무엇을·빛")
         if v.setdefault("aspect", "3:2") not in ASPECTS:
@@ -1190,9 +1307,9 @@ runpy.run_path(str(HERE.parents[3] / "tools" / "panels_from_spec.py"), run_name=
 
 
 @mcp.tool()
-def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", reuse: str = "") -> str:
+def set_panels(series: str, episode: str, panels: dict | list | str = "", scenes: dict | str = "", reuse: dict | str = "") -> str:
     """컷 설명 표(panels_spec.json)를 채운다. 코드를 쓰지 않고 컷 몇 개씩(5~8컷) 나눠 여러 번 불러도 된다(같은 번호는 덮어씀).
-    panels: JSON 객체 {"p003": {"chars": ["jaemin"], "outfit": {"jaemin": "white dress shirt, navy slacks"}, "location": "office",
+    panels: 객체(또는 JSON 글) {"p003": {"chars": ["<인물 id>"], "outfit": {"<인물 id>": "white dress shirt, navy slacks"}, "location": "<장소 이름>",
       "shot": "wide shot", "action": "영어로 이 컷에서 일어나는 일", "acting": "영어로 표정·눈썹·입·몸짓", "camera": "대화 컷이면 어깨 너머 숏 설명"}}
       chars 는 cast.json 의 인물 id, location 은 assets/locations 의 장소 이름. 인물이 있는 컷은 acting 을 꼭 쓴다.
       넓은 컷은 양옆 배치, 대화 컷은 듣는 사람 어깨 너머 숏(camera), 혼자 클로즈업은 한 사람만, 화면 좌우는 장면 내내 같게.
@@ -1205,10 +1322,8 @@ def set_panels(series: str, episode: str, panels: str = "", scenes: str = "", re
     spec = _json(f, {}) or {}
     spec.setdefault("scenes", {}), spec.setdefault("reuse", {}), spec.setdefault("panels", {})
     notes = []
-    try:
-        add_p = json.loads(panels) if panels.strip() else {}
-        add_s = json.loads(scenes) if scenes.strip() else {}
-        add_r = json.loads(reuse) if reuse.strip() else {}
+    try:  # JSON 글이든 객체든 받는다(작은 모델은 JSON 안의 JSON 글 이스케이프에서 자주 깨진다)
+        add_p, add_s, add_r = ((json.loads(v) if v.strip() else {}) if isinstance(v, str) else (v or {}) for v in (panels, scenes, reuse))
     except ValueError as e:
         return f"JSON 오류: {e}. 큰따옴표 JSON 객체로 다시"
     if isinstance(add_p, list):  # [{"id": "p003", ...}] 도 받는다

@@ -3,7 +3,7 @@
 
     python mcp/vision_review.py <series_dir> <episode> [--ids p001,p002] [--scene hotel_room] [--out report.md]
 
-환경변수 VLM_URL(기본 https://judge-gateway.invalid/v1)·VLM_MODEL(기본 qwen3.8-27b). 사내 인프라로 그림을 보낸다(개인 작업이지만 외부 서비스는 아님).
+주소·모델은 vast/judge_ep(VLM_URL → state/vlm_url.txt → VLM_FALLBACK, OpenAI 호환이면 어느 모델이든).
 """
 import argparse
 import base64
@@ -19,8 +19,6 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vast"))  # judge_ep(그림 보는 모델 주소 고르기)
-VLM_URL = os.environ.get("VLM_URL", "https://judge-gateway.invalid/v1").rstrip("/")
-VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.8-27b")
 
 ASK = """너는 웹툰 작화 검수자다. 아래 '컷 설명'대로 그림이 그려졌는지 그림을 보고 판정한다. 그림에 실제로 보이는 것만 근거로 한다.
 확인할 것:

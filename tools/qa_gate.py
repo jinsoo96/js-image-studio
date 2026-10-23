@@ -6,11 +6,12 @@
 검사:
 1. 콘티·인물 설정(LESSONS 1·2·3·10): 가중치 1.3 초과, extreme_close, 남은 layout(얼굴 둘)·혼자 컷의 count, 금지 태그
    (large breasts·curvy·oversized·cute face·sparkling eyes·bishounen·petite·cinematic lighting·sharp features·anime male lead·defined jawline·wide-eyed 등).
-2. 글(LESSONS 7·8): 생각 풍선에 되돌아보는 말(~었다/~줄 알았다로 끝나는 긴 문장), 표지판식 자막(서술어 없이 끝남), 회사 호칭(선배님·에이스·부사수).
+2. 글(LESSONS 7·8): 생각 풍선에 되돌아보는 말(~었다/~줄 알았다로 끝나는 긴 문장), 표지판식 자막(서술어 없이 끝남), 작품마다 쓰지 않는 말(series_rules).
 3. 말풍선(LESSONS 7): 얼굴 가림(풍선과 이어 주는 띠)·이어 말하는 풍선 순서(check_bubbles 와 같은 계산).
 4. 인물 동일인(LESSONS 0): char_check 의 "튐·기준과 다름".
 """
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -24,9 +25,20 @@ from comfy import load_json, load_style  # noqa: E402
 BANNED_TAGS = ["large breasts", "huge breasts", "curvy", "voluptuous", "hourglass", "cute face", "sparkling eyes",
                "bishounen", "petite", "child-like", "cinematic lighting", "sharp features", "anime male lead", "defined jawline",
                "thick eyebrows", "wide-eyed", "school uniform"]
-BANNED_WORDS = ["선배님", "에이스", "부사수"]
-# 사용자가 지금 얼굴을 받아들인 인물의 기존 태그는 예외(바꾸면 얼굴이 달라진다)
-ALLOW = {"jaemin": ["defined jawline"]}
+
+
+def series_rules(series: Path) -> dict:
+    """작품마다 다른 검사 규칙: series.json 의 "qa" 또는 작품 폴더 qa.json.
+    banned_words = 이 작품 글에 쓰면 안 되는 말(예: D+18 회사 호칭 선배님·에이스·부사수, LESSONS 8),
+    allow_tags = {인물 id: [금지 태그지만 사용자가 받아들인 얼굴이라 둘 것]}.
+    (2026-10-23 사용자 "특정 웹툰만 되게 박지 말 것": 이 둘이 이 파일에 D+18 값으로 박혀 다른 작품에도 걸렸다)"""
+    rules = {}
+    if (series / "qa.json").exists():
+        rules.update(json.loads((series / "qa.json").read_text(encoding="utf-8")))
+    if (series / "series.json").exists():
+        rules.update(json.loads((series / "series.json").read_text(encoding="utf-8-sig")).get("qa") or {})
+    return rules
+
 WEIGHT = re.compile(r":\s*(\d+(?:\.\d+)?)\)")
 PREDICATE = ("다", "요", "까", "지", "네", "야", "어", "아", "고", "데", "게", "라", "나", "죠", "냐", "자", "래", "걸", "군")
 
@@ -65,10 +77,14 @@ def lint_board(ep):
     series = ep.parent.parent
     board = load_json(ep / "storyboard.json")
     chars = load_json(series / "characters.json")
+    rules = series_rules(series)
+    allow, banned_words = rules.get("allow_tags") or {}, rules.get("banned_words") or []
     warns = []
     for cid, c in chars.items():
+        if cid.startswith("_") or not isinstance(c, dict):
+            continue
         for b in tags_hit(c.get("tags", "")):
-            if b not in ALLOW.get(cid, []):
+            if b not in allow.get(cid, []):
                 warns.append(("설정", cid, f"인물 태그에 금지 태그 '{b}'"))
         for oname, o in (c.get("outfits") or {}).items():
             for b in tags_hit(o):
@@ -95,9 +111,9 @@ def lint_board(ep):
                     and not d.get("authored")):
                 if not sentence_ok(text):
                     warns.append(("글", pid, f"자막이 표지판식(서술어 없음): {text[:30]}"))
-            for w in BANNED_WORDS:
+            for w in banned_words:
                 if w in text:
-                    warns.append(("글", pid, f"호칭 '{w}' (LESSONS 8)"))
+                    warns.append(("글", pid, f"이 작품에서 쓰지 않는 말 '{w}'(작품 qa 규칙)"))
     return warns
 
 

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 from comfy_client import Comfy  # noqa: E402
-from comfy_panel import LLM_MODEL, LLM_URL, graph, panel_text, pick_expr, upload  # noqa: E402
+from comfy_panel import graph, panel_text, pick_expr, upload  # noqa: E402
 
 
 def refine_prompt(series, p, expr=True):
@@ -51,7 +51,6 @@ def refine_prompt(series, p, expr=True):
     return "\n".join(lines), refs
 
 
-VLM_URL, VLM_MODEL = LLM_URL, LLM_MODEL  # 그림을 보는 모델(comfy_panel 과 같은 설정: 환경변수 VLM_URL·VLM_MODEL)
 
 
 def find_extras(img_path: Path, series, p) -> list:

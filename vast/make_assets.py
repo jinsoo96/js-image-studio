@@ -111,50 +111,62 @@ def expr_prompt(ex, homely=False):
 
 TURN = ("turn this photo into a character reference sheet: a 3x2 grid on a plain grey background with a close-up portrait of {pr} face, then {pr} full "
         "outfit from the front, back, side, three-quarter front and three-quarter back, cropped at the neck")  # 캐릭터 시트 LoRA 작성자의 문장 그대로
-VIEWS = ["front", "back", "side", "side2", "34front", "34back"]  # 얼굴 칸 아래 2열 × 3행의 차례(2026-10-20 상수 시험 그림)
 
 
 def split_turnaround(src: Path, vr: Path, cid: str) -> list:
-    """캐릭터 시트를 흰 구분선으로 칸마다 잘라 <id>_view_face·front·back·side·side2·34front·34back.png 로. 구분선을 못 찾으면 []."""
+    """캐릭터 시트(얼굴 + 여러 방향 전신)를 사람 하나씩 잘라 <id>_view_face.png 와 <id>_view_<방향>.png(front·back·side·34front·34back)로.
+    시트 배치는 그릴 때마다 달랐다(2열 3행·한 줄에 셋·한 명만, 목에서 잘린 칸): 자리 차례로 방향을 정하면 개항 8명 중 6명이 못 잘렸다
+    (2026-10-23). → 흰 가로줄로 줄을 나누고, 줄 안 사람은 sheet_refs.person_columns(가장 옅은 골짜기)로 가르고, 방향은 그림 보는 모델이 본다.
+    모델에 닿지 않으면 얼굴 칸만 남긴다(방향을 짐작해 잘못된 뒷모습을 주느니 없는 게 낫다)."""
+    import base64
+    import io
     import numpy as np
     from PIL import Image
+    import sheet_refs as SR
+    from judge_ep import JudgeDown, chat, parse_json
     im = Image.open(src).convert("RGB")
-    a = np.asarray(im).astype(int)
-    white = a.min(axis=2) > 235
-
-    def runs(idx):
-        out, s0, p0 = [], None, None
-        for x in idx:
-            if s0 is None:
-                s0 = p0 = x
-            elif x == p0 + 1:
-                p0 = x
-            else:
-                out.append((s0, p0))
-                s0 = p0 = x
-        return out + ([(s0, p0)] if s0 is not None else [])
-
-    rows = runs([y for y in range(a.shape[0]) if white[y].mean() > 0.9])
-    if len(rows) < 3:
+    a = np.asarray(im).astype(np.int16)
+    h, w, _ = a.shape
+    # 칸 사이 가로줄: 고르고(줄 안 표준편차 작음) 위아래 이웃보다 밝은 줄. 줄 색이 시트마다 달라(흰색 235~·밝은 회색 205~) 한 값으로 못 잡았고,
+    # 1~3px 라 틈을 잇지 않는다(2026-10-23 개항 도경·재헌·금수)
+    rm, rs = a.mean(axis=(1, 2)), a.std(axis=(1, 2))
+    sep = np.array([rs[y] < 6 and rm[y] > np.median(rm[max(0, y - 15):y + 16]) + 4 for y in range(h)])
+    bands = SR.runs(~sep, min_gap=0, min_len=40)
+    if len(bands) < 2:
         return []
-    ys = [0] + [r[1] + 1 for r in rows]
-    ye = [r[0] for r in rows] + [a.shape[0]]
-    bands = [(y0, y1) for y0, y1 in zip(ys, ye) if y1 - y0 > 40]
-    if len(bands) != 4:
-        return []
-    made = []
-    im.crop((0, bands[0][0], im.width, bands[0][1])).save(vr / f"{cid}_view_face.png")
-    made.append(f"{cid}_view_face.png")
-    k = 0
+    y0, y1 = bands[0]
+    im.crop((0, y0, w, y1)).save(vr / f"{cid}_view_face.png")
+    made = [f"{cid}_view_face.png"]
+    best, crops = {}, []
     for y0, y1 in bands[1:]:
-        # 가장자리에 붙은 흰 열은 구분선이 아니다: 첫 덩어리가 왼쪽 끝(0)이면 mid=0 이 돼 빈 그림을 저장하다 멈췄다(2026-10-23 개항 하루키)
-        cols = [c for c in runs([x for x in range(a.shape[1]) if white[y0:y1, x].mean() > 0.6]) if c[0] > 0 and c[1] < im.width - 1]
-        mid = min(((c[0] + c[1]) // 2 for c in cols), key=lambda m: abs(m - im.width // 2)) if cols else im.width // 2
-        for x0, x1 in ((0, mid), (mid + 3, im.width)):
-            f = vr / f"{cid}_view_{VIEWS[k]}.png"
-            im.crop((x0, y0, x1, y1)).save(f)
-            made.append(f.name)
-            k += 1
+        sub = a[y0:y1]
+        bg = np.median(np.concatenate([sub[:4].reshape(-1, 3), sub[-4:].reshape(-1, 3)]), axis=0)
+        crops += [im.crop((max(0, x0 - 6), y0, min(w, x1 + 6), y1)) for x0, x1 in SR.person_columns(np.abs(sub - bg).sum(axis=2) > 60, w)
+                  if x1 - x0 >= 0.08 * w]
+    tall = max((c.height for c in crops), default=0)
+    for crop in crops:
+        if crop.height < 0.45 * tall:  # 다리만 나온 줄 같은 짧은 칸(2026-10-23 개항 도경 옆모습이 다리만)
+            continue
+        buf = io.BytesIO()
+        crop.save(buf, "PNG")
+        ask = ("This is one figure cut from a character turnaround sheet. From which direction do we see this person? "
+               'Reply with JSON only: {"view": "front" | "back" | "side" | "34front" | "34back", "head": true or false}. '
+               "side = full profile; 34front = three-quarter view from the front; 34back = three-quarter view from behind; head = is the head visible.")
+        try:
+            r = parse_json(chat([{"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}},
+                                 {"type": "text", "text": ask}], max_tokens=60, timeout=90))
+        except (JudgeDown, ValueError) as ex:
+            print(f"  {cid}: 방향을 못 물어봄({str(ex)[:80]}), 얼굴 칸만 남김", flush=True)
+            return made
+        view = str(r.get("view", "")).replace("3/4", "34").replace("-", "").replace(" ", "").lower()
+        if view not in ("front", "back", "side", "34front", "34back"):
+            continue
+        score = (bool(r.get("head")), crop.height * crop.width)  # 머리가 보이는 칸, 그다음 큰 칸
+        if view not in best or score > best[view][0]:
+            best[view] = (score, crop)
+    for view, (_, crop) in best.items():
+        crop.save(vr / f"{cid}_view_{view}.png")
+        made.append(f"{cid}_view_{view}.png")
     return made
 
 
@@ -251,7 +263,7 @@ def main():
             jf.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
         if outp.name.endswith("_turnaround.png"):
             cells = split_turnaround(outp, vr, cid)
-            print(f"  {cid}: 칸 {len(cells)}개로 자름" + ("" if cells else " (구분선을 못 찾음, 시트만 남김)"), flush=True)
+            print(f"  {cid}: 방향 그림 {len(cells)}개로 자름 {cells}" + ("" if cells else " (줄을 못 나눔, 시트만 남김)"), flush=True)
         print(f"[{n}/{len(queued)}] {outp.name} {label or ('캐릭터 시트' if args.what == 'turn' else '베이스')} (누적 {time.time() - t0:.0f}초)", flush=True)
 
 

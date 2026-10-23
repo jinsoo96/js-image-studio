@@ -9,6 +9,7 @@ state/vlm_url.txt('주소|모델', 한 줄)가 있으면 VLM_URL 다음 후보�
 import json
 import re
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -27,14 +28,19 @@ _picked = None
 
 
 def candidates() -> list:
-    out = [(os.environ.get("VLM_URL", DEFAULT_URL), os.environ.get("VLM_MODEL", DEFAULT_MODEL), os.environ.get("VLM_API_KEY", "EMPTY"))]
+    """고를 차례: 환경변수 VLM_URL(준 때만) → state/vlm_url.txt(지금 켠 서버, runpod_cloud use 가 적음) → VLM_FALLBACK → 사내 게이트웨이.
+    모델·서버를 갈아끼우려면 state/vlm_url.txt 한 줄('주소|모델|키')만 바꾸면 된다: OpenAI 호환 chat(그림은 image_url)이면 어느 모델이든.
+    (예전엔 사내 게이트웨이가 늘 첫째라, 꺼진 동안 작업마다 그 주소를 먼저 기다렸다. 2026-10-23 사용자 "LLM 모델·서버도 갈아낄 수 있어야")"""
+    out = []
+    if os.environ.get("VLM_URL"):
+        out.append((os.environ["VLM_URL"], os.environ.get("VLM_MODEL", DEFAULT_MODEL), os.environ.get("VLM_API_KEY", "EMPTY")))
     if POD_FILE.exists():
         parts = [x.strip() for x in POD_FILE.read_text(encoding="utf-8").strip().split("|")]
         if len(parts) >= 2 and parts[0]:
             out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))
     # 대체 후보를 안 줬으면 이 작업실의 사내 VL 터널(agent app 로컬 MCP 가 쓰는 localhost:12361)을 둔다. 사내 judge 가 502 로 반나절 죽었을 때
     # 대체가 없어 모든 검사가 '검사불가'로 끝났다(2026-10-20 외출). 대체 모델(8B)은 약해서 job 로그에 고른 주소가 남는다(endpoint)
-    for item in (os.environ.get("VLM_FALLBACK") or "http://localhost:12361/v1|Qwen3-VL-8B-FP8").split(","):
+    for item in ((os.environ.get("VLM_FALLBACK") or "http://localhost:12361/v1|Qwen3-VL-8B-FP8") + f",{DEFAULT_URL}|{DEFAULT_MODEL}").split(","):
         parts = [x.strip() for x in item.split("|")]
         if len(parts) >= 2 and parts[0]:
             out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))
@@ -61,25 +67,42 @@ def endpoint(refresh: bool = False) -> tuple:
     raise JudgeDown("그림 보는 모델에 닿지 않는다: " + " / ".join(tried))
 
 
-def body_extra(model: str) -> dict:
-    """Qwen3 의 생각 끄기는 자체 호스팅 vLLM 에서만 chat_template_kwargs 로(다른 곳은 모르는 칸이라 거절할 수 있다)."""
+_plain = set()  # 생각 끄기 칸을 거절한 주소(이 실행 동안 그 칸 없이 보낸다)
+
+
+def body_extra(model: str, url: str = "") -> dict:
+    """생각(추론문) 끄기. 자체 호스팅 vLLM 의 Qwen3 계열은 chat_template_kwargs 로 끈다. 다른 모델·서버가 이 칸을 모른다며 400 을 주면
+    chat 이 그 주소엔 칸 없이 다시 보낸다(모델 이름으로만 정하면 다른 서버로 갈아끼울 때 깨졌다)."""
+    if url in _plain:
+        return {}
     return {"chat_template_kwargs": {"enable_thinking": False}} if "qwen" in model.lower() else {}
+
+
+def _strip_think(txt: str) -> str:
+    """생각을 못 끈 모델이 본문 앞에 붙인 <think>…</think> 를 뺀다(판정 JSON·숫자를 읽는 쪽이 그 글에 걸렸다)."""
+    return re.sub(r"(?s)^\s*<think>.*?</think>\s*", "", txt or "")
 
 
 def chat(content: list, max_tokens: int = 600, temperature: float = 0.0, timeout: float = 120) -> str:
     """OpenAI 호환 chat 한 번. 실패하면 한 번 다른 후보를 골라 다시, 그래도 안 되면 JudgeDown."""
-    for attempt in (0, 1):
-        url, model, key = endpoint(refresh=attempt == 1)
+    for attempt in (0, 1, 2):
+        url, model, key = endpoint(refresh=attempt == 2)
         body = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": content}], **body_extra(model)}
+                "messages": [{"role": "user", "content": content}], **body_extra(model, url)}
         req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(),
                                      headers={**UA, "Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 # 본문이 비어 None 으로 오는 때가 있다(생각만 하고 끝난 답). 부르는 쪽 re·json 이 None 에서 터져 컷이 '실패'로 빠졌다(2026-10-19 p054)
-                return json.loads(r.read().decode())["choices"][0]["message"].get("content") or ""
+                return _strip_think(json.loads(r.read().decode())["choices"][0]["message"].get("content") or "")
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 422) and "chat_template_kwargs" in body and url not in _plain:
+                _plain.add(url)  # 그 칸을 모르는 서버: 같은 주소에 칸 없이 한 번 더
+                continue
+            if attempt == 2:
+                raise JudgeDown(f"{url} HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:100]}") from e
         except Exception as e:  # noqa: BLE001
-            if attempt == 1:
+            if attempt == 2:
                 raise JudgeDown(f"{url} {type(e).__name__}: {str(e)[:100]}") from e
     raise JudgeDown("unreachable")
 

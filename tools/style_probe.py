@@ -34,6 +34,26 @@ def prompt_for(scene: dict, style: str, people_rule: str) -> str:
     ])
 
 
+def cell_issue(path: Path, scene_text: str) -> str:
+    """그림 보는 모델(judge_ep)에게 사람 사고만 묻는다(그림체는 판단하지 않는다). 문제가 없거나 모델에 닿지 않으면 ''."""
+    import base64
+    from judge_ep import JudgeDown, chat, parse_json
+    im = Image.open(path).convert("RGB")
+    im.thumbnail((1024, 1024))
+    import io
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=85)
+    ask = ("Scene text: " + scene_text + " | Look only for drawing accidents with people: translucent or ghost-like duplicate people, the same person drawn "
+           "twice, more people in the foreground than the scene text implies, or extra limbs. Ignore the art style. "
+           'Reply with JSON only: {"ok": true or false, "issue": "short reason or empty"}')
+    try:
+        r = parse_json(chat([{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}},
+                             {"type": "text", "text": ask}], max_tokens=80, timeout=90))
+    except (JudgeDown, ValueError):
+        return ""
+    return "" if r.get("ok", True) else str(r.get("issue") or "people accident")
+
+
 def main():
     probe = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     out = Path(sys.argv[2])
@@ -61,6 +81,25 @@ def main():
         hist = c.wait(pid, 6 * 3600)
         c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
         print(dst, flush=True)
+    # 칸마다 한 번 검사: 반투명한 유령 사람·장면 글보다 많은 사람·두 번 그려진 사람이 있으면 다른 시드로 한 번만 다시(2026-10-23 오피스 시안 밤 장면 둘에
+    # 유령·세 번째 사람). 그림체를 고르는 표라 그림체 탓이 아닌 사고가 섞이면 비교가 틀어진다. 검사 모델에 닿지 않으면 그대로 둔다
+    redo = []
+    for (stname, sname), dst in cells.items():
+        if not any(dst == q[1] for q in queued):
+            continue
+        issue = cell_issue(dst, probe["scenes"][sname]["text"])
+        if issue:
+            print(f"  다시 그림 {dst.name}: {issue}", flush=True)
+            si = list(probe["scenes"]).index(sname)
+            w, h = SIZES[probe["scenes"][sname].get("aspect", "3:2")]
+            full = bool(probe.get("full"))
+            g = graph(used[dst.name], [], w, h, seed + si + 7919, 40 if full else 8, 1024, turbo=not full)
+            g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/style_probe"
+            redo.append((c.queue(g), dst))
+    for pid, dst in redo:
+        hist = c.wait(pid, 6 * 3600)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+        print(dst, "(다시 그림)", flush=True)
     (out / "prompts.json").write_text(json.dumps(used, ensure_ascii=False, indent=1), encoding="utf-8")
     # 비교표: 줄마다 그림체 하나, 왼쪽에 이름
     cw, lab = 520, 150

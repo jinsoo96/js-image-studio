@@ -168,9 +168,7 @@ def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit
     return g
 
 
-# 판단하는 모델(표정 칸 고르기·남는 사람 찾기). 그림 검수(mcp/vision_review.py)와 같은 환경변수, 기본은 사내 vLLM(키 없음)
-LLM_URL = os.environ.get("VLM_URL", "https://judge-gateway.invalid/v1").rstrip("/")
-LLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.8-27b")
+# 판단하는 모델(표정 칸 고르기·남는 사람 찾기)은 judge_ep.chat 하나로 부른다(주소·모델은 judge_ep.candidates)
 
 
 def pick_expr(series, cid, name, text):
@@ -364,7 +362,9 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
         # turned: 독자를 봐서 다시 그릴 때. 정면 표정 칸·정면 머리가 고개 방향까지 끌고 갔다(2026-10-18 추몽 p016) → 시트의 3/4 머리만 넣는다
         turn = series / "assets" / "vast_refs" / f"{cid}_turn.png"
-        if turned and turn.exists():
+        # 옆·뒤에서 보는 컷도 정면 머리 대신 3/4 머리: 정면 머리를 같이 주면 몸까지 독자 쪽으로 돌려, 기둥에 몸 앞으로 박는 옆모습 컷이
+        # 등·어깨를 기둥에 기댄 정면 컷으로 두 번 그려졌다(2026-10-23 개항 p023f, 사용자 "앞에서 박아야지 왜 등으로 쳐박노")
+        if (turned or view_kind) and turn.exists():
             refs.append(turn)
             bind[cid] = len(refs)
             lines.append(f"<image{len(refs)}> is {NAMES[cid]}'s head in three-quarter view (identity only: same face, eyes, hairstyle and hair color).")
