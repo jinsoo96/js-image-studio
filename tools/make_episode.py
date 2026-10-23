@@ -109,14 +109,23 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
     return need
 
 
-def export(series: Path, ep: Path):
-    run([PY, TOOLS / "trailer2.py", ep], "예고편", allow_fail=True, capture=True)
-    run([PY, TOOLS / "to_epub.py", ep], "epub", capture=True)
-    b = json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))
+def export_name(series: Path, ep: Path) -> str:
+    """exports/<날짜>/ 에 놓을 파일 이름(확장자 없이). MCP export 도구도 이걸 쓴다: 두 곳에서 따로 짜서 판 번호(_v3)가
+    MCP 쪽에만 붙었고, make_episode 로 끝까지 돌린 v3 가 원본 이름으로 나갔다(2026-10-24 개항 1화 v3)."""
+    sb = ep / "storyboard.json"
+    b = json.loads(sb.read_text(encoding="utf-8")) if sb.exists() else {}
     title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
     # 본편 내보내기를 덮지 않게 판 이름을 붙인다(<회차>_vast = GPU 서버판, <회차>_restyle = UC 로 그리고 Restyle LoRA 로 정본 그림체를 입힌 판)
     name = f"{b.get('title', series.name)}_{title}".replace(" ", "") + {"_vast": "_vast판", "_restyle": "_리스타일판"}.get(
         next((s for s in ("_vast", "_restyle") if ep.name.endswith(s)), ""), "")
+    v = re.search(r"_(v\d+)", ep.name)  # 다른 버전(ep001_v2)은 끝에 _v2: 같은 날 내보내면 제목·부제가 같아 원본을 덮었다(2026-10-23)
+    return name + (f"_{v.group(1)}" if v else "")
+
+
+def export(series: Path, ep: Path):
+    run([PY, TOOLS / "trailer2.py", ep], "예고편", allow_fail=True, capture=True)
+    run([PY, TOOLS / "to_epub.py", ep], "epub", capture=True)
+    name = export_name(series, ep)
     day = ROOT / "exports" / time.strftime("%Y-%m-%d")
     day.mkdir(parents=True, exist_ok=True)
     for src, ext in ((next(ep.glob("out/*.pdf"), None), ".pdf"), (next(ep.glob("out/*.epub"), None), ".epub"),

@@ -76,12 +76,16 @@ def balance() -> dict:
     req = urllib.request.Request("https://api.runpod.io/graphql", method="POST",
                                  data=json.dumps({"query": "query { myself { clientBalance currentSpendPerHr } }"}).encode(),
                                  headers={**UA, "Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            me = json.loads(r.read())["data"]["myself"]
-    except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"RunPod 잔액을 못 읽음: {str(e)[:200]}") from e
-    return {"balance": float(me["clientBalance"]), "per_hr": float(me["currentSpendPerHr"])}
+    err = None
+    for k in range(3):  # RunPod API 가 가끔 30초 넘게 답이 없다(2026-10-24 00:30)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                me = json.loads(r.read())["data"]["myself"]
+            return {"balance": float(me["clientBalance"]), "per_hr": float(me["currentSpendPerHr"])}
+        except Exception as e:  # noqa: BLE001
+            err = e
+            time.sleep(5 * (k + 1))
+    raise RuntimeError(f"RunPod 잔액을 못 읽음: {str(err)[:200]}") from err
 
 
 def budget_ok(need_hours: float = 0.5) -> bool:
@@ -632,7 +636,15 @@ def main():
         if c.get("min_balance_usd") is None:
             print("min_balance_usd 설정 없음: 지킬 바닥이 없다")
             return
-        b = balance()
+        log = ROOT / "state" / "logs" / "budget_guard.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            b = balance()
+        except RuntimeError as e:  # 못 읽은 것도 남긴다(조용히 죽으면 지킴이가 도는지 모른다). 다음 차례(10분 뒤)에 다시 본다
+            with log.open("a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M')} {e}\n")
+            print(e)
+            return
         running = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
         line = f"{time.strftime('%Y-%m-%d %H:%M')} 잔액 ${b['balance']:.2f} 바닥 ${c['min_balance_usd']} 켜진 파드 {len(running)} 시간당 ${b['per_hr']:.2f}"
         if b["balance"] <= float(c["min_balance_usd"]) and running:
@@ -640,8 +652,6 @@ def main():
                 stop(p["id"])
             line += " → 바닥이라 파드를 멈춤"
         print(line, flush=True)
-        log = ROOT / "state" / "logs" / "budget_guard.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     elif cmd == "status":

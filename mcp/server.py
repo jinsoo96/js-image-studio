@@ -47,6 +47,7 @@ import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷
 sys.path.insert(0, str(ROOT / "tools"))
 import new_series as ns  # noqa: E402  새 작품 열기(설정 한 장 → 작품 폴더)
 import gates  # noqa: E402  하네스 관문(콘티·컷 설명 격리 judge, 통과해야 그린다)
+import make_episode as make_episode_mod  # noqa: E402  내보내기 이름(export_name)을 같이 쓴다
 import clean_old  # noqa: E402  _tmp·_old 로 옮긴 파일의 처음 본 시각(_tmp 만 10일 뒤 지운다)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
@@ -91,6 +92,18 @@ DESTRUCTIVE = {"write_file", "edit_file", "move_file", "copy_file", "adopt_panel
 OPEN_WORLD = {"publish_ailism", "ailism_work"}
 
 
+def _job_started(result):
+    """작업을 띄운 도구의 글('작업 시작 <번호>: …')을 state=running JSON 으로. 글로만 주자 27B 모델이 시작만 한 작업을
+    '다 됐어요, PDF 여기' 라며 없는 링크까지 지어 답했다(2026-10-24 미사일 스튜디오 시험). 결과가 없다는 것을 칸으로 못 박는다."""
+    if not (isinstance(result, str) and result.startswith("작업 시작 ")):
+        return result
+    m = re.search(r"\b(\d{4}-\d{6}-[0-9a-f]{4})\b", result)
+    return json.dumps({"state": "running", "job": m.group(1) if m else "", "result_ready": False,
+                       "rule": "아직 끝나지 않았다. 그림·PDF·링크는 job_status 의 state 가 done 이나 needs_review 일 때만 있다. "
+                               "지금은 작업 번호와 예상 시간만 알린다(끝났다고 말하지 않는다).",
+                       "message": result}, ensure_ascii=False)
+
+
 def _threaded_tool(*args, **kwargs):
     def deco(fn):
         name = kwargs.get("name") or fn.__name__
@@ -104,7 +117,7 @@ def _threaded_tool(*args, **kwargs):
 
         @functools.wraps(fn)
         async def run(**kw):
-            return await anyio.to_thread.run_sync(functools.partial(fn, **kw))
+            return _job_started(await anyio.to_thread.run_sync(functools.partial(fn, **kw)))
 
         deco(run)
         return fn
@@ -1936,11 +1949,7 @@ def compose(series: str, episode: str) -> str:
 def export(series: str, episode: str) -> str:
     """예고편(trailer.json)·epub 을 만들고 PDF·epub·예고편을 exports/<오늘>/ 로 복사한다. compose 가 끝난 뒤 부른다. 크레딧 안 씀."""
     ep = _episode(series, episode)
-    b = _json(ep / "storyboard.json", {}) or {}
-    title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
-    name = f"{b.get('title', _series(series).name)}_{title}".replace(" ", "") + ("_vast판" if ep.name.endswith("_vast") else "")  # 본편 내보내기를 덮지 않게
-    # 다른 버전(ep001_v2)은 이름 끝에 _v2: 원본과 같은 날 내보내면 제목·부제가 같아 원본 파일을 덮었다(2026-10-23)
-    name += "_" + re.search(r"_(v\d+)", ep.name).group(1) if re.search(r"_(v\d+)", ep.name) else ""
+    name = make_episode_mod.export_name(_series(series), ep)  # make_episode 의 내보내기와 같은 이름(판 번호 _v2 등)
     day = time.strftime("%Y-%m-%d")
     copy = ("import shutil,sys; from pathlib import Path; ep=Path(sys.argv[1]); d=Path(sys.argv[2]); n=sys.argv[3]; d.mkdir(parents=True,exist_ok=True)\n"
             "for src,ext in [(next(ep.glob('out/*.pdf'),None),'.pdf'),(next(ep.glob('out/*.epub'),None),'.epub'),(ep/'out/trailer.mp4','_예고편.mp4'),(ep/'out/trailer.gif','_예고편.gif')]:\n"
@@ -2108,6 +2117,10 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     links = [x for x in (_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m) if x]
     if links:
         out["links"] = links
+    # 끝난 작업만 결과가 있다(시작만 한 작업을 '다 됐다'고 답한 일이 있어 칸으로 알린다, 2026-10-24)
+    out["result_ready"] = out["state"] in ("done", "needs_review")
+    if out["state"] == "failed":
+        out["next"] = out.get("next") or "실패: log_tail 의 마지막 오류를 사용자에게 알리고, 고칠 수 있는 입력(컷 설명·콘티)이면 고친 뒤 같은 도구를 다시 부른다"
     out["log_tail"] = "\n".join(lines[-tail_lines:]) if tail_lines else ""
     return out
 

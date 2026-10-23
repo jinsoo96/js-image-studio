@@ -359,6 +359,11 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
         if vf is not None and vf.exists() and (len(p.get("chars") or []) == 1 or re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1].lower() in cam):
             refs.append(vf)
             lines.append(f"<image{len(refs)}> shows {NAMES[cid]} from the {view_kind}: use it for how the hair, build and clothes look from that side.")
+            # 뒤에서 보는 인물(어깨 너머 숏의 앞사람)은 얼굴 참고를 주지 않는다: 얼굴을 주면 마주 선 다른 사람(이름 없는 관리)에게 그 얼굴을
+            # 그렸다(2026-10-24 개항 p004a 김치형 얼굴이 일본 관리에게). 뒷모습 그림 하나로 그 사람을 묶는다
+            if view_kind == "back":
+                bind[cid] = len(refs)
+                continue
         # --expr: 연기에 맞는 표정 칸을 얼굴 참고로(그 표정을 따라 그린다). 없으면 무표정 머리(얼굴 칸 첫 장은 웃음이라 그 표정을 따라 그렸다, p045)
         # turned: 독자를 봐서 다시 그릴 때. 정면 표정 칸·정면 머리가 고개 방향까지 끌고 갔다(2026-10-18 추몽 p016) → 시트의 3/4 머리만 넣는다
         turn = series / "assets" / "vast_refs" / f"{cid}_turn.png"

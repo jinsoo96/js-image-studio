@@ -8,6 +8,7 @@ state/vlm_url.txt('주소|모델', 한 줄)가 있으면 VLM_URL 다음 후보�
 """
 import json
 import re
+import sys
 import os
 import urllib.error
 import urllib.request
@@ -62,19 +63,38 @@ def endpoint(refresh: bool = False) -> tuple:
                 _picked = (url, model, key)
                 return _picked
             tried.append(f"{url}: {model} 없음({', '.join(map(str, ids))[:80]})")
+        except urllib.error.HTTPError as e:
+            # 목록(/models)은 거절하고 chat 만 받는 OpenAI 호환 서버가 있다(Anthropic: 목록은 자기 헤더를 요구). 1토큰 chat 으로 살아 있나 본다.
+            # 예전엔 여기서 다음 후보로 조용히 넘어가, 일부러 바꾼 판정 모델이 늘 RunPod Qwen 으로 돌아갔다(2026-10-24 시험)
+            if e.code in (400, 404, 405) and _chat_ok(url, model, key):
+                _picked = (url, model, key)
+                return _picked
+            tried.append(f"{url}: HTTP {e.code}")
         except Exception as e:  # noqa: BLE001
             tried.append(f"{url}: {type(e).__name__} {str(e)[:60]}")
+        if os.environ.get("VLM_URL") and url == os.environ["VLM_URL"].rstrip("/"):
+            print(f"[judge] 지정한 판정 모델에 닿지 않아 다음 후보로: {tried[-1]}", file=sys.stderr, flush=True)
     raise JudgeDown("그림 보는 모델에 닿지 않는다: " + " / ".join(tried))
 
 
-_plain = set()  # 생각 끄기 칸을 거절한 주소(이 실행 동안 그 칸 없이 보낸다)
+def _chat_ok(url: str, model: str, key: str) -> bool:
+    body = {"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]}
+    req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={**UA, "Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return bool(json.loads(r.read().decode()).get("choices"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_dropped: dict = {}  # 주소 → 그 서버가 거절한 요청 칸(이 실행 동안 그 칸 없이 보낸다)
+OPTIONAL = ("chat_template_kwargs", "temperature", "top_p")  # 빼도 답은 나오는 칸
 
 
 def body_extra(model: str, url: str = "") -> dict:
     """생각(추론문) 끄기. 자체 호스팅 vLLM 의 Qwen3 계열은 chat_template_kwargs 로 끈다. 다른 모델·서버가 이 칸을 모른다며 400 을 주면
     chat 이 그 주소엔 칸 없이 다시 보낸다(모델 이름으로만 정하면 다른 서버로 갈아끼울 때 깨졌다)."""
-    if url in _plain:
-        return {}
     return {"chat_template_kwargs": {"enable_thinking": False}} if "qwen" in model.lower() else {}
 
 
@@ -84,27 +104,42 @@ def _strip_think(txt: str) -> str:
 
 
 def chat(content: list, max_tokens: int = 600, temperature: float = 0.0, timeout: float = 120) -> str:
-    """OpenAI 호환 chat 한 번. 실패하면 한 번 다른 후보를 골라 다시, 그래도 안 되면 JudgeDown."""
-    for attempt in (0, 1, 2):
-        url, model, key = endpoint(refresh=attempt == 2)
+    """OpenAI 호환 chat 한 번. 서버가 어떤 칸을 거절하면(400·422 에 그 칸 이름) 그 주소엔 그 칸을 빼고 다시 보낸다:
+    Qwen 전용 chat_template_kwargs, 새 Claude 의 temperature(2026-10-24 판정 모델을 Claude 로 바꾸자 'temperature is deprecated').
+    그래도 안 되면 다른 후보를 골라 한 번 더, 그래도 안 되면 JudgeDown."""
+    switched = False
+    for _ in range(len(OPTIONAL) + 3):
+        url, model, key = endpoint(refresh=switched)
         body = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": content}], **body_extra(model, url)}
+        for k in _dropped.get(url, ()):
+            body.pop(k, None)
         req = urllib.request.Request(url + "/chat/completions", data=json.dumps(body).encode(),
                                      headers={**UA, "Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                # 본문이 비어 None 으로 오는 때가 있다(생각만 하고 끝난 답). 부르는 쪽 re·json 이 None 에서 터져 컷이 '실패'로 빠졌다(2026-10-19 p054)
-                return _strip_think(json.loads(r.read().decode())["choices"][0]["message"].get("content") or "")
-        except urllib.error.HTTPError as e:
-            if e.code in (400, 422) and "chat_template_kwargs" in body and url not in _plain:
-                _plain.add(url)  # 그 칸을 모르는 서버: 같은 주소에 칸 없이 한 번 더
+                ch = json.loads(r.read().decode())["choices"][0]
+            # 본문이 비어 None 으로 오는 때가 있다(생각만 하고 끝난 답). 부르는 쪽 re·json 이 None 에서 터져 컷이 '실패'로 빠졌다(2026-10-19 p054)
+            text = _strip_think(ch["message"].get("content") or "")
+            # 속으로 생각하는 모델이 한도를 생각에 다 쓰고 빈 본문을 준다(2026-10-24 Claude Sonnet 5.5: 1500토큰 모두 생각, finish length) → 한도를 키워 다시
+            if not text.strip() and ch.get("finish_reason") == "length" and max_tokens < 8000:
+                max_tokens = min(8000, max_tokens * 3)
                 continue
-            if attempt == 2:
-                raise JudgeDown(f"{url} HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:100]}") from e
+            return text
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", "replace")
+            bad = next((k for k in OPTIONAL if k in body and k in msg), None) if e.code in (400, 422) else None
+            if bad:
+                _dropped.setdefault(url, set()).add(bad)
+                continue
+            if switched:
+                raise JudgeDown(f"{url} HTTP {e.code}: {msg[:100]}") from e
+            switched = True
         except Exception as e:  # noqa: BLE001
-            if attempt == 2:
+            if switched:
                 raise JudgeDown(f"{url} {type(e).__name__}: {str(e)[:100]}") from e
-    raise JudgeDown("unreachable")
+            switched = True
+    raise JudgeDown("판정 모델 요청을 맞추지 못함")
 
 
 def parse_json(txt: str, repair: bool = True) -> dict:

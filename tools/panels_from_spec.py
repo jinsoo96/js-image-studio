@@ -96,6 +96,27 @@ def structure_lint(panels, board) -> list:
     return out
 
 
+def _names(series: Path) -> dict:
+    cast = json.loads((series / "cast.json").read_text(encoding="utf-8")) if (series / "cast.json").exists() else {}
+    return {k: re.sub(r"\s*\(.*?\)", "", v.get("en") or k) for k, v in cast.items() if isinstance(v, dict)}
+
+
+def normalize(sp: dict, names: dict) -> dict:
+    """그리기·검수는 acting·camera·action·extras 를 글로, outfit 을 {인물: 글} 로 읽는다. 에이전트가 acting 을 {인물: 연기} 객체로 넣자
+    그대로 통과해 그리기 단계에서 8컷 모두 TypeError 로 멈췄다(2026-10-24 미사일 스튜디오 새 작품). 들어온 꼴을 여기서 한 번 맞춘다."""
+    sp = dict(sp)
+    for k in ("acting", "camera", "action", "extras", "look", "text_in_image"):
+        v = sp.get(k)
+        if isinstance(v, dict):
+            sp[k] = "; ".join(f"{names.get(c, c)}: {x}" for c, x in v.items() if str(x).strip())
+        elif isinstance(v, (list, tuple)):
+            sp[k] = " ".join(str(x) for x in v if str(x).strip())
+    o = sp.get("outfit")
+    if isinstance(o, str) and o.strip():
+        sp["outfit"] = {c: o for c in (sp.get("chars") or [])}
+    return sp
+
+
 def main():
     ep = Path(sys.argv[1]).resolve()
     series = ep.parents[1]
@@ -122,7 +143,9 @@ def main():
             im.resize((1600, round(im.height * 1600 / im.width)), Image.LANCZOS).save(placed)
 
     panels, unknown = [], []
+    names = _names(series)
     for pid, sp in P.items():
+        sp = normalize(sp, names)
         if pid not in by_id:
             unknown.append(pid)
             continue
