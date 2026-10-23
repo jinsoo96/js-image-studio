@@ -439,10 +439,13 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
     # 학습한 LoRA 가 있는 인물은 이름 옆에 그 trigger 를 붙인다(학습 캡션 맨 앞 낱말, lora.build_data)
     trig = {} if NO_LORA else {x["who"]: x["trigger"] for x in lora_for(series, p.get("chars", [])) if x.get("trigger")}
+    # 참고 그림만 묶으면 '그 사람'으로만 읽어 고양이 수인을 사람 노인으로 그렸다(2026-10-24 등불 상점 p002) → 작품 설정 생김새(who)의 첫 마디를 같이
+    cast_who = (json.loads((series / "series.json").read_text(encoding="utf-8")).get("cast") or {}) if (series / "series.json").exists() else {}
     for cid, k in bind.items():
         short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
         tag = f"{trig[cid]}, " if cid in trig else ""
-        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} ({tag}the person in <image{k}>)", action, count=1)
+        kind = str((cast_who.get(cid) or {}).get("who", "")).split(",")[0].strip()
+        action = re.sub(rf"\b{re.escape(short)}\b", f"{short} ({tag}the person in <image{k}>" + (f", {kind}" if kind else "") + ")", action, count=1)
     for cid in [c for c in trig if c not in bind and c in NAMES]:
         short = re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1]
         action = re.sub(rf"\b{re.escape(short)}\b", f"{short} ({trig[cid]})", action, count=1)

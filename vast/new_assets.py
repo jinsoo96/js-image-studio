@@ -82,18 +82,50 @@ def candidate_prompt(series: Path, kind: str, name: str):
     return prompt, refs
 
 
+PLACE_EXPECT = """This describes the background location of a webtoon: {text}
+Is the camera meant to be inside a room or building (an interior), outdoors (a street, an alley, a field, the outside of a building), or
+both (a half-open place such as a station platform under a roof, a porch, a covered market)?
+Answer JSON only: {{"where": "inside" | "outside" | "both" | "unclear"}}"""
+PLACE_SEE = """Look at this background picture. Is the camera inside a room or building (walls, ceiling or furniture around the viewer), or outdoors
+(sky, a street, the outside of a building seen from the street), or both (a half-open place under a roof, such as a station platform or a porch)?
+Answer JSON only: {{"where": "inside" | "outside" | "both" | "unclear"}}"""
+PLACE_FIX = {"inside": "The camera stands INSIDE this place, looking at its interior: walls, shelves and furniture around the viewer. Do not show the outside of the building or the street.",
+             "outside": "The camera stands OUTDOORS, looking at this place from outside."}
+
+
+def place_mismatch(series: Path, name: str, img: Path) -> str:
+    """장소 글이 실내인데 그림이 바깥(또는 반대)이면 글이 말하는 쪽('inside'|'outside'), 맞거나 모르면 ''. 글과 그림을 따로 묻고 코드가 비교한다.
+    '골목 끝의 실내'를 가게 바깥(골목에서 본 가게 앞)으로 그렸고 그 그림이 모든 컷의 배경이 됐다(2026-10-24 등불 상점).
+    지붕 덮인 승강장처럼 반쯤 열린 곳은 'both'(어긋남으로 보지 않는다): 둘로만 고르게 하니 경성역 승강장을 글은 바깥, 그림은 안으로 갈랐다."""
+    from refine import _text_json, _vlm
+    txt = paths(series, "location", name)[0].read_text(encoding="utf-8")
+    m = re.search(r"LOCATION:\s*(.+)", txt, flags=re.S)
+    want = str(_text_json(PLACE_EXPECT.format(text=(m.group(1) if m else txt).strip()[:800])).get("where", "")).lower()
+    got = str(_vlm([img], PLACE_SEE, 60).get("where", "")).lower()
+    return want if {want, got} == {"inside", "outside"} else ""
+
+
 def make(series: Path, kind: str, name: str, seed=None) -> Path:
     cand = paths(series, kind, name)[1]
     prompt, ref_paths = candidate_prompt(series, kind, name)
     c, cache = Comfy(), {}
     refs = [upload(c, r, cache) for r in ref_paths]
-    # 오래 쓰는 그림이라 터보 없이 40스텝, 16:9
-    g = graph(prompt, refs, 1920, 1088, seed if seed is not None else random.randrange(2**48), 40, 1024, turbo=False, series=series,
-              role="candidate_location" if kind == "location" else "candidate_sheet")
-    g["9"]["inputs"]["filename_prefix"] = f"webtoon_studio/new_{kind}"
-    hist = c.wait(c.queue(g), 1200)
-    cand.parent.mkdir(parents=True, exist_ok=True)
-    c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), cand)
+    seed = seed if seed is not None else random.randrange(2**48)
+    for k in range(2):
+        # 오래 쓰는 그림이라 터보 없이 40스텝, 16:9
+        g = graph(prompt, refs, 1920, 1088, seed + k, 40, 1024, turbo=False, series=series,
+                  role="candidate_location" if kind == "location" else "candidate_sheet")
+        g["9"]["inputs"]["filename_prefix"] = f"webtoon_studio/new_{kind}"
+        hist = c.wait(c.queue(g), 1200)
+        cand.parent.mkdir(parents=True, exist_ok=True)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), cand)
+        if kind != "location" or name.endswith("_reverse") or k:
+            break
+        want = place_mismatch(series, name, cand)
+        if not want:
+            break
+        print(f"  {name}: 장소 글은 {want} 인데 그림은 반대 → 한 번 더 그림", flush=True)
+        prompt += "\n\n" + PLACE_FIX[want]
     if kind == "location":  # 장소는 사람 0명이 정답: 글로 막아도 앞 테이블에 사람을 앉혀서(호프집) 2단 지우기를 건다
         from refine import fix_extras
         fix_extras(c, cache, cand, series, {"id": name, "chars": [], "action": "", "outfit": {}}, seed=7, log=print)

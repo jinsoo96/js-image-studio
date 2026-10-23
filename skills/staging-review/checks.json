@@ -275,6 +275,17 @@
    "problem": "머리 없는 몸통 {v}개(한 사람이 몸 둘로 그려짐): 그 몸통만 지운다"
   },
   {
+   "name": "identity_each",
+   "category": "생김새",
+   "when": "people",
+   "kind": "ref_each",
+   "ref": "bust",
+   "verify": false,
+   "why": "고양이 수인 모쿠가 사람 노인 얼굴로 그려졌는데 컷 검사는 글(자세·시선·소품)만 보고 넘겼고, 장면 이어짐 점검만 '사람에서 고양이로 바뀜'이라 적고 아무 일도 안 했다(2026-10-24 등불 상점 1화 p002). 인물마다 상반신 참고 그림을 같이 보여 주고 '같은 종류의 존재(사람 얼굴·짐승 얼굴·귀·뿔·털빛)인가' 하나만 묻는다. 사람 작품 컷 22개에서 잘못 건 것 0",
+   "observe": "Image 2 is the reference portrait of {name} ({kind}). Image 1 is a webtoon panel that should show {name}.\nPeople in image 1 should be: {looks}. Panel text: {text}\nFind {name} in image 1 (use the panel text, positions and clothes to tell who is who). Compare only what kind of being {name} is drawn as: a human face or an animal face (fur, muzzle, whiskers), animal ears, horns, skin or fur color. Ignore clothes, pose, expression, camera angle and small drawing details.\nAnswer JSON only: {{\"found\": true|false, \"same_kind\": true|false, \"differs\": \"what is different, empty if the same\"}}",
+   "problem": "{name} 가 참고 그림과 다른 모습으로 그려짐: {differs}"
+  },
+  {
    "name": "unheld",
    "category": "소품",
    "when": "people",
@@ -316,6 +327,8 @@
   "배경": "배경이 장소 설정과 다르다",
   "몸": "팔·손 개수가 이상하다",
   "기타": "그 밖의 문제(note 참고)",
-  "검사불가": "그림은 그려졌고 문제가 아니다. 검사 모델이 답을 못 줘 확인하지 못했을 뿐이다: 다시 그리지 말고 그림을 보여 주고 사용자에게 확인받는다"
+  "검사불가": "그림은 그려졌고 문제가 아니다. 검사 모델이 답을 못 줘 확인하지 못했을 뿐이다: 다시 그리지 말고 그림을 보여 주고 사용자에게 확인받는다",
+  "생김새": "인물이 참고 그림(시트)과 다른 종류의 모습으로 그려졌다(사람 얼굴↔짐승 얼굴, 귀·뿔·털빛)",
+  "이어짐": "같은 장면 앞 컷과 이어지지 않는다(인물 모습·옷·머리·자세·소품). 장면 이어짐 점검(tools/continuity_check.py)이 뒤 컷에 남긴다"
  }
 }

@@ -1443,7 +1443,9 @@ def style_compare(name: str, styles: dict | list | str, scenes: dict | list | st
     except ValueError as e:
         return _fail("bad_json", detail=str(e), hint='styles = {"이름": "English style paragraph"}, scenes = {"이름": {"text": "...", "aspect": "3:2"}}')
     if not isinstance(st, dict) or not 2 <= len(st) <= 8:
-        return _fail("bad_styles", hint="styles 는 그림체 2~8개의 JSON 객체")
+        # 쉼표로 이은 이름 한 줄("watercolor, anime-soft")은 그림체 하나로 읽힌다(그림체 문단에도 쉼표가 있어 나누지 않는다, 2026-10-24 등불 상점 시험)
+        return _fail("bad_styles", got=len(st) if isinstance(st, dict) else 0,
+                     hint='styles 는 그림체 2~8개: {"수채": "soft watercolor ... (영어 문단)", "애니": "clean anime ..."}. 쉼표로 이은 이름 한 줄은 하나로 읽힌다')
     if not isinstance(sc, dict) or not 1 <= len(sc) <= 4:
         return _fail("bad_scenes", hint="scenes 는 장면 1~4개의 JSON 객체")
     probe_styles = {}

@@ -309,7 +309,8 @@ def _compare(check: dict, fill: dict, img_path: Path) -> list:
 def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
     """사실 하나씩 묻는 항목(checks.json kind). 약한 판정 모델도 여럿을 한꺼번에 물으면 놓치고 하나씩 물으면 잡았다(2026-10-20 하네스 시험,
     tools/harness_selftest.py). facts: 글에서 꼭 보여야 할 사실을 예/아니오 질문으로 뽑아 하나씩 · count_each: 인물마다 그 생김새인 사람 수 ·
-    fixed: 고정 질문 하나(field 가 양수면 걸림) · each: 사람마다 한 질문(expect 가 'no' 인 사람이 bad_value 면 걸림)."""
+    fixed: 고정 질문 하나(field 가 양수면 걸림) · each: 사람마다 한 질문(expect 가 'no' 인 사람이 bad_value 면 걸림) ·
+    ref_each: 사람마다 참고 그림과 나란히 한 질문(found 인데 same_kind 가 아니면 걸림)."""
     from hf_panel import names
     nm = names(Path(series))
     out = []
@@ -336,6 +337,18 @@ def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
             n = _vlm([img_path], c["observe"].format(top=top, kind=kinds[ch]), 60).get("count")
             if isinstance(n, int) and n > same:
                 out.append(c["problem"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch)), n=n))
+    elif kind == "ref_each":  # 인물마다 참고 그림(vast_refs/<id>_<ref>.png)을 같이 보여 주고 묻는다. 참고 그림이 없는 인물은 건너뛴다
+        sj = Path(series) / "series.json"
+        cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
+        for ch in p.get("chars") or []:
+            ref = Path(series) / "assets" / "vast_refs" / f"{ch}_{c.get('ref', 'bust')}.png"
+            if not ref.exists():
+                continue
+            name = re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch))
+            kind_txt = str((cast.get(ch) or {}).get("who", "")).split(",")[0].strip() or "a person"
+            r = _vlm([img_path, ref], c["observe"].format(name=name, kind=kind_txt, looks=fill["looks"], text=fill["text"][:500]), 150)
+            if r.get("found") is True and r.get("same_kind") is False:
+                out.append(c["problem"].format(name=name, differs=str(r.get("differs") or "")[:200]))
     elif kind == "fixed":
         v = _vlm([img_path], c["observe"].format(**fill), 80).get(c["field"])
         if isinstance(v, (int, float)) and v > 0 and c.get("bad") == "positive":
@@ -514,7 +527,7 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
     record_review(ep_dir, p["id"], left, note)
 
 
-STRUCTURAL = {"인원", "몸", "빈자리", "좌우", "검사불가"}  # 독자 눈 거르기에서 빼지 않는 것: 그림의 짜임이 깨졌거나 검사를 못 했다
+STRUCTURAL = {"인원", "몸", "빈자리", "좌우", "생김새", "검사불가"}  # 독자 눈 거르기에서 빼지 않는 것: 그림의 짜임이 깨졌거나(인물이 딴 모습) 검사를 못 했다
 READER_ASK = """This is one panel of a vertical-scroll webtoon. The reader sees only this picture{talk}.
 An automatic check compared the picture with the artist's written plan and found these differences (category: description):
 {notes}
