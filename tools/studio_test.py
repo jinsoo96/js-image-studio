@@ -36,6 +36,18 @@ def ask(text: str, provider: str = "", conversation: str = "", timeout: int = 15
     return d
 
 
+def wait_jobs(max_min: float):
+    """웹툰 MCP 작업(state/mcp_jobs)이 더 이상 돌지 않을 때까지(최대 max_min 분) 기다린다."""
+    end = time.time() + max_min * 60
+    jobs = ROOT / "state" / "mcp_jobs"
+    while time.time() < end:
+        running = [f for f in jobs.glob("*.status.json") if time.time() - f.stat().st_mtime < 6 * 3600
+                   and json.loads(f.read_text(encoding="utf-8")).get("state") in ("starting", "running")]
+        if not running:
+            return
+        time.sleep(20)
+
+
 def summarize(d: dict) -> dict:
     calls, errors, running = [], [], set()
     for e in d.get("events", []):
@@ -92,7 +104,11 @@ def main():
     passed = 0
     for sc in pick:
         t0, turns, conv = time.time(), [], ""
-        for text in [sc["prompt"]] + list(sc.get("then") or []):
+        for turn in [sc["prompt"]] + list(sc.get("then") or []):
+            # 이어 할 말은 글이나 {"say": 글, "wait_jobs_min": 분}: 앞 차례가 띄운 작업이 끝날 때까지 기다렸다가 말한다
+            text, wait_min = (turn, 0) if isinstance(turn, str) else (turn["say"], float(turn.get("wait_jobs_min", 0)))
+            if wait_min:
+                wait_jobs(wait_min)
             d = ask(text, sc.get("provider") or a.provider, conv)
             conv = d.get("conversation_id") or conv
             turns.append({"text": d.get("text", ""), "sum": summarize(d), "error": d.get("error", "")})

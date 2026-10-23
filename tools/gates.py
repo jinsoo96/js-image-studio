@@ -219,6 +219,12 @@ def judge_panels(ep: Path) -> dict:
     board = {p["id"]: p for p in json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))["panels"]}
     lint = structure_lint(panels, board)
     scenes = (_json_file(ep / "panels_spec.json").get("scenes") or {})
+    # 바뀌지 않았고 지난번에 문제없이 지나간 묶음은 다시 채점하지 않는다: 채점 모델이 돌릴 때마다 손대지 않은 컷에서 새 문제를 집어
+    # 대사 한 줄 고치는 일이 관문 왕복 34번이 됐다(2026-10-24 스튜디오 시험). 바뀐 묶음·문제가 있던 묶음만 다시 본다
+    cache_f = ep / "review" / "gates_panels_cache.json"
+    cache = _json_file(cache_f) if cache_f.exists() else {}
+    crit_key = hashlib.sha1(json.dumps(crit, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:10]
+    new_cache = {}
     results = []
     for k in range(0, len(panels), CHUNK):
         part = panels[k:k + CHUNK]
@@ -232,9 +238,16 @@ def judge_panels(ep: Path) -> dict:
         if any(scenes.get(l) for l in locs):
             mat = "장면 배치:\n" + "\n".join(f"  {l}: {scenes[l]}" for l in sorted(x for x in locs if x and scenes.get(x))) + "\n\n" + mat
         setting = _setting(ep.parents[1])
-        r = _llm(ASK.format(what="컷 설명", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=mat))
-        r["problems"] = _verify(crit, setting, mat, [p for p in r.get("problems", []) if isinstance(p, dict)])
+        key = hashlib.sha1((crit_key + setting + mat).encode()).hexdigest()[:16]
+        if key in cache and not cache[key].get("problems"):
+            r = cache[key]
+        else:
+            r = _llm(ASK.format(what="컷 설명", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=mat))
+            r["problems"] = _verify(crit, setting, mat, [p for p in r.get("problems", []) if isinstance(p, dict)])
+        new_cache[key] = r
         results.append(r)
+    (ep / "review").mkdir(exist_ok=True)
+    cache_f.write_text(json.dumps(new_cache, ensure_ascii=False), encoding="utf-8")
     low, total, hard, probs = _score(crit, results)
     probs = [{"criterion": "lint", "panel": ln.split()[0], "fix": ln} for ln in lint] + probs
     return {"gate": "panels", "score": round(total, 3), "scores": low, "hard_failed": hard, "problems": probs,
