@@ -38,8 +38,30 @@ HANGUL = re.compile(r"[\uac00-\ud7a3]")
 EN_KEYS = ("who", "main", "exprs")  # 그림 모델에 그대로 들어가는 칸(영어 글)
 
 
+def _by_id(items: list, text_keys: tuple) -> dict:
+    """[{"id": ..., ...}] 목록을 {id: 항목} 으로. text_keys 를 주면 값은 그 칸의 글(장소 설명)."""
+    out = {}
+    for x in items:
+        if not isinstance(x, dict):
+            continue
+        key = next((str(x[k]) for k in ("id", "key", "slug") if x.get(k)), "")
+        if not key:
+            continue
+        out[key] = next((x[k] for k in text_keys if x.get(k)), "") if text_keys else {k: v for k, v in x.items() if k not in ("id", "key", "slug")}
+    return out
+
+
 def normalize(spec: dict) -> dict:
-    """받아 줄 수 있는 꼴은 고쳐 둔다: exprs 목록 → 쉼표 글. (2026-10-23 미사일 스튜디오 시험: 모델이 exprs 를 목록으로 넣어 프롬프트에 ['calm', ...] 가 들어갈 뻔)"""
+    """받아 줄 수 있는 꼴은 고쳐 둔다: exprs 목록 → 쉼표 글. (2026-10-23 미사일 스튜디오 시험: 모델이 exprs 를 목록으로 넣어 프롬프트에 ['calm', ...] 가 들어갈 뻔)
+    cast·locations 가 [{"id": ...}] 목록이면 {id: ...} 로(이름 칸 name → ko, 장소 설명 desc·description·text). 목록으로 넣은 설정에
+    'list' object has no attribute 'values' 로 죽었다(2026-10-24 등불 상점 시험)."""
+    if isinstance(spec.get("cast"), list):
+        spec["cast"] = _by_id(spec["cast"], ())
+        for c in spec["cast"].values():
+            if not c.get("ko") and isinstance(c.get("name"), str):
+                c["ko"] = c.pop("name")
+    if isinstance(spec.get("locations"), list):
+        spec["locations"] = _by_id(spec["locations"], ("desc", "description", "text", "prompt"))
     for c in (spec.get("cast") or {}).values():
         if isinstance(c, dict) and isinstance(c.get("outfit"), str) and not isinstance(c.get("main"), str):
             c["main"] = c.pop("outfit")  # 옷 칸을 outfit 이라 부른 설정

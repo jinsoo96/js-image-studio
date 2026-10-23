@@ -169,7 +169,7 @@ def main():
         cmd = [PY, VAST / "comfy_panel.py", series, ep / "panels.json", "--episode", ep.name, "--only", ",".join(todo),
                "--variant", "vast", "--turbo", "--expr", "--fix"] + ([] if args.no_check else ["--check"])
         r = run(cmd, f"vast {len(todo)}컷 그리기(크레딧 0)", allow_fail=True, capture=True)
-        look = [l.strip() for l in r.stdout.splitlines() if "사람 눈으로 확인" in l or "실패" in l]
+        look = [l.strip() for l in r.stdout.splitlines() if "실패" in l]  # 사람 확인 남은 컷은 끝에서 review/staging.json 으로
     else:
         look = []
     (ep / "panels_hf").mkdir(exist_ok=True)
@@ -182,7 +182,6 @@ def main():
         raise SystemExit(f"그림이 없는 컷: {','.join(missing)}(다시 부르면 그 컷만 다시 그린다)")
     if new:  # 같은 장면 앞뒤 컷의 이어짐(자세·소품·옷·얼굴·그림체·좌우). 컷 하나씩 보는 연출 확인으로는 못 잡았다(2026-10-18 외출 1화)
         cc = run([PY, TOOLS / "continuity_check.py", ep, "--only", ",".join(new), "--record"], "장면 이어짐 점검", allow_fail=True, capture=True)
-        look += [l.strip() for l in cc.stdout.splitlines() if l.startswith("이어짐 ")]
     if args.until == "draw":
         return
 
@@ -195,6 +194,11 @@ def main():
     if args.until == "compose":
         return
     export(series, ep)
+    # 사람 확인 남은 컷은 검수 기록(review/staging.json, 이어짐 포함)이 정본: 로그 줄을 긁으니 뒤에서 '독자 눈엔 자연스러움'으로 뺀 컷까지
+    # 4컷 다 남았다고 나갔다(2026-10-24 등불 상점 1화, 기록은 비어 있음)
+    sf = ep / "review" / "staging.json"
+    cur = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
+    look += [f"{k}: {'·'.join(v.get('issues', []))} — {str(v.get('note', ''))[:160]}" for k, v in sorted(cur.items())]
     print(f"\n== 끝 ({(time.time() - t0) / 60:.0f}분)" + ("\n사람 눈으로 확인할 컷:\n- " + "\n- ".join(look) if look else ""), flush=True)
 
 

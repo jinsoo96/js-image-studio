@@ -1307,8 +1307,9 @@ def new_series(spec: dict | str) -> str:
      "people_rule": "English rule for people (ages, proportions, restrained expressions)",
      "model": "uc" | "anima"(그리는 판, 비우면 uc. anima 는 글만 받아 인물 생김새를 who 글로 맞춘다, 편집은 uc)}
     직함·호칭은 cast 의 role 에 적는다(콘티 관문이 대사의 호칭과 맞춰 본다). era_rule 은 그리기 지시와 그림 검수에 들어간다.
-    폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 다음: new_episode(slug, "ep001") → 콘티 → set_panels →
-    make_episode(에셋 점검에서 인물 시트·장소 시안을 GPU 서버로 그리고 멈춤, 사용자가 고르면 accept_new=True)."""
+    폴더 series/<slug>-hf 와 설정·프롬프트를 만든다(그림은 아직). 시트·장소 그림을 먼저 보려면 draw_candidates(slug).
+    다음: new_episode(slug, "ep001") → 콘티 → set_panels → make_episode(에셋 점검에서 없는 인물 시트·장소 시안을 GPU 서버로 그리고 멈춤,
+    사용자가 고르면 accept_new=True)."""
     try:
         d = json.loads(spec) if isinstance(spec, str) else spec
         made = ns.create(d)
@@ -1317,7 +1318,8 @@ def new_series(spec: dict | str) -> str:
     except Exception as e:  # noqa: BLE001
         return f"실패: {type(e).__name__}: {e}"
     return (f"새 작품 {made.relative_to(ROOT)}: 인물 {len(d['cast'])}명 · 장소 {len(d.get('locations') or {})}곳 설정과 프롬프트를 만들었다. "
-            f"다음: new_episode('{d['slug']}', 'ep001') 로 첫 회차를 연다")
+            f"다음: 인물 시트·장소 그림을 먼저 보려면 draw_candidates('{d['slug']}'), 바로 이야기로 가면 new_episode('{d['slug']}', 'ep001') "
+            "(첫 make_episode 가 없는 시안을 그리고 멈춘다)")
 
 
 @mcp.tool()
@@ -1380,6 +1382,44 @@ def draw_models(series: str = "") -> str:
             "refine": bool((vv.get("meta") or {}).get("refine")), **({"current": k == cur} if cur else {})}
            for k, vv in sorted(m.items())]
     return json.dumps({"draw_models": out}, ensure_ascii=False)
+
+
+@mcp.tool()
+def draw_candidates(series: str, names: str = "") -> str:
+    """새 작품의 인물 시트·장소 시안을 처음 그린다(크레딧 0, GPU 서버, 한 장에 약 1~3분). 콘티 전에 "시트랑 장소 그림 보여 줘" 할 때 쓴다.
+    names: 인물 id·장소 이름을 쉼표로(비우면 assets 에도 시안에도 없는 것 전부). 결과는 assets/_candidates/(<id>_sheet.png · locations/<이름>.png).
+    끝나면 contact_sheet(paths='series/<작품>-hf/assets/_candidates/*') 로 보여 주고, 사용자가 고르면 move_file 로 assets/ 에 넣거나
+    make_episode(accept_new=True) 가 넣는다. 마음에 안 드는 것은 redo_candidate. 생김새를 바꾸려면 먼저 add_to_series."""
+    try:
+        s = _series(series)
+    except ValueError as e:
+        return str(e)
+    sj = _json(s / "series.json", {}) or {}
+    cast_ids = list((sj.get("cast") or {}).keys()) or [k for k in (_json(s / "cast.json", {}) or {}) if not k.startswith("_")]
+    locs = list((sj.get("locations") or {}).keys())
+    want = [x.strip() for x in names.split(",") if x.strip()]
+    unknown = [x for x in want if x not in cast_ids and x not in locs]
+    if unknown:
+        return _fail("unknown_name", unknown=unknown, cast=cast_ids, locations=locs)
+    todo = []
+    for kind, ids in (("sheet", cast_ids), ("location", locs)):
+        for n in ids:
+            if want and n not in want:
+                continue
+            have = s / "assets" / (f"locations/{n}.png" if kind == "location" else f"{n}_sheet.png")
+            cand = s / "assets" / "_candidates" / (f"locations/{n}.png" if kind == "location" else f"{n}_sheet.png")
+            if not want and (have.exists() or cand.exists()):
+                continue
+            if not (s / "prompts" / (f"loc_{n}.txt" if kind == "location" else f"sheet_{n}.txt")).exists():
+                return _fail("no_prompt", name=n, hint="add_to_series 로 설정을 넣으면 프롬프트가 생긴다")
+            todo.append((kind, n))
+    if not todo:
+        return "그릴 시안이 없다(모두 assets 나 _candidates 에 있다). 다시 그리려면 redo_candidate, 이름을 콕 집으려면 names"
+    _ensure_idle(s)
+    steps = [{"label": f"시안 그리기({k} {n})", "cmd": [PY, str(VAST / "new_assets.py"), str(s), k, n]} for k, n in todo]
+    job = _start_job("draw_candidates", s, steps)
+    return (f"작업 시작 {job}: 시안 {len(todo)}장({', '.join(n for _, n in todo)}), 약 {len(todo) * 2}분. job_status('{job}', wait=50) → "
+            f"끝나면 contact_sheet(paths='{(s / 'assets' / '_candidates').relative_to(ROOT).as_posix()}/*')")
 
 
 @mcp.tool()
@@ -1754,9 +1794,13 @@ def vast_make_assets(series: str, character: str = "all", what: str = "both") ->
     sd = _series(series)
     if what not in ("base", "expr", "both", "subtle", "turn"):
         return json.dumps({"error": "bad_what", "given": what, "allowed": ["base", "expr", "both", "subtle", "turn"]}, ensure_ascii=False)
-    if character != "all" and not (sd / "assets" / f"{character}_sheet.png").exists() and not (sd / "assets" / "vast_refs" / f"{character}_front.png").exists():
-        return f"{character}_sheet.png 가 없다(인물 시트를 먼저 만든다). 있는 인물: " + ", ".join(
-            sorted(p.name[:-len('_sheet.png')] for p in (sd / "assets").glob("*_sheet.png")))
+    sheets = sorted(p.name[:-len('_sheet.png')] for p in (sd / "assets").glob("*_sheet.png"))
+    # 시트가 하나도 없는 작품에 all 로 부르면 '할 일 0장'으로 조용히 끝나 에이전트가 빈 회차를 만들며 헤맸다(2026-10-24 등불 상점 시험)
+    if (character != "all" and not (sd / "assets" / f"{character}_sheet.png").exists() and not (sd / "assets" / "vast_refs" / f"{character}_front.png").exists()) \
+            or (character == "all" and not sheets and not any((sd / "assets" / "vast_refs").glob("*_front.png"))):
+        return _fail("no_sheet", character=character, sheets=sheets,
+                     hint="인물 시트가 먼저 있어야 한다: draw_candidates(작품) 로 시안을 그리고, 사용자가 고르면 move_file 로 assets/ 에 넣거나 "
+                          "make_episode(accept_new=True) 가 넣는다")
     _ensure_idle(sd)
     steps = [{"label": "시트에서 참고 그림 자르기", "cmd": [PY, str(VAST / "sheet_refs.py"), str(sd)]},
              {"label": f"에셋 만들기({character}, {what})", "cmd": [PY, str(VAST / "make_assets.py"), str(sd), character, what, "--res", "768"]}]

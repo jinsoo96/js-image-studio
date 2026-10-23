@@ -11,7 +11,7 @@
 ## 1. 하네스 단계(어느 에이전트가 붙어도 같다)
 | 단계 | 도구 | 관문·검사(통과해야 다음 단계) |
 |---|---|---|
-| 작품 열기 | new_series(spec) · add_to_series | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(style_compare 로 후보 비교표 → add_to_series(…, 'style')) |
+| 작품 열기 | new_series(spec) · add_to_series · draw_candidates(시트·장소 첫 시안) | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(style_compare 로 후보 비교표 → add_to_series(…, 'style')) |
 | 콘티 | new_episode → set_storyboard(컷 목록을 표로, 몇 컷씩 나눠도 됨. 파이썬을 쓰지 않는다) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
 | 컷 설명 | set_panels(5~8컷씩) | prepare_episode 의 **컷 설명 관문**(skills/panel-spec/judge.json + 연출 문법 코드 검사): 마주 보기·얼굴 방향, 앉음 이어짐, 소품 종류·개수, 탈것 방향, 대사 중 뒷모습 금지, 시대 소품 |
 | 그리기 | make_episode (관문을 통과해야 시작한다) | 컷마다 그린 직후 그림 검수: 인원·팔다리·독자 시선·마주 보기·현실 논리·소품·시대. 걸리면 걸린 점을 지시에 붙여 스스로 다시 그린다 |
@@ -21,7 +21,7 @@
 ## 2. 새 작품(「새 웹툰 생성기」의 일)
 1. 사용자가 준 것(장르·분위기·주인공·이야기)을 받고, 빠진 것만 한 번에 묻는다. "알아서"면 제안한다.
 2. 작품 설정 초안을 표로 보여 주고 확인받는다: 제목 · 한 줄 소개 · 장르 · 인물 2~7명(이름·나이·역할·직함, 영어 who·main·exprs 6개) · 장소(영어) · 그림체(영어 문단) · 시대(era, era_rule 영어 한 문장).
-3. new_series(spec) → new_episode(slug, "ep001") → 콘티 → 컷 설명 → prepare_episode 가 관문을 다 통과할 때까지 고친다. 여기서 한 번 답을 끝낸다("그릴까요?").
+3. new_series(spec) → (사용자가 시트·장소 그림을 먼저 보고 싶으면 draw_candidates(slug) → contact_sheet 로 보여 주고 고르기) → new_episode(slug, "ep001") → 콘티 → 컷 설명 → prepare_episode 가 관문을 다 통과할 때까지 고친다. 여기서 한 번 답을 끝낸다("그릴까요?").
 4. make_episode 를 부르고 바로 답을 끝낸다. 처음 나오는 인물·장소는 시안을 그리고 '확인 필요'로 멈춘다 → 사용자가 고르면 make_episode(..., accept_new=True).
 
 ## 3. 다음 화(「웹툰 이어 그리기」의 일)

@@ -76,7 +76,7 @@ agent app 의 MCP 목록은 PC 마다 따로고(서버 동기화 없음), 서버
 | `panel_versions` · `compare_panel` | 예전 판 보기 · 고치기 전/후 그림 |
 | `vast_draw` | 같은 panels.json 을 vast ComfyUI(Qwen Image 2.1)로 그림 → `panels_hf_vast\`. turbo·expr 기본, aspect 로 세로, seed 로 다시. 한 번에 80컷까지 |
 | `vast_make_assets` | 시트에서 참고 그림 자르기 + 베이스 몸·센 표정 12가지 |
-| `new_series` · `add_to_series` · `redo_candidate` · `style_compare` | 새 작품 열기(작품 설정 한 장 → `series\<slug>-hf`, `tools\new_series.py`) · 인물·장소 더하기, 그림체·사람 규칙 바꾸기 · 마음에 안 드는 시안 다시 그리기 · 화풍 후보 비교표(그림체 여러 개 x 장면, `tools\style_probe.py`) |
+| `new_series` · `add_to_series` · `draw_candidates` · `redo_candidate` · `style_compare` | 새 작품 열기(작품 설정 한 장 → `series\<slug>-hf`, `tools\new_series.py`) · 인물·장소 더하기, 그림체·사람 규칙 바꾸기 · 마음에 안 드는 시안 다시 그리기 · 화풍 후보 비교표(그림체 여러 개 x 장면, `tools\style_probe.py`) |
 | `make_episode` | **한 화를 한 번에**(어느 작품이든): 콘티 준비 → 에셋 점검(새 장소·인물은 시안 후 멈춤, `accept_new`) → vast 그리기 → 합성·점검 → 내보내기. 본편 그림이 있는 컷은 안 건드림 |
 | `adopt_panel` | 사용자가 고른 판을 본편(panels_hf)으로: source=vast(다시 그린 판) · preview(미리 보기) · version(예전 판으로 되돌리기). 원본은 `_rejected\` |
 

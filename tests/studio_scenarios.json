@@ -304,7 +304,8 @@
   },
   "setup": {
    "set_aside": [
-    "series/deungbul-shop-hf"
+    "series/deungbul-shop-hf",
+    "series/lantern-shop-hf"
    ]
   },
   "why": "수인(짐승 머리·귀·꼬리) 인물로 새 작품을 처음부터 끝까지. 첫 판(2026-10-24): 모쿠가 사람 노인으로, 실내 장소가 가게 바깥으로 그려졌는데 검수·이어짐 점검이 말없이 넘겼다 → 생김새 검사(identity_each)·장소 안팎 검사·이어짐 기록"
