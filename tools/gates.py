@@ -257,7 +257,10 @@ def judge_panels(ep: Path) -> dict:
 def run(ep: Path, which: str = "all") -> dict:
     out = json.loads((ep / "review" / "gates.json").read_text(encoding="utf-8")) if (ep / "review" / "gates.json").exists() else {}
     if which in ("storyboard", "all"):
-        out["storyboard"] = judge_storyboard(ep)
+        # 콘티가 그대로이고 지난번에 지나갔으면 다시 채점하지 않는다(채점 모델이 같은 콘티를 돌릴 때마다 다르게 걸었다)
+        old = out.get("storyboard") or {}
+        if not (old.get("passed") and old.get("hash") == _hash(ep / "storyboard.json", ep.parents[1] / "source" / "beats.json")):
+            out["storyboard"] = judge_storyboard(ep)
     if which in ("panels", "all") and (ep / "panels.json").exists():
         out["panels"] = judge_panels(ep)
     out["at"] = time.strftime("%Y-%m-%d %H:%M")
