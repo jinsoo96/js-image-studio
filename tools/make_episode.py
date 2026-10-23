@@ -118,6 +118,10 @@ def export_name(series: Path, ep: Path) -> str:
     sb = ep / "storyboard.json"
     b = json.loads(sb.read_text(encoding="utf-8")) if sb.exists() else {}
     title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
+    # 표지 글이 작품 제목과 같으면 회차 번호로: '등불상점_등불상점' 이 됐고, 2화도 같은 표지면 1화 파일을 덮는다(2026-10-24 등불 상점)
+    num = re.match(r"ep0*(\d+)", ep.name)
+    if num and title == re.sub(r"[^\w가-힣]+", "", str(b.get("title", series.name))):
+        title = f"{num.group(1)}화"
     # 본편 내보내기를 덮지 않게 판 이름을 붙인다(<회차>_vast = GPU 서버판, <회차>_restyle = UC 로 그리고 Restyle LoRA 로 정본 그림체를 입힌 판)
     name = f"{b.get('title', series.name)}_{title}".replace(" ", "") + {"_vast": "_vast판", "_restyle": "_리스타일판"}.get(
         next((s for s in ("_vast", "_restyle") if ep.name.endswith(s)), ""), "")

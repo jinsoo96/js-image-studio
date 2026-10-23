@@ -338,6 +338,29 @@ def gen_takes_refs(series) -> bool:
         return True
 
 
+VIEW_ASK = """A webtoon panel is described below. For each of these people: {names}, from which side does the camera see them in this panel?
+"front" (we see their face, also three-quarter), "side" (profile), "back" (we see the back of their head, like the foreground person of an
+over-the-shoulder shot), or "unclear".
+Panel: {text}
+Answer JSON only: {{"<name>": "front" | "side" | "back" | "unclear"}}"""
+
+
+def person_views(p: dict, NAMES: dict) -> dict:
+    """컷 글(카메라·샷·동작)을 판정 모델이 읽고 인물마다 카메라가 보는 쪽 {인물 id: front|side|back}. 못 물으면 {}(정면 참고 그림만 쓴다)."""
+    chars = [c for c in p.get("chars") or [] if c in NAMES]
+    text = " ".join(str(p.get(k) or "") for k in ("shot", "camera", "action")).strip()
+    if not chars or not text:
+        return {}
+    short = {c: re.sub(r"\s*\(.*?\)", "", NAMES[c]).split()[-1] for c in chars}
+    try:
+        from refine import _text_json
+        r = _text_json(VIEW_ASK.format(names=", ".join(short.values()), text=text[:1500]), 120)
+    except Exception:  # noqa: BLE001
+        return {}
+    low = {str(k).lower(): str(v).lower() for k, v in r.items()}
+    return {c: low[s.lower()] for c, s in short.items() if low.get(s.lower()) in ("front", "side", "back")}
+
+
 def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, text_only=False):
     """같은 컷 설명(panels.json)으로 Qwen 용 짧은 프롬프트와 참고 그림을 만든다. 2026-10-15 시험에서 정한 것:
     - 힉스필드 프롬프트(약 4천 자, 맥락·규칙·연기 일반론)를 그대로 쓰면 연기가 묻힌다(p045 울 컷이 무표정, 짧게 쓰니 눈물·입술 깨묾이 나옴)
@@ -373,12 +396,14 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     bind = {}
     # 뒷모습·옆모습 컷이면 캐릭터 시트에서 자른 그 방향 그림을 더 준다(make_assets turn → <id>_view_back·side). 정면 참고 그림만 주면 뒷모습의
     # 머리 모양·옷 뒤판을 지어냈다. 방향은 컷 설명의 카메라 칸이 정한다(panel-spec 스킬이 'seen from behind'·'profile' 로 적는다)
-    cam = " ".join(str(p.get(k) or "") for k in ("camera", "shot")).lower()
-    view_kind = "back" if any(w in cam for w in ("from behind", "back view", "back to the camera", "seen from the back")) else (
-        "side" if any(w in cam for w in ("profile", "side view")) else None)
+    # 누가 어느 쪽에서 보이는지는 컷 글을 판정 모델이 읽고 인물마다 정한다(person_views). 카메라 글에 'from behind' 가 있으면 뒷모습으로 보던
+    # 문구 찾기는 'over-shoulder from behind Haru'(뒤에서 보는 건 하루)에서 화면의 유일한 인물 모쿠에게 뒷모습만 줘 얼굴 참고가 빠졌고,
+    # 고양이 수인이 사람 얼굴로 그려졌다(2026-10-24 등불 상점 4판 p002)
+    views = {} if text_only else person_views(p, NAMES)
     for cid in ([] if text_only else p.get("chars", [])):
+        view_kind = views.get(cid) if views.get(cid) in ("back", "side") else None
         vf = series / "assets" / "vast_refs" / f"{cid}_view_{view_kind}.png" if view_kind else None
-        if vf is not None and vf.exists() and (len(p.get("chars") or []) == 1 or re.sub(r"\s*\(.*?\)", "", NAMES[cid]).split()[-1].lower() in cam):
+        if vf is not None and vf.exists():
             refs.append(vf)
             lines.append(f"<image{len(refs)}> shows {NAMES[cid]} from the {view_kind}: use it for how the hair, build and clothes look from that side.")
             # 뒤에서 보는 인물(어깨 너머 숏의 앞사람)은 얼굴 참고를 주지 않는다: 얼굴을 주면 마주 선 다른 사람(이름 없는 관리)에게 그 얼굴을

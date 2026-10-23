@@ -96,8 +96,12 @@ def set_aside(sc: dict):
     """시나리오의 setup.set_aside(작업실 기준 경로 목록)를 series/_tmp/studio_test_<시각>/ 로 옮긴다(지우지 않는다). 새 회차·새 판을 만드는
     시나리오가 지난 시험의 결과(3화·v2)가 이미 있어 매번 다른 길로 갔다(2026-10-24): 같은 출발점에서 돌게 한다."""
     stamp = time.strftime("%m%d-%H%M%S")
-    for rel in (sc.get("setup") or {}).get("set_aside", []):
-        src = (ROOT / rel).resolve()
+    # 글로브(series/*lantern*): 새 작품 시나리오는 에이전트가 고르는 작품 이름(slug)이 판마다 달랐다(deungbul-shop · lantern-shop · deungbul-store)
+    paths = [p for rel in (sc.get("setup") or {}).get("set_aside", [])
+             for p in (sorted(ROOT.glob(rel)) if any(ch in rel for ch in "*?[") else [ROOT / rel])]
+    for src in paths:
+        rel = src.relative_to(ROOT).as_posix()
+        src = src.resolve()
         if not src.exists():
             continue
         if (ROOT / "series").resolve() not in src.parents:

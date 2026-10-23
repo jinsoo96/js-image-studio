@@ -616,6 +616,19 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
     if best and best[1] != dst.read_bytes() and best[0] < len(probs):
         dst.write_bytes(best[1])
         log(f"  {pid}: 가장 나은 판으로 되돌림")
+    # 다시 그려도 인물이 참고 그림과 다른 모습(생김새)이면 참고 그림을 준 머리·얼굴 편집. 컷 전체를 다시 보고 새 문제가 없을 때만 받는다
+    if "생김새" in best[2]:
+        kept = dst.read_bytes()
+        if fix_identity(c, cache, dst, series, p, seed, log):
+            r2, p2 = staging_check(series, ep_dir, dst, pid)
+            if "생김새" not in p2 and p2 <= best[2]:
+                best, r = (len(p2), dst.read_bytes(), p2), r2
+                if not p2:
+                    log(f"  {pid}: 생김새를 맞춘 뒤 연출 확인 통과")
+                    return set(), ""
+            else:
+                dst.write_bytes(kept)
+                log(f"  {pid}: 생김새를 맞춘 뒤 다시 보니 {sorted(p2)} → 맞추기 전 판으로 되돌림")
     # 고치기 사다리의 마지막 칸: 다시 그려도 안 고쳐진 시선·방향은 편집으로 돌린다(외출 p004 박 과장: 다시 그리면 또 정면, 편집은 한 번에 됐다)
     # 다른 작은 지적(소품 등)이 같이 남아도 돌린다: '시선만 남았을 때'로 묶어 두니 둘 다 카메라를 보는 컷이 그대로 나갔다(2026-10-24 야근의 온도 3화 p004)
     gaze = {"시선", "좌우시선"}
@@ -680,6 +693,40 @@ def fix_count(c, cache, dst: Path, p: dict, seed, log=print, hint: str = "") -> 
     dst.write_bytes(before)
     log(f"  {p['id']}: 남는 사람을 못 지움 → 되돌림")
     return False
+
+
+IDENT_FIX = ("<image2> is {name}'s reference portrait. In <image1>, redraw only {name}'s head and face so it is clearly the same character as <image2>: "
+             "the same kind of being, head shape, face, ears, fur or hair and its color. Problem to fix: {problem}. Keep {name}'s expression, head angle, "
+             "gaze, pose, hands, clothes and everything else in <image1> exactly the same: the other people, the place, the light, the framing and the art style.")
+
+
+def fix_identity(c, cache, dst: Path, series, p, seed, log=print) -> bool:
+    """참고 그림과 다른 모습으로 그려진 인물(생김새)만 그 인물 상반신 참고 그림을 <image2> 로 준 머리·얼굴 편집으로 맞춘다(qa_fix.FACE 와 같은 꼴).
+    다시 그려도 고양이 수인이 사람 얼굴로 나왔다(2026-10-24 등불 상점 4판 p002). 생김새가 다 풀리면 True, 아니면 원본으로 되돌리고 False."""
+    from hf_panel import names
+    nm = names(Path(series))
+    probs = run_checks(series, dst, p, only={"identity_each"}).get("생김새", [])
+    if not probs:
+        return False
+    before = dst.read_bytes()
+    for k, ch in enumerate(p.get("chars") or []):
+        name = re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch))
+        line = next((x for x in probs if x.startswith(f"{name} ")), "")
+        ref = Path(series) / "assets" / "vast_refs" / f"{ch}_bust.png"
+        if not line or not ref.exists():
+            continue
+        g = graph(IDENT_FIX.format(name=name, problem=line.split(": ", 1)[-1][:300]), [upload(c, dst, cache), upload(c, ref, cache)], 0, 0,
+                  seed % 100000 + 61 + k, 8, 1024, turbo=True, edit=True, series=series)
+        g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/identity"
+        hist = c.wait(c.queue(g), 600)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+        log(f"  {p['id']}: {name} 머리·얼굴을 참고 그림에 맞춤")
+    left = run_checks(series, dst, p, only={"identity_each"}).get("생김새", [])
+    if left:
+        dst.write_bytes(before)
+        log(f"  {p['id']}: 생김새 편집으로 못 고침({'; '.join(left)[:80]}) → 되돌림")
+        return False
+    return True
 
 
 TURN = ("In <image1>, change only where these people look and which way their face and shoulders turn, so the picture matches the panel text. "

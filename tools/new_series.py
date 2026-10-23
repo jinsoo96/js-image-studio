@@ -55,6 +55,9 @@ def normalize(spec: dict) -> dict:
     """받아 줄 수 있는 꼴은 고쳐 둔다: exprs 목록 → 쉼표 글. (2026-10-23 미사일 스튜디오 시험: 모델이 exprs 를 목록으로 넣어 프롬프트에 ['calm', ...] 가 들어갈 뻔)
     cast·locations 가 [{"id": ...}] 목록이면 {id: ...} 로(이름 칸 name → ko, 장소 설명 desc·description·text). 목록으로 넣은 설정에
     'list' object has no attribute 'values' 로 죽었다(2026-10-24 등불 상점 시험)."""
+    # 폴더 이름은 <slug>-hf 라 slug 끝의 -hf 는 뗀다(deungbul-store-hf → 폴더 deungbul-store-hf-hf 가 됐다, 2026-10-24)
+    if isinstance(spec.get("slug"), str) and spec["slug"].endswith("-hf"):
+        spec["slug"] = spec["slug"][:-3]
     if isinstance(spec.get("cast"), list):
         spec["cast"] = _by_id(spec["cast"], ())
         for c in spec["cast"].values():

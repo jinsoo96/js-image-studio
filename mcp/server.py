@@ -1299,7 +1299,7 @@ def new_series(spec: dict | str) -> str:
     """새 웹툰(작품)을 연다. spec 은 작품 설정 JSON(문자열):
     {"slug": "영어-소문자-하이픈", "title": "제목", "logline": "한 줄 소개", "genre": "장르·수위", "credit": "글: …  그림: …",
      "style": "English art style paragraph (line, coloring, light, faces, proportions)",
-     "cast": {"<id>": {"ko": "이름", "en": "English Name (age)", "role": "역할", "who": "English appearance (adult: ethnicity, age, height, build, hair, eyes, face)",
+     "cast": {"<id>": {"ko": "이름", "en": "English Name (age)", "role": "역할", "who": "English appearance. 첫 마디는 무엇인지(사람이면 'Korean man, 30s', 사람이 아니면 'an elderly grey cat beastman' 처럼 종족부터), 이어서 age, height, build, hair or fur, eyes, face",
                        "main": "English default outfit(기본 옷차림 글. 주인공 여부가 아니다)", "exprs": "six English expressions, comma separated"}},
      그림 모델에 들어가는 칸(who·main·exprs·locations·style·people_rule·era_rule)은 영어로 쓴다(한국어면 되돌려 보낸다).
      "locations": {"<name>": "English description: place, time of day, light, furniture"},

@@ -121,10 +121,13 @@ def make(series: Path, kind: str, name: str, seed=None) -> Path:
         hist = c.wait(c.queue(g), 1200)
         cand.parent.mkdir(parents=True, exist_ok=True)
         c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), cand)
-        if kind != "location" or name.endswith("_reverse") or k:
+        if kind != "location" or name.endswith("_reverse"):
             break
         want = place_mismatch(series, name, cand)
         if not want:
+            break
+        if k:  # 두 번째도 어긋나면 말없이 넘기지 않는다(등불 상점 4판: 다시 그린 것도 반쯤 바깥이었는데 아무 말이 없었다)
+            print(f"  {name}: 확인 필요 - 다시 그려도 장소 글은 {want} 인데 그림은 아님. 장소 글을 더 분명히(add_to_series) 하고 redo_candidate", flush=True)
             break
         print(f"  {name}: 장소 글은 {want} 인데 그림은 반대 → 한 번 더 그림", flush=True)
         prompt += "\n\n" + PLACE_FIX[want]
