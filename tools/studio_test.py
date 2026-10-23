@@ -124,6 +124,27 @@ def set_aside(sc: dict):
         print(f"  떠 둠 {src_rel} → {dst_rel}", flush=True)
 
 
+CLEAN_ROOTS = ("series", "exports")
+
+
+def snapshot(sc: dict) -> set:
+    """setup.cleanup 글로브에 지금 걸리는 것(시나리오 전부터 있던 것). 끝나고 이것은 지우지 않는다."""
+    return {p.resolve() for g in (sc.get("setup") or {}).get("cleanup", []) for p in ROOT.glob(g)}
+
+
+def cleanup(sc: dict, before: set):
+    """setup.cleanup 글로브 중 이 시나리오가 새로 만든 것만 지운다(시험 사본 회차·그 내보내기·모아보기).
+    시험이 남긴 사본·PDF 가 작품 폴더와 exports 에 쌓여 사용자가 '보기도 싫다'고 했다(2026-10-24). 전부터 있던 것(개항 화풍시안 등)은 건드리지 않는다."""
+    import shutil
+    for g in (sc.get("setup") or {}).get("cleanup", []):
+        for p in ROOT.glob(g):
+            rp = p.resolve()
+            if rp in before or not any((ROOT / r).resolve() in rp.parents for r in CLEAN_ROOTS):
+                continue
+            shutil.rmtree(rp) if rp.is_dir() else rp.unlink()
+            print(f"  치움 {rp.relative_to(ROOT.resolve())}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
@@ -137,6 +158,7 @@ def main():
     report = [f"# 스튜디오 시험 {time.strftime('%Y-%m-%d %H:%M')} (공급자 {a.provider or '기본'})", ""]
     passed = 0
     for sc in pick:
+        before = snapshot(sc)
         set_aside(sc)
         t0, turns, conv = time.time(), [], ""
         for turn in [sc["prompt"]] + list(sc.get("then") or []):
@@ -149,6 +171,8 @@ def main():
             turns.append({"text": d.get("text", ""), "sum": summarize(d), "error": d.get("error", "")})
         secs = time.time() - t0
         fails = judge(sc, turns, secs)
+        wait_jobs(float((sc.get("setup") or {}).get("cleanup_wait_min", 20)) if (sc.get("setup") or {}).get("cleanup") else 0)
+        cleanup(sc, before)
         passed += not fails
         head = f"## {'통과' if not fails else '실패'} · {sc['name']} · {secs:.0f}초 · 도구 {sum(len(t['sum']['calls']) for t in turns)}번"
         print(head + ("" if not fails else " · " + "; ".join(fails)), flush=True)

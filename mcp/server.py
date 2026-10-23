@@ -846,14 +846,28 @@ SYNC_REVIEW_MAX = 3
 
 
 @mcp.tool()
-def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> str:
+def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "", deep: bool = False) -> str:
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
     folder="vast" 면 GPU 서버로 그린 컷을 본다(다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
-    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw."""
+    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw.
+    deep=True: 이미 그린 회차를 그리기 때와 같은 검사로 다시 본다(인물이 시트와 같은 모습인지·기준표 항목·팔손·사라진 사람 + 같은 장면 앞뒤 컷
+    이어짐, 독자 눈 거르기까지). "인물·상황이 안 지켜진 컷을 찾아 줘" 같은 회차 전체 점검에 쓴다(컷당 약 15초, 늘 작업으로).
+    ids·scene 을 비우면 인물이 나오는 컷 전부. 걸린 컷은 review/staging.json 에 남고 job_status 의 review 로 나온다."""
     ep = _episode(series, episode)
     sd = _series(series)
     sub = _folder(folder)
+    if deep:
+        only = ",".join(vision_review.pick_ids(ep, ",".join(_pids(ep, ids, "any")), scene)) if (ids or scene) else ""
+        n = len(only.split(",")) if only else sum(1 for p in (_json(ep / "panels.json", []) or []) if p.get("chars"))
+        _ensure_idle(sd)
+        steps = [{"label": f"연출·생김새 검사 {n}컷", "cmd": [PY, str(VAST / "qa_fix.py"), str(sd), ep.name, "--folder", sub, "--record"]
+                  + (["--only", only] if only else [])},
+                 {"label": "장면 이어짐 점검", "cmd": [PY, str(TOOLS / "continuity_check.py"), str(ep), "--record"] + (["--only", only] if only else []),
+                  "allow_fail": True}]
+        job = _start_job("review", ep, steps)
+        return (f"작업 시작 {job}: {n}컷 깊은 검수(약 {max(1, n * 15 // 60)}분). job_status('{job}') 의 review 에 사람 확인이 남은 컷이 나온다"
+                "(끝났다고 말하지 말고 작업 번호와 시간만 알린다)")
     vision_review.DIRS[:] = [sub] if sub != "panels_hf" else ["panels_hf", "panels"]
     try:
         pick = vision_review.pick_ids(ep, ",".join(_pids(ep, ids, "any")), scene)

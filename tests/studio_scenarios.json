@@ -11,31 +11,11 @@
    "answer_has": [
     "8"
    ]
-  }
- },
- {
-  "name": "회차_요약",
-  "prompt": "D+18 3화는 몇 컷이고 어떤 장면들로 돼 있어? 서아가 처음 나오는 컷 번호도.",
-  "checks": {
-   "must_call": [
-    "find"
-   ],
-   "max_tool_errors": 1,
-   "max_seconds": 180,
-   "answer_has": [
-    "34"
+  },
+  "setup": {
+   "cleanup": [
+    "exports/_sheets/*"
    ]
-  }
- },
- {
-  "name": "옛_작품_둘러보기",
-  "prompt": "무대 뒤 작품에 나오는 인물들 시트를 한 장으로 보여주고, 각자 어떤 역할인지 짧게 알려줘.",
-  "checks": {
-   "must_call": [
-    "contact_sheet"
-   ],
-   "max_tool_errors": 1,
-   "max_seconds": 240
   }
  },
  {
@@ -75,25 +55,83 @@
   }
  },
  {
-  "name": "그림체_비교",
-  "gpu": true,
-  "prompt": "새 웹툰 그림체 후보 2개를 장면 1개(비 오는 버스 정류장, 20대 남녀)로 비교표 만들어 보여줘.",
+  "name": "옛_작품_둘러보기",
+  "prompt": "무대 뒤 작품에 나오는 인물들 시트를 한 장으로 보여주고, 각자 어떤 역할인지 짧게 알려줘.",
   "checks": {
    "must_call": [
-    "style_compare",
-    "job_status"
+    "contact_sheet"
    ],
-   "max_tool_errors": 2,
-   "max_seconds": 400
+   "max_tool_errors": 1,
+   "max_seconds": 240
+  },
+  "setup": {
+   "cleanup": [
+    "exports/_sheets/*mudae*"
+   ]
   }
  },
  {
-  "name": "옛_회차_대사_고치고_합성",
+  "name": "회차_요약",
+  "prompt": "개항 1화 v3 는 몇 컷이고 어떤 장면들로 돼 있어? 사에코가 처음 나오는 컷 번호도.",
+  "checks": {
+   "max_tool_errors": 1,
+   "max_seconds": 240,
+   "answer_has": [
+    "111"
+   ]
+  }
+ },
+ {
+  "name": "그림체_비교",
   "gpu": true,
-  "prompt": "야근의 온도 1화 v8 에서 p008 컷 윤재 대사를 '따뜻하게 마셔. 식기 전에.' 로 바꾸고, 합성해서 PDF 다시 만들어 줘.",
+  "prompt": "개항 그림체(지금 것) 하고 더 밝은 수채 느낌 후보 하나를, 장면 1개(1930년대 경성역 승강장, 양복 입은 20대 남자)로 나란히 비교표 만들어 보여줘.",
+  "checks": {
+   "must_call": [
+    "style_compare"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 600
+  },
+  "setup": {
+   "cleanup": [
+    "exports/*/화풍시안_*",
+    "exports/_sheets/*화풍시안*"
+   ]
+  }
+ },
+ {
+  "name": "개항_깊은_검수",
+  "gpu": true,
+  "prompt": "개항 1화 v3 전체를 꼼꼼히 검사해서, 인물 생김새가 시트와 다르거나 장면 상황(이어짐)이 안 지켜진 컷을 찾아 줘.",
   "then": [
    {
-    "say": "다 됐어? 바뀐 컷 확인해 줘.",
+    "say": "다 됐어? 걸린 컷 목록이랑 그 컷들 모아보기 보여 줘.",
+    "wait_jobs_min": 60
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "review_panels"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 5400,
+   "answer_has": [
+    "p0"
+   ]
+  },
+  "setup": {
+   "cleanup": [
+    "exports/_sheets/*"
+   ]
+  }
+ },
+ {
+  "name": "개항_대사_고치고_합성",
+  "gpu": true,
+  "prompt": "개항 1화 v9 에서 p013 컷 금수 대사를 '알아. 오늘도 혼자 가.' 로 바꾸고, 합성해서 PDF 다시 만들어 줘.",
+  "then": [
+   {
+    "say": "다 됐어? PDF 링크 줘.",
     "wait_jobs_min": 15
    }
   ],
@@ -104,209 +142,89 @@
    "max_tool_errors": 2,
    "max_seconds": 1500,
    "answer_has": [
-    "식기 전에"
+    "PDF"
    ]
   },
   "setup": {
-   "set_aside": [
-    "series/overtime-heat-hf/episodes/ep001_v8"
-   ],
    "copy": [
     [
-     "series/overtime-heat-hf/episodes/ep001",
-     "series/overtime-heat-hf/episodes/ep001_v8"
+     "series/gaehang-hf/episodes/ep001_v3",
+     "series/gaehang-hf/episodes/ep001_v9"
     ]
+   ],
+   "cleanup": [
+    "series/gaehang-hf/episodes/ep001_v9",
+    "exports/*/개항*_v9*",
+    "exports/_sheets/*ep001_v9*",
+    "exports/_files/*ep001_v9*"
    ]
   }
  },
  {
-  "name": "다음_화_그리기",
+  "name": "개항_컷_미리보기_비교",
   "gpu": true,
-  "prompt": "야근의 온도 2화, 관문 통과시키고 그려 줘. 새 장소 시안이 나오면 보여 줘.",
+  "prompt": "개항 1화 v9 p008 금수 표정을 더 굳은 얼굴(입술을 깨물고 눈썹을 찌푸린)로 바꾸면 어떤지, 본편은 그대로 두고 미리 보여 줘. 원래랑 비교해서.",
   "then": [
    {
-    "say": "다 됐어? 시안 있으면 보여 줘.",
-    "wait_jobs_min": 30
-   },
-   {
-    "say": "시안 좋아, 그대로 쓰고 끝까지 그려 줘."
-   },
-   {
-    "say": "다 됐어?",
-    "wait_jobs_min": 40
+    "say": "다 됐어? 원래 거랑 나란히 보여 줘.",
+    "wait_jobs_min": 10
    }
   ],
   "checks": {
    "must_call": [
-    "prepare_episode",
-    "make_episode",
-    "job_status"
+    "preview_panel"
    ],
-   "max_tool_errors": 3,
-   "max_seconds": 6000
+   "max_tool_errors": 2,
+   "max_seconds": 1200
   },
   "setup": {
-   "set_aside": [
-    "series/overtime-heat-hf/episodes/ep002/panels_hf",
-    "series/overtime-heat-hf/episodes/ep002/panels_hf_vast",
-    "series/overtime-heat-hf/episodes/ep002/panels",
-    "series/overtime-heat-hf/episodes/ep002/out",
-    "series/overtime-heat-hf/episodes/ep002/review",
-    "series/overtime-heat-hf/episodes/ep002/render_status.json"
+   "copy": [
+    [
+     "series/gaehang-hf/episodes/ep001_v3",
+     "series/gaehang-hf/episodes/ep001_v9"
+    ]
+   ],
+   "cleanup": [
+    "series/gaehang-hf/episodes/ep001_v9",
+    "exports/*/개항*_v9*",
+    "exports/_sheets/*ep001_v9*",
+    "exports/_files/*ep001_v9*"
    ]
   }
  },
  {
-  "name": "컷_미리보기_비교",
+  "name": "개항_다른_버전_만들기",
   "gpu": true,
-  "prompt": "야근의 온도 1화 p003 서진 표정을 더 지친 표정(눈 밑 그늘, 축 처진 눈)으로 바꾸면 어떤지 본편은 그대로 두고 미리 보여 줘. 원래랑 비교해서.",
-  "checks": {
-   "must_call": [
-    "preview_panel",
-    "compare_panel"
-   ],
-   "max_tool_errors": 2,
-   "max_seconds": 400
-  }
- },
- {
-  "name": "옛_형식_작품_컷_고치기",
-  "gpu": true,
-  "prompt": "무대 뒤 1화에서 대사 있는 컷 하나 골라서 그 인물 표정을 더 놀란 얼굴로 바꾼 미리 보기 만들고 전후 비교 보여 줘. 본편은 건드리지 마.",
-  "checks": {
-   "must_call": [
-    "preview_panel",
-    "compare_panel"
-   ],
-   "max_tool_errors": 2,
-   "max_seconds": 500
-  }
- },
- {
-  "name": "다른_버전_만들기",
-  "gpu": true,
-  "prompt": "야근의 온도 1화를 원본은 그대로 두고 v2 버전으로 하나 만들어 줘. v2 에서는 p008 컷만 윤재가 캔커피를 서진 볼에 살짝 대는 장난스러운 구도로 바꿔서 그리고, 합성해서 내보내 줘.",
+  "prompt": "개항 1화 v9 에서 p013 컷만 금수가 기차 창밖을 내다보며 혼잣말하는 옆모습 구도로 바꿔서 다시 그리고, 합성해서 내보내 줘.",
   "then": [
    {
-    "say": "그 정도면 됐어. 그대로 합성해서 내보내 줘.",
-    "wait_jobs_min": 30
-   },
-   {
-    "say": "다 됐어? 원본이랑 v2 파일 이름 알려 줘.",
-    "wait_jobs_min": 30
+    "say": "다 됐어? 바뀐 컷이랑 PDF 링크 보여 줘.",
+    "wait_jobs_min": 25
    }
   ],
   "checks": {
    "must_call": [
-    "new_episode",
     "vast_draw"
    ],
    "max_tool_errors": 3,
-   "max_seconds": 3600,
-   "answer_has": [
-    "v2"
-   ]
-  },
-  "setup": {
-   "set_aside": [
-    "series/overtime-heat-hf/episodes/ep001_v2"
-   ]
-  }
- },
- {
-  "name": "새_회차_끝까지",
-  "gpu": true,
-  "prompt": "야근의 온도 3화를 4컷으로 짧게 만들어서 그려 줘. 금요일 밤 회사 옥상, 서진이 윤재에게 그날 캔커피 고마웠다고 처음으로 먼저 말을 건네고, 윤재가 살짝 웃는 이야기. 관문 통과하면 바로 그리고 합성·내보내기까지.",
-  "then": [
-   {
-    "say": "다 됐어? 파일 링크 알려 줘.",
-    "wait_jobs_min": 40
-   }
-  ],
-  "checks": {
-   "must_call": [
-    "set_storyboard",
-    "set_panels",
-    "prepare_episode",
-    "make_episode"
-   ],
-   "max_tool_errors": 4,
-   "max_seconds": 4000,
-   "answer_has": [
-    "3화"
-   ]
-  },
-  "setup": {
-   "set_aside": [
-    "series/overtime-heat-hf/episodes/ep003"
-   ]
-  }
- },
- {
-  "name": "걸린_컷_고치기",
-  "gpu": true,
-  "prompt": "야근의 온도 3화 p002 컷이 이상해. 어깨 너머로 보이는 윤재 몸통이 둘로 겹쳐 그려졌어. 검수 기록이랑 컷 설명도 확인해서 틀린 데 있으면 같이 고치고, 그 컷만 다시 그려서 합성하고 내보내 줘.",
-  "then": [
-   {
-    "say": "다 됐어? p002 어떻게 고쳤는지랑 PDF 링크 알려 줘.",
-    "wait_jobs_min": 30
-   }
-  ],
-  "checks": {
-   "must_call": [
-    "panel_info",
-    "vast_draw"
-   ],
-   "max_tool_errors": 3,
-   "max_seconds": 3000,
-   "answer_has": [
-    "p002"
-   ]
-  },
-  "manual": true
- },
- {
-  "name": "새_작품_판타지_수인",
-  "gpu": true,
-  "manual": true,
-  "prompt": "새 웹툰 하나 만들자. 제목 「등불 상점」, 장르 판타지. 인물은 둘: 하루(20살 여자 떠돌이 상인, 여우 귀와 여우 꼬리가 있는 수인, 주황색 단발), 모쿠(늙은 고양이 수인 남자, 회색 털, 둥근 안경, 등불 상점 주인). 장소는 밤 골목 끝의 작은 등불 상점 안. 그림체는 부드러운 수채 판타지 웹툰. 설정 만들고 인물 시트랑 장소 그림까지 만들어 줘.",
-  "then": [
-   {
-    "say": "다 됐어? 시트랑 장소 그림 보여 줘.",
-    "wait_jobs_min": 45
-   },
-   {
-    "say": "좋아. 1화를 4컷으로 짧게: 하루가 비에 젖은 채 상점 문을 열고 들어오고, 모쿠가 안경 너머로 쳐다보다 '등불 하나에 이야기 하나.'라고 말하고, 하루가 주머니에서 작은 이야기 구슬을 꺼내 내미는 장면. 콘티 짜서 관문 통과시키고 그려 줘.",
-    "wait_jobs_min": 5
-   },
-   {
-    "say": "시안 있으면 그대로 쓰고 끝까지 그려서 합성하고 내보내 줘.",
-    "wait_jobs_min": 40
-   },
-   {
-    "say": "다 됐어? PDF 링크랑 사람 확인 남은 컷 있으면 알려 줘.",
-    "wait_jobs_min": 40
-   }
-  ],
-  "checks": {
-   "must_call": [
-    "new_series",
-    "draw_candidates",
-    "set_storyboard",
-    "set_panels",
-    "make_episode"
-   ],
-   "max_tool_errors": 6,
-   "max_seconds": 9000,
+   "max_seconds": 2700,
    "answer_has": [
     "PDF"
    ]
   },
   "setup": {
-   "set_aside_title": [
-    "등불 상점"
+   "copy": [
+    [
+     "series/gaehang-hf/episodes/ep001_v3",
+     "series/gaehang-hf/episodes/ep001_v9"
+    ]
+   ],
+   "cleanup": [
+    "series/gaehang-hf/episodes/ep001_v9",
+    "exports/*/개항*_v9*",
+    "exports/_sheets/*ep001_v9*",
+    "exports/_files/*ep001_v9*"
    ]
-  },
-  "why": "수인(짐승 머리·귀·꼬리) 인물로 새 작품을 처음부터 끝까지. 첫 판(2026-10-24): 모쿠가 사람 노인으로, 실내 장소가 가게 바깥으로 그려졌는데 검수·이어짐 점검이 말없이 넘겼다 → 생김새 검사(identity_each)·장소 안팎 검사·이어짐 기록"
+  }
  }
 ]

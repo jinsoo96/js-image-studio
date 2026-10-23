@@ -281,6 +281,7 @@ def main():
     ap.add_argument("--folder", default="panels_hf_vast")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--fix", action="store_true")
+    ap.add_argument("--record", action="store_true", help="검사 뒤 독자 눈 거르기를 하고 review/staging.json 에 남긴다(--fix 없이)")
     ap.add_argument("--from-report", help="검사를 다시 하지 않고 이 qa_*.json 의 걸린 컷만 고친다")
     ap.add_argument("--checks", help="이 기준표 항목만(쉼표, 예: emotion,mouth,footwear,body_view) + 같은 사람이 둘인지. 없으면 전체 연출 검사")
     ap.add_argument("--faces", help="얼굴 맞추기만: '컷:인물' 쉼표 목록(예 p481:sangsu,p061:eunyoung). 인물을 빼면 그 컷의 첫 인물")
@@ -307,6 +308,19 @@ def main():
         rep.parent.mkdir(exist_ok=True)
         rep.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
         print("보고서", rep)
+    if a.record:
+        # 그리기 때와 같은 끝손질: 독자 눈 거르기(짜임 결함·생김새는 남김) 뒤 review/staging.json 에 남긴다(MCP review_panels deep).
+        # 이미 그린 회차는 그리기 때 검사가 없던 판(생김새·이어짐 검사 전)이라 다시 볼 길이 필요했다(2026-10-24 사용자 '개항 인물·상황 안 지켜진 컷 많다')
+        n = 0
+        for pid, r in sorted(res.items()):
+            probs = set(r["probs"])
+            if probs:
+                probs, note = R.reader_filter(ep, ep / a.folder / f"{pid}.png", pid, probs, r["note"])
+                n += bool(probs)
+                R.record_review(ep, pid, probs, note)
+            else:
+                R.record_review(ep, pid, None)
+        print(f"사람 확인으로 남긴 컷 {n}개(review/staging.json)", flush=True)
     if not a.fix:
         return
     c, cache = Comfy(), {}
