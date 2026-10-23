@@ -706,7 +706,9 @@ def panel_info(series: str, episode: str, panel: str) -> str:
     cat = _catalog(ep)
     review = _json(ep / "review" / "staging.json", {}) or {}
     out = [{"series": _series(series).name, "episode": ep.name, "panel": pid, "status": cat[pid]["status"], "storyboard": cat[pid]["board"],
-            "description": cat[pid]["spec"], "reuse_source": cat[pid]["reuse"], "images": _images_of(ep, pid), "review": review.get(pid)}
+            "description": cat[pid]["spec"], "reuse_source": cat[pid]["reuse"], "images": _images_of(ep, pid), "review": review.get(pid),
+            # 같은 번호에 글자 붙은 컷이 있으면 알린다: 'p023i' 를 '23' 으로 줄여 불러 p023 을 답했다(2026-10-24 스튜디오 시험)
+            **({"same_number": sib} if (sib := sorted(x for x in cat if re.fullmatch(re.escape(pid) + r"[a-z]", x))) else {})}
            for pid in _pids(ep, panel, "any")]
     return json.dumps(out[0] if len(out) == 1 else out, ensure_ascii=False)
 
