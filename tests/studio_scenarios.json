@@ -1,0 +1,79 @@
+[
+ {
+  "name": "시트_모아보기",
+  "prompt": "개항 작품의 인물 시트들을 한 장으로 모아서 보여줘. 몇 명인지도 알려줘.",
+  "checks": {
+   "must_call": [
+    "contact_sheet"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 180,
+   "answer_has": [
+    "8"
+   ]
+  }
+ },
+ {
+  "name": "회차_요약",
+  "prompt": "D+18 3화는 몇 컷이고 어떤 장면들로 돼 있어? 서아가 처음 나오는 컷 번호도.",
+  "checks": {
+   "must_call": [
+    "find"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 180,
+   "answer_has": [
+    "34"
+   ]
+  }
+ },
+ {
+  "name": "옛_작품_둘러보기",
+  "prompt": "무대 뒤 작품에 나오는 인물들 시트를 한 장으로 보여주고, 각자 어떤 역할인지 짧게 알려줘.",
+  "checks": {
+   "must_call": [
+    "contact_sheet"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 240
+  }
+ },
+ {
+  "name": "버전_회차_이름",
+  "prompt": "개항 1화 v3 의 p023i 컷 설명이랑 그림 링크 알려줘.",
+  "checks": {
+   "must_call": [
+    "panel_info"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 180,
+   "answer_has": [
+    "p023i"
+   ]
+  }
+ },
+ {
+  "name": "작업_상태_정직",
+  "prompt": "지금 돌고 있거나 최근에 끝난 웹툰 작업 목록 보여주고, 끝난 것과 안 끝난 것을 구분해 줘.",
+  "checks": {
+   "must_call": [
+    "job_status"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 180
+  }
+ },
+ {
+  "name": "그림체_비교",
+  "gpu": true,
+  "prompt": "새 웹툰 그림체 후보 2개를 장면 1개(비 오는 버스 정류장, 20대 남녀)로 비교표 만들어 보여줘.",
+  "checks": {
+   "must_call": [
+    "style_compare",
+    "job_status"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 400
+  }
+ }
+]

@@ -371,7 +371,11 @@ def _catalog(ep: Path) -> dict:
     no_description(콘티엔 있는데 컷 설명이 없다)."""
     board = (_json(ep / "storyboard.json", {}) or {}).get("panels", [])
     draw = {x["id"]: x for x in _panels_json(ep)}
-    reuse = (_json(ep / "panels_spec.json", {}) or {}).get("reuse", {})
+    spec = _json(ep / "panels_spec.json", {}) or {}
+    reuse = spec.get("reuse", {})
+    # set_panels 로 넣고 아직 prepare_episode 를 안 돌린 컷도 설명이 있는 컷이다(panels.json 만 보면 '설명 없음'으로 나왔다)
+    for i, sp in (spec.get("panels") or {}).items():
+        draw.setdefault(i, {"id": i, **sp})
     out = {}
     for b in board:
         i = b["id"]
@@ -467,10 +471,21 @@ def _gpu_host() -> str:
     return f"{host} ({kind})"
 
 @mcp.tool()
-def guide() -> str:
-    """웹툰 하네스 안내: 단계(작품 열기 → 콘티 → 컷 설명 → 그리기 → 이어짐 → 합성·출판), 단계마다 통과해야 하는 관문, 돈·장비·내용 규칙.
-    어떤 에이전트든 일을 시작하기 전에 꼭 한 번 부른다(이 MCP 는 따로 시스템 프롬프트가 필요 없다)."""
-    return f"지금 그리는 GPU 서버: {_gpu_host()} (state/comfy_url.txt 또는 COMFY_URL)\n\n" + (ROOT / "mcp" / "HARNESS.md").read_text(encoding="utf-8")
+def guide(topic: str = "") -> str:
+    """웹툰 하네스 안내: 단계(작품 열기 → 콘티 → 컷 설명 → 그리기 → 이어짐 → 합성·출판), 단계마다 통과해야 하는 관문, 긴 작업·오류 다루기, 돈·장비·내용 규칙.
+    어떤 에이전트든 일을 시작하기 전에 꼭 한 번 부른다(이 MCP 는 따로 시스템 프롬프트가 필요 없다). topic='storage' 면 저장소 둘러보기·버전·그림체 바꾸기 예,
+    'all' 이면 전부."""
+    t = (ROOT / "mcp" / "HARNESS.md").read_text(encoding="utf-8")
+    parts = re.split(r"(?m)^(?=## )", t)
+    storage = [x for x in parts if x.startswith("## 4.")]
+    # 처음엔 핵심만: 전부(16KB)를 주니 32k 창의 작은 모델이 그것만으로 문맥을 많이 썼다(2026-10-24 스튜디오 시험). 저장소 예시는 필요할 때
+    if topic.strip().lower() in ("storage", "저장소", "4"):
+        body = "".join(storage)
+    elif topic.strip().lower() in ("all", "전부"):
+        body = t
+    else:
+        body = "".join(x for x in parts if not x.startswith("## 4.")) + ("\n(저장소 둘러보기·회차 버전·그림체 바꾸기 예는 guide('storage'))" if storage else "")
+    return f"지금 그리는 GPU 서버: {_gpu_host()} (COMFY_URL 또는 state/comfy_url.txt)\n\n" + body
 
 
 @mcp.tool()
@@ -543,12 +558,14 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
     """회차의 컷 목록: 번호·장면·인물·첫 대사, 그 컷 그림이 있는지(새로 그리는 컷은 panels_hf, 합성·재사용 컷은 panels)."""
     ep = _episode(series, episode)
     b = _json(ep / "storyboard.json", {}) or {}
-    new_ids = {p["id"] for p in _panels_json(ep)}
+    cat = _catalog(ep)  # 상태는 panel_info·find 와 같은 것으로(컷 설명이 아직 없는 컷을 '재사용'이라 적어 에이전트가 헷갈렸다, 2026-10-24)
+    label = {"new": "새로", "composite": "합성", "reuse": "재사용", "no_description": "설명 없음"}
     out = []
     for p in b.get("panels", []):
         pid = p["id"]
-        kind = "합성" if p.get("composite") else ("새로" if pid in new_ids else "재사용")
-        has = (ep / "panels_hf" / f"{pid}.png").exists() if kind == "새로" else (ep / "panels" / f"{pid}.png").exists()
+        st = cat.get(pid, {}).get("status", "no_description")
+        kind = label[st]
+        has = (ep / "panels_hf" / f"{pid}.png").exists() if st == "new" else (ep / "panels" / f"{pid}.png").exists()
         if only_missing and has:
             continue
         line = next((d.get("text", "") for d in p.get("dialogue", [])), "")
@@ -658,7 +675,9 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
         if sname:
             sd = ROOT / "series" / sname
             sj = _json(sd / "series.json", {}) if (sd / "series.json").exists() else {}
-            series_hits.append({"series": sname, "title": sj.get("title") or sname,
+            heads = [(sd / d).read_text(encoding="utf-8", errors="replace").lstrip().splitlines()[:1] for d in ("SERIES.md", "README.md") if (sd / d).exists()]
+            head = next((h[0][2:].strip() for h in heads if h and h[0].startswith("# ")), "")
+            series_hits.append({"series": sname, "title": sj.get("title") or head or sname,
                                 "episodes": sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir()),
                                 "characters": [c for c in (_json(sd / "cast.json", {}) or {}) if not c.startswith("_")],
                                 "assets": f"series/{sname}/assets (인물 시트 *_sheet.png · locations/ · vast_refs/)"})
@@ -1520,9 +1539,14 @@ def set_panels(series: str, episode: str, panels: dict | list | str = "", scenes
     try:  # JSON 글이든 객체든 받는다(작은 모델은 JSON 안의 JSON 글 이스케이프에서 자주 깨진다)
         add_p, add_s, add_r = ((json.loads(v) if v.strip() else {}) if isinstance(v, str) else (v or {}) for v in (panels, scenes, reuse))
     except ValueError as e:
-        return f"JSON 오류: {e}. 큰따옴표 JSON 객체로 다시"
+        # 큰 컷 설명을 JSON 글로 넣다 이스케이프가 깨져 같은 오류를 네 번 되풀이했다(2026-10-24 스튜디오 시험) → 객체로 넘기는 길을 알린다
+        return (f"JSON 오류: {e}. panels 는 JSON 글 대신 객체 그대로 넘기면 이스케이프가 필요 없다(예: panels={{\"p001\": {{\"chars\": [...], …}}}}). "
+                "한 번에 2~3컷씩 나눠 넣어도 된다")
     if isinstance(add_p, list):  # [{"id": "p003", ...}] 도 받는다
-        add_p = {x.pop("id"): x for x in add_p if isinstance(x, dict) and x.get("id")}
+        no_id = [i for i, x in enumerate(add_p, 1) if not (isinstance(x, dict) and x.get("id"))]
+        if no_id:  # 예전엔 id 없는 항목을 말없이 버려 '0개 넣음'만 돌려줬다
+            return _fail("missing_id", items=no_id, hint='목록이면 항목마다 "id"(p001 같은)를 넣거나, {"p001": {...}, "p002": {...}} 객체로 넘긴다')
+        add_p = {x.pop("id"): x for x in add_p}
     cast = _json(sd / "cast.json", {}) or {}
     locs = {p.stem for p in (sd / "assets" / "locations").glob("*.png")}
     for pid, sp in add_p.items():
