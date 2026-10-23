@@ -48,6 +48,8 @@ def norm_cut(c: dict) -> dict:
     for k in ("gap_after", "composite"):
         if c.get(k):
             out[k] = c[k]
+    # 옛 콘티에서 옮겨 온 컷의 다른 칸(prompt·layout·count 등 옛 도구가 읽는 것)은 그대로 둔다
+    out.update({k: v for k, v in c.items() if k not in out and k not in ("chars", "lines", "location", "mode")})
     return out
 
 

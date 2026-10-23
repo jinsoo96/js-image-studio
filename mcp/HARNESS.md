@@ -34,7 +34,7 @@
   episodes/<회차>/(storyboard_spec.json 콘티 표(옛 회차는 make_storyboard.py) · panels_spec.json 컷 설명 · panels_hf/ 본편 그림 · panels_hf_vast/ 다시 그린 그림 · out/ 합성본). `exports/<날짜>/` 내보낸 PDF·epub·예고편. `worklogs/` 작업 기록.
 - 보기: list_files(path, pattern='*.png') 목록·크기·고친 시각 · read_file 글 · contact_sheet(paths='폴더·파일·* 패턴') 그림(시트·시안·참고 그림·장소도) · file_link 사용자에게 줄 주소.
 - 다루기: copy_file(파일·폴더·패턴 → 작품 폴더·exports·worklogs, 그림 포함) · move_file(옮기기·이름 바꾸기, 같은 이름이 있으면 안 옮김, 그 작품에 작업이 돌면 안 옮김).
-- 예) 회차를 다른 버전으로: copy_file(episodes/ep001 → episodes/ep001_v2) → 콘티·컷 설명에서 바꿀 곳만 edit_file·set_panels → prepare_episode →
+- 예) 회차를 다른 버전으로: copy_file(episodes/ep001 → episodes/ep001_v2) → 바꿀 컷만 set_storyboard(같은 id 는 덮음)·set_panels 로 → prepare_episode →
   바뀐 컷만 vast_draw(ids) → compare_panel(redraw) → adopt_panel → compose → export(버전은 파일 이름 끝에 _v2 가 붙어 원본을 덮지 않는다).
   그림을 처음부터 다시 그릴 버전이면 new_episode(작품, 'ep001_v2', template='ep001') + copy_file(ep001/panels_spec.json → ep001_v2/) 로 그림 없이 연다.
 - 예) 인물 한 명 생김새·옷 바꾸기(작품 전체에 걸린다: 옛 회차를 다시 그려도 새 모습): add_to_series(작품, 'cast', <id>, …) → redo_candidate(sheet, <id>) →

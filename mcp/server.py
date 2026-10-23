@@ -1433,6 +1433,12 @@ def set_storyboard(series: str, episode: str, cuts: list | dict | str, title_car
         clean.append(c)
     f = ep / "storyboard_spec.json"
     spec = {} if replace else (_json(f, {}) or {})
+    if not replace and not f.exists() and (ep / "storyboard.json").exists():
+        # 코드로 된 콘티(make_storyboard.py)를 처음 표로 바꿀 때: 지금 콘티 컷을 표에 먼저 옮겨 둔다. 안 그러면 넘겨준 몇 컷만 남고
+        # 나머지 컷이 콘티에서 사라진다(옛 회차·copy_file 로 연 버전에서 컷 몇 개만 고칠 때)
+        old_board = _json(ep / "storyboard.json", {}) or {}
+        spec = {"cuts": [{**p_, "chars": p_.get("characters", [])} for p_ in old_board.get("panels", [])],
+                **({"title_card": old_board["title_card"]} if old_board.get("title_card") else {})}
     have = spec.get("cuts") or []
     pos = {c["id"]: i for i, c in enumerate(have)}
     for c in clean:
