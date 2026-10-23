@@ -74,7 +74,8 @@ mcp = FastMCP("webtoon-studio", instructions=(
     "차례: 새 작품 = new_series(설정 객체) → new_episode(작품, 'ep001') → set_storyboard(컷 목록) → set_panels(컷 설명) → prepare_episode(관문) → "
     "사용자가 그리자고 하면 make_episode. 다음 화 = new_episode → set_storyboard(replace=True) → set_panels → prepare_episode. "
     "컷 고치기 = panel_info → preview_panel 또는 edit_panel → compare_panel → adopt_panel. 그림체 고르기 = style_compare. "
-    "작업 결과는 JSON(state·review·drawn·links)이다. "
+    "작업 결과는 JSON(state·review·drawn·links)이다. 사용자가 말한 작품·회차·판 이름('1화 v3' 등)은 바꾸거나 빼지 말고 그대로 episode 에 넘긴다"
+    "(도구가 풀어 주고, 없으면 있는 판을 알려 준다: 그때는 없다고 사용자에게 말한다). "
     "콘티·컷 설명은 prepare_episode 의 관문(격리 judge)을 통과해야 make_episode 가 그린다. 그린 그림은 검수가 스스로 다시 그린다. "
     "오래 걸리는 일은 job_id 를 돌려주니 기다리지 말고 알린 뒤 답을 끝낸다. 사용자에게는 한국어로 답한다."))
 
@@ -204,7 +205,16 @@ def _episode(series: str, episode: str) -> Path:
     p = sd / "episodes" / episode
     if not re.fullmatch(r"ep\d{3}(_v\d+)?(_vast)?", episode) or not p.is_dir():
         have = sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir())
-        raise ValueError(_fail("unknown_episode", given=episode, series=sd.name, candidates=_near(episode, have) or have, episodes=have))
+        # 같은 화의 없는 판(1화 v8)이면 그 화의 판들과 가장 최근 판을 알린다: 후보로 ep001 하나만 주니 에이전트가 v8 을 찾아 서른 번 헤매다
+        # v3 을 통째로 복사해 v8 을 만들었다(2026-10-24 스튜디오 시험)
+        base = re.match(r"ep\d{3}", episode)
+        ver_only = re.fullmatch(r"v\d+", episode, re.I)  # 판만('v8')인데 그런 판이 없다
+        same = sorted((d for d in have if (base and d.startswith(base.group(0))) or ver_only),
+                      key=lambda d: (d[:5], int((re.search(r"_v(\d+)", d) or [0, 1])[1])))
+        extra = {"versions": same, "latest": same[-1],
+                 "hint": f"그 판은 없다. 이 화의 판은 {', '.join(same)}(가장 최근 {same[-1]}). 사용자에게 어느 판인지 묻거나, 가장 최근 판으로 한다고 "
+                         "알리고 진행한다. 새 판이 필요하면 new_episode(파일 복사로 만들지 않는다)"} if same and episode not in same else {}
+        raise ValueError(_fail("unknown_episode", given=episode, series=sd.name, candidates=_near(episode, have) or have, episodes=have, **extra))
     return p
 
 
@@ -649,8 +659,10 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
     if series:
         try:
             ep = _episode(series, q)
-        except ValueError:
+        except ValueError as e:
             ep = None
+            if re.fullmatch(r"\s*(?:(?:ep)?\s*\d+\s*(?:화)?\s*[_\s-]*(?:v\d+)?|v\d+)\s*(?:판)?\s*", q, re.I):  # 회차·판만 찾았는데 없다: 있는 판과 할 일
+                return str(e)
         if ep is not None:
             board = _json(ep / "storyboard.json", {}) or {}
             panels = board.get("panels", [])
@@ -728,7 +740,9 @@ def panel_info(series: str, episode: str, panel: str) -> str:
     ep = _episode(series, episode)
     cat = _catalog(ep)
     review = _json(ep / "review" / "staging.json", {}) or {}
-    out = [{"series": _series(series).name, "episode": ep.name, "panel": pid, "status": cat[pid]["status"], "storyboard": cat[pid]["board"],
+    # 같은 화의 다른 판을 알린다: 사용자가 말한 판(v8)을 빼고 원본(ep001)을 읽어 답한 적이 있다(2026-10-24 스튜디오 시험)
+    sib = sorted(d.name for d in ep.parent.iterdir() if d.is_dir() and d.name[:5] == ep.name[:5] and d.name != ep.name and not d.name.endswith("_vast"))
+    out = [{"series": _series(series).name, "episode": ep.name, **({"other_versions": sib} if sib else {}), "panel": pid, "status": cat[pid]["status"], "storyboard": cat[pid]["board"],
             "description": cat[pid]["spec"], "reuse_source": cat[pid]["reuse"], "images": _images_of(ep, pid), "review": review.get(pid),
             # 같은 번호에 글자 붙은 컷이 있으면 알린다: 'p023i' 를 '23' 으로 줄여 불러 p023 을 답했다(2026-10-24 스튜디오 시험)
             **({"same_number": sib} if (sib := sorted(x for x in cat if re.fullmatch(re.escape(pid) + r"[a-z]", x))) else {})}
@@ -1153,11 +1167,10 @@ def edit_file(path: str, old: str, new: str, series: str = "") -> str:
 
 @mcp.tool()
 def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> str:
-    """작업실 안 파일·폴더를 내용을 읽지 않고 그대로 복사한다: 긴 콘티·컷 설명, 그림, 회차 폴더 통째(다른 버전 만들기). src 는 파일·폴더·* 패턴,
-    dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더.
+    """작업실 안 파일·폴더를 내용을 읽지 않고 그대로 복사한다: 긴 콘티·컷 설명, 그림, 참고 그림 폴더. src 는 파일·폴더·* 패턴,
+    dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더. 회차를 다른 판으로 여는 건 new_episode(같은 화 번호면 콘티·컷 설명·그림을 옮긴다).
 
     series 를 주면 두 경로 모두 그 작품 폴더 기준. 이미 있는 파일은 overwrite=True 일 때만 덮고 원본은 state/mcp_backups/ 에 남긴다. 이미 있는 폴더는 덮지 않는다.
-    예: 회차를 다른 버전으로 → copy_file('series/x-hf/episodes/ep001', 'series/x-hf/episodes/ep001_v2') 뒤 바꿀 컷만 고쳐 다시 그린다.
     read_file → write_file 로 옮기지 않는다(수만 자가 컨텍스트에 들어와 끊긴다)."""
     # 모델이 3만 자를 읽어 들여 그대로 다시 치면 컨텍스트가 무거워지고 한 번에 다 못 써 끊겼다(2026-10-22 미사일 스튜디오)
     try:
@@ -1166,6 +1179,11 @@ def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> 
         return str(e)
     if not pairs:
         return json.dumps({"error": "no_match", "given": src}, ensure_ascii=False)
+    # 회차 폴더 통째 복사(1.1GB, 작업 기록·지난 판까지)로 새 판을 만들어 판 규칙(_v 번호·콘티 연결)을 건너뛰었다(2026-10-24 스튜디오 시험)
+    whole = [s for s, _ in pairs if s.is_dir() and s.parent.name == "episodes"]
+    if whole:
+        return _fail("use_new_episode", given=src, reason="회차 폴더는 복사하지 않는다",
+                     hint=f"새 판은 new_episode(series, '{whole[0].name.split('_')[0]}_v<번호>', template='{whole[0].name}')")
     rel = lambda p: p.resolve().relative_to(ROOT.resolve()).as_posix()  # noqa: E731
     bad = [rel(d) for _, d in pairs if not (_writable(d) or _storable(d))]
     if bad:
@@ -1230,8 +1248,9 @@ def move_file(src: str, dst: str, series: str = "") -> str:
 
 @mcp.tool()
 def new_episode(series: str, episode: str, template: str = "") -> str:
-    """새 회차 폴더를 앞 회차 틀로 연다: template 회차(기본 = 그 작품의 가장 최신 회차)의 make_storyboard.py·build_panels.py·trailer.json 을 복사한다.
-    그다음 read_file 로 열어 사용자 이야기에 맞게 고쳐 write_file 로 쓰고 prepare_episode 를 돌린다. 이미 있는 회차 폴더는 건드리지 않는다."""
+    """새 회차 폴더를 연다. 다음 화(ep003)면 template 회차(기본 = 그 작품의 가장 최신 회차)의 틀만 옮기고 콘티 표는 비워 둔다 → set_storyboard·set_panels.
+    같은 화의 다른 판(ep001_v4, template='ep001_v3' 처럼 바탕 판)이면 콘티·컷 설명·그림을 통째로 옮긴다 → 바꿀 컷만 고친다.
+    이미 있는 회차 폴더는 건드리지 않는다."""
     s = _series(series)
     if not re.fullmatch(r"ep\d{3}(_v\d+)?", episode.strip()):
         return "회차 이름은 ep003, ep003_v2 같은 꼴이다"

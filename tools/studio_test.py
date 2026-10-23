@@ -106,6 +106,14 @@ def set_aside(sc: dict):
         dst.parent.mkdir(parents=True, exist_ok=True)
         src.rename(dst)
         print(f"  옮겨 둠 {rel} → {dst.relative_to(ROOT)}", flush=True)
+    # setup.copy: [[바탕, 시험용]] 시험이 고칠 판을 바탕에서 새로 떠 둔다(지난 시험이 남긴 판에 기대지 않는다)
+    import shutil
+    for src_rel, dst_rel in (sc.get("setup") or {}).get("copy", []):
+        src, dst = (ROOT / src_rel).resolve(), (ROOT / dst_rel).resolve()
+        if (ROOT / "series").resolve() not in dst.parents or dst.exists():
+            raise SystemExit(f"copy 는 series/ 안의 없는 곳으로만(먼저 set_aside): {dst_rel}")
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_old", "_rejected", "_stage1", "*.log"))
+        print(f"  떠 둠 {src_rel} → {dst_rel}", flush=True)
 
 
 def main():
@@ -141,7 +149,7 @@ def main():
             report += [f"### 차례 {k}"] + [f"- `{n}` {args}" for n, args in t["sum"]["calls"]] + [f"- 오류: {e}" for e in t["sum"]["errors"]]
             report += ["", "> " + t["text"][:600].replace("\n", "\n> "), ""]
     report.insert(1, f"{passed}/{len(pick)} 통과")
-    out = ROOT / "state" / "logs" / f"studio_test_{time.strftime('%Y%m%d-%H%M')}.md"
+    out = ROOT / "state" / "logs" / f"studio_test_{time.strftime("%Y%m%d-%H%M%S")}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(report), encoding="utf-8")
     print(f"{passed}/{len(pick)} 통과 → {out}")
