@@ -171,6 +171,25 @@ def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit
 # 판단하는 모델(표정 칸 고르기·남는 사람 찾기)은 judge_ep.chat 하나로 부른다(주소·모델은 judge_ep.candidates)
 
 
+DARK_MEAN, DARK_TARGET = 14, 30  # 회색조 평균(0~255). 이보다 어두우면 밤 장면 정도(30)까지 어두운 곳만 들어 올린다
+
+
+def lift_dark(path: Path, log=print) -> bool:
+    """거의 까만 컷을 감마로 밝힌다(구도·색은 그대로, 다시 그리지 않음). 어두운 그림체(밤·등불) 작품에서 평균 밝기 6 인 컷이 검수를 지나
+    합성본에 그대로 들어갔다(2026-10-24 개항 v3 p015a 시험장). 그림 검수는 무엇이 그려졌는지만 보고 밝기는 보지 않는다."""
+    from PIL import Image, ImageStat
+    im = Image.open(path).convert("RGB")
+    mean = ImageStat.Stat(im.convert("L")).mean[0]
+    if mean >= DARK_MEAN:
+        return False
+    import math
+    g = max(0.35, math.log(DARK_TARGET / 255) / math.log(max(mean, 1) / 255))  # mean^g 가 목표가 되는 감마(너무 세게는 안 올림)
+    lut = [round(255 * (i / 255) ** g) for i in range(256)]
+    im.point(lut * 3).save(path)
+    log(f"  {path.stem}: 너무 어두워(평균 {mean:.0f}) 감마 {g:.2f} 로 어두운 곳을 밝힘 → {ImageStat.Stat(Image.open(path).convert('L')).mean[0]:.0f}")
+    return True
+
+
 def pick_expr(series, cid, name, text):
     """컷 연기 글에 가장 가까운 표정 칸 번호(1~12)를 사내 Qwen 이 고른다. 이 인물 얘기가 없거나 맞는 칸이 없으면 None.
     (2026-10-15 사용자 "연기 강도 강하게": Qwen Image 는 참고 얼굴의 표정을 그대로 따라 그린다 → 맞는 칸을 넣으면 그 연기가 나온다)"""
@@ -622,6 +641,7 @@ def main():
             if cp:
                 raise RuntimeError(f"참고 그림 {cp.name} 를 거의 그대로 내놓음(ComfyUI 0.42 버그 #17187, 서버를 재시작할 때까지 계속된다): "
                                    "다른 사람 작업이 없을 때 vast/comfy_admin.py restart")
+            lift_dark(dst, log)  # 검사들보다 먼저: 까만 그림에선 검수가 같은 사람 둘(개항 p015a)을 못 봤다
             if args.fix:  # 2단: 남는 사람 지우기(2026-10-16, 무대 뒤 소파 6명 → 3명, D+18 p003 우빈 둘 → 하나)
                 from refine import fix_extras
                 fix_extras(c, cache, dst, series, p, seed=sd % 100000, log=log)

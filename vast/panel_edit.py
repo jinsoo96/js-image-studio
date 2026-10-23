@@ -102,6 +102,8 @@ def _run_edit(series: Path, src: Path, refs: list, prompt: str, seed: int, dst: 
     if st.get("status_str") == "error":
         raise SystemExit("편집 실패: " + str(next((m[1].get("exception_message") for m in st.get("messages", []) if m[0] == "execution_error"), ""))[:300])
     c.download(next(i for o in h["outputs"].values() for i in o.get("images", [])), dst)
+    from comfy_panel import lift_dark  # 편집 모델도 어두운 그림을 더 어둡게 내놓았다(2026-10-24 개항 p015a 평균 12) → 그리기와 같은 규칙
+    lift_dark(dst)
 
 
 def edit(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: int = 0) -> dict:
