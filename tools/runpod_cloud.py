@@ -130,6 +130,9 @@ def pod_env(mode, token):
         "IDLE_MIN": str(c["idle_min"]),
         "MAX_HOURS": str(c["max_hours"]),
         "ON_IDLE": "stop" if c["keep_pod"] else "terminate",
+        # 이미지가 CUDA 12.8 을 요구(NVIDIA_REQUIRE_CUDA)해 드라이버가 12.4~12.7 인 기계에선 컨테이너가 아예 안 떴다(2026-10-23 L40S 31분 runtime 없음),
+        # 12.8 이상만 고르면 L40S 재고가 0. Ada(L40S) 까지는 CUDA 12.x 하위 호환으로 cu128 torch 가 돌아 그 검사만 끈다(설정 nvidia_disable_require)
+        **({"NVIDIA_DISABLE_REQUIRE": "1"} if c.get("nvidia_disable_require") else {}),
     }
 
 
@@ -165,6 +168,10 @@ def create_pod(mode="comfy", image=None):
         # 비우면 거르지 않는다: 2026-10-22 RTX PRO 6000 재고가 많은데도 ["12.8","12.9","13.0"] 이면 늘 "no instances currently available"
         if c.get("allowed_cuda"):
             body["allowedCudaVersions"] = c["allowed_cuda"]
+        # 데이터센터를 고를 수 있다(설정 data_centers). 2026-10-23 L40S 다섯 대 중 정상으로 뜬 두 대가 US-NC-1, 나머지는 컨테이너가 안 뜨거나 pip 가 멈춤.
+        # 첫 바퀴만 그곳에서 찾고, 없으면 다음 바퀴부터는 어디서든 찾는다
+        if c.get("data_centers") and len(errors) < len(types):
+            body["dataCenterIds"] = c["data_centers"]
         try:
             pod = api("POST", "/pods", body)
         except RuntimeError as e:
@@ -194,6 +201,10 @@ def wait_ready(pod_id, timeout_min, mode="comfy"):
     url = proxy_url(pod_id)
     t0, seen, ckpt_at, req_at = time.time(), 0, None, None
     lines = []
+    # 멈춘 기계는 일찍 버린다(2026-10-23 L40S: 컨테이너가 31분 안 뜸 · /workspace 가 네트워크 저장소라 pip 가 27분에 500MB, CPU 1%).
+    # 로그가 아예 없이 25분(이미지 받기, 캐시 없는 기계는 10GB 이미지에 12분 넘게 걸렸다), 또는 체크포인트 전까지 로그가 15분 그대로면
+    # 실패로 보고 ensure_pod 가 새 파드를 만든다
+    changed_at = t0
     while time.time() - t0 < timeout_min * 60:
         try:
             if mode == "agent":
@@ -204,7 +215,13 @@ def wait_ready(pod_id, timeout_min, mode="comfy"):
             with urllib.request.urlopen(urllib.request.Request(url + "/system_stats", headers=UA), timeout=10) as r:
                 stats = json.loads(r.read())
         except Exception:
-            lines = boot_log(pod_id) or lines
+            got = boot_log(pod_id)
+            if got and len(got) != len(lines):
+                changed_at = time.time()
+            lines = got or lines
+            if not ckpt_at and ((not lines and time.time() - t0 > 25 * 60) or (lines and time.time() - changed_at > 15 * 60)):
+                print(f"  파드가 {(time.time() - changed_at) / 60:.0f}분째 진행이 없다(컨테이너가 안 뜨거나 설치가 멈춤): 버리고 새로 만든다", flush=True)
+                break
             for line in lines[seen:]:
                 if line.startswith("[boot]") or line.startswith("[watchdog]") or "Error" in line or "Traceback" in line:
                     print("  " + line[:300], flush=True)
@@ -408,8 +425,13 @@ def ensure_pod(mode="comfy", image=None):
             save_state(stopped_at=None)
             return pod["id"], wait_ready(pod["id"], c["resume_timeout_min"])
         except Exception as e:
-            print(f"다시 켜지 못했다({str(e)[:200]}). 이 파드를 지우고 새로 만든다", flush=True)
-            terminate(pod["id"])
+            # 지우지 않고 멈춘 채 남긴다: 볼륨에 받은 모델·학습한 LoRA 가 있을 수 있다(2026-10-23 그 기계에 빈 GPU 가 없어 못 켜자
+            # 볼륨째 지우고 새로 만들어, 안을 확인하지 못한 채 잃었다). 남긴 파드는 state 의 left_pods 에 적고, 필요 없으면 down 으로 지운다
+            print(f"다시 켜지 못했다({str(e)[:200]}). 이 파드는 멈춘 채 남기고(볼륨 보관) 새로 만든다: {pod['id']}", flush=True)
+            with contextlib.suppress(Exception):
+                if (get_pod(pod["id"]) or {}).get("desiredStatus") == "RUNNING":
+                    api("POST", f"/pods/{pod['id']}/stop")
+            save_state(left_pods=sorted(set(load_state().get("left_pods", [])) | {pod["id"]}))
     # 기계를 잘못 만나면(드라이버·디스크 문제) 그 파드를 지우고 한 번 더 새로 만든다
     for attempt in (1, 2):
         pod_id = create_pod(mode, image)
@@ -471,7 +493,7 @@ def main():
         s, llm = load_state(), cfg()["llm"]
         script = (ROOT / "cloud" / "runpod_llm.sh").read_text(encoding="utf-8").replace("\r\n", "\n")
         env = {"LLM_REPO": llm["repo"], "LLM_NAME": llm["name"], "VLLM_VERSION": llm["vllm_version"],
-               "GPU_UTIL": str(llm["gpu_util"]), "MAX_LEN": str(llm["max_len"]),
+               "GPU_UTIL": str(llm["gpu_util"]), "MAX_LEN": str(llm["max_len"]), "LLM_ARGS": llm.get("args", ""),
                "SCRIPT_B64": base64.b64encode(script.encode()).decode("ascii")}
         print(agent_run(s["pod_id"], "llm", "echo $SCRIPT_B64 | base64 -d > /workspace/llm.sh && bash /workspace/llm.sh", env))
         print(f"로그: {agent_url(s['pod_id'])}/job_llm.log · 주소: https://{s['pod_id']}-8000.proxy.runpod.net/v1 (모델 {llm['name']}, 키는 파드 env AGENT_TOKEN)")

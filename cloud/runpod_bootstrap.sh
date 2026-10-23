@@ -126,7 +126,18 @@ while True:
             idle = idle + 1 if not busy else 0
         else:
             q = json.loads(urllib.request.urlopen("http://127.0.0.1:8188/queue", timeout=5).read())
-            busy = q.get("queue_running") or q.get("queue_pending") or llm_busy()
+            # 에이전트 작업(받기·학습 등)과, 아직 응답하기 전인 LLM 작업(vLLM 설치·모델 내려받기·올리기)도 일하는 중으로 센다.
+            # 놀면 멈춤을 15분으로 줄이자 4비트 LLM(17.6GB)을 받는 도중에 파드가 멈췄다(2026-10-23 L40S). 다 뜬 LLM 은 llm_busy 가 본다
+            jobs = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/jobs", timeout=5).read())
+            act = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/activity", timeout=5).read())
+            llm_up = True
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=5)
+            except Exception:
+                llm_up = False
+            agent_busy = (any(j["running"] for k, j in jobs.items() if k != "llm") or act.get("ago", 1e9) < 120
+                          or ((jobs.get("llm") or {}).get("running") and not llm_up))
+            busy = q.get("queue_running") or q.get("queue_pending") or llm_busy() or agent_busy
             idle = idle + 1 if not busy else 0
     except Exception:
         idle = 0
@@ -291,4 +302,5 @@ if [ "${MODE:-comfy}" = "agent" ]; then
   echo "[boot] agent ready $(date -u)"
   exec sleep infinity
 fi
-exec $PY main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch
+# 같은 GPU 를 vLLM(48GB 의 절반)과 나눠 쓴다: 1GB 를 남겨 두고 모자라면 내려 놓게(2026-10-23 L40S 에서 손님 많은 컷 편집 중 멈춤)
+exec $PY main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --reserve-vram 1

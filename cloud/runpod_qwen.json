@@ -1,233 +1,111 @@
 {
- "_why": "2026-10-22 회사 공용 vast(5090)가 꺼져 사용자 개인 RunPod 로 옮김. vast 와 같은 구성(ComfyUI 0.42.1 + Qwen Image 2.1 UC + 우리 학습 노드·패치 + mcp_use_ 워크플로우). RUNPOD_PROFILE=runpod_qwen 으로 고른다. allowed_cuda 는 비움: 걸면 재고가 있어도 파드가 안 잡혔다(2026-10-22). RTX PRO 6000(Blackwell)은 드라이버가 늘 12.8 이상.",
- "image": "runpod/pytorch:1.4.1-cu1281-torch2121-ubuntu2404",
- "gpu_types": [
-  "NVIDIA RTX PRO 6000 Blackwell Server Edition",
-  "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
-  "NVIDIA A100-SXM4-80GB",
-  "NVIDIA H100 80GB HBM3",
-  "NVIDIA H100 NVL"
- ],
- "cloud_types": [
-  "SECURE"
- ],
- "allowed_cuda": [],
- "comfyui_ref": "v0.42.1",
- "comfy_start_timeout_min": 20,
- "download_timeout_min": 30,
- "container_disk_gb": 60,
- "keep_pod": true,
- "volume_gb": 200,
- "stopped_storage_usd_per_gb_month": 0.2,
- "checkpoint": {
-  "name": "",
-  "url": ""
- },
- "idle_min": 30,
- "max_hours": 14,
- "ready_timeout_min": 60,
- "resume_timeout_min": 15,
- "stale_stopped_days": 14,
- "name_prefix": "webtoon-qwen",
- "upload_models": [],
- "custom_nodes": [
-  {
-   "dir": "ComfyUI-Anima_IP-Adapter",
-   "url": "https://github.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter.git",
-   "ref": "6b77cd0c367d76402174ace2be50d3cb6aa77855"
+  "_why": "2026-10-22 회사 공용 vast(5090)가 꺼져 사용자 개인 RunPod 로 옮김. vast 와 같은 구성(ComfyUI 0.42.1 + Qwen Image 2.1 UC + 우리 학습 노드·패치 + mcp_use_ 워크플로우). RUNPOD_PROFILE=runpod_qwen 으로 고른다. allowed_cuda 는 비움: 걸면 재고가 있어도 파드가 안 잡혔다(2026-10-22). RTX PRO 6000(Blackwell)은 드라이버가 늘 12.8 이상. 2026-10-23 사용자 '쓸데없는 모델 빼고 스펙 낮춘 걸로': RTX PRO 6000 96GB($2.49/h) → L40S 48GB($1.09/h, 없으면 같은 Ada 48GB 인 L40·RTX 6000 Ada). 그림 모델 Qwen Image 2.1 은 7B(fp8 6.6GB)라 그림만은 약 22GB, 96GB 는 LLM 27B FP8 때문이었다. 쓰지 않던 MOSS·Anima·Noct-Q(10-15 이후 작업 0번)와 그 노드를 빼고 볼륨 200→100GB, 놀면 멈춤 30→15분.",
+  "image": "runpod/pytorch:1.4.1-cu1281-torch2121-ubuntu2404",
+  "gpu_types": [
+    "NVIDIA L40S",
+    "NVIDIA L40",
+    "NVIDIA RTX 6000 Ada Generation"
+  ],
+  "cloud_types": [
+    "SECURE"
+  ],
+  "allowed_cuda": [],
+  "comfyui_ref": "v0.42.1",
+  "comfy_start_timeout_min": 20,
+  "download_timeout_min": 30,
+  "container_disk_gb": 60,
+  "keep_pod": true,
+  "volume_gb": 100,
+  "stopped_storage_usd_per_gb_month": 0.2,
+  "checkpoint": {
+    "name": "",
+    "url": ""
   },
-  {
-   "dir": "ComfyUI-Cosmos-Reference",
-   "url": "https://github.com/Mirumo0u0/ComfyUI-Cosmos-Reference.git",
-   "ref": "6fd6b27e7c72847d69ad74f4c9cb68ce91b319df"
+  "idle_min": 15,
+  "max_hours": 14,
+  "ready_timeout_min": 60,
+  "resume_timeout_min": 15,
+  "stale_stopped_days": 14,
+  "name_prefix": "webtoon-qwen",
+  "upload_models": [],
+  "custom_nodes": [],
+  "extra_files": {
+    "custom_nodes/webtoon_train_lora/__init__.py": "vast/server_nodes/webtoon_train_lora/__init__.py",
+    "patches/qwen_image21_gated_residual_pr16654.diff": "vast/server_patches/qwen_image21_gated_residual_pr16654.diff"
   },
-  {
-   "dir": "ComfyUI-AnimaFastTrain",
-   "url": "https://github.com/quinteroac/ComfyUI-AnimaFastTrain.git",
-   "ref": "722a49178ca97930a8e867d3593b86d2cc3dcfe6"
-  }
- ],
- "extra_files": {
-  "custom_nodes/webtoon_train_lora/__init__.py": "vast/server_nodes/webtoon_train_lora/__init__.py",
-  "patches/qwen_image21_gated_residual_pr16654.diff": "vast/server_patches/qwen_image21_gated_residual_pr16654.diff"
- },
- "patches": [
-  "patches/qwen_image21_gated_residual_pr16654.diff"
- ],
- "extra_models": [
-  {
-   "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
-   "file": "qwen-image-2.1-UC-fp8.safetensors",
-   "dest": "diffusion_models/qwen-image-2.1-UC-fp8.safetensors"
+  "patches": [
+    "patches/qwen_image21_gated_residual_pr16654.diff"
+  ],
+  "extra_models": [
+    {
+      "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
+      "file": "qwen-image-2.1-UC-fp8.safetensors",
+      "dest": "diffusion_models/qwen-image-2.1-UC-fp8.safetensors"
+    },
+    {
+      "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
+      "file": "qwen-image-2.1-uncensored-lora.safetensors",
+      "dest": "loras/qwen-image-2.1-uncensored-lora.safetensors"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "file": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "dest": "vae/qwen_image_2.1_vae_bf16.safetensors"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "file": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
+      "dest": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "file": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors",
+      "dest": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+    },
+    {
+      "repo": "akhaliq/Qwen-Image-2.1-Next-Scene-LoRA",
+      "file": "next_scene_step2500.safetensors",
+      "dest": "loras/qwen21_next_scene_step2500.safetensors"
+    },
+    {
+      "repo": "houseofboern/character-sheet-qwen-image-2.1-edit-lora",
+      "file": "character-sheet-qwen-image-2.1-edit-lora-e9.safetensors",
+      "dest": "loras/qwen21_character_sheet_edit_e9.safetensors"
+    },
+    {
+      "repo": "Alissonerdx/BFS-Best-Face-Swap",
+      "file": "bfs_head_v1.1_qwen_2.1.safetensors",
+      "dest": "loras/bfs_head_v1.1_qwen_2.1.safetensors"
+    },
+    {
+      "repo": "SimpleTuner/Qwen-Image-2.1-training-assistant-v3",
+      "file": "pytorch_lora_weights.safetensors",
+      "dest": "loras/qwen21_training_assistant_v3.safetensors"
+    },
+    {
+      "repo": "NidAll/Qwen3VL-8B-Abliterated-INT8-ConvRot",
+      "file": "qwen3vl_8b_abliterated_int8_convrot.safetensors",
+      "dest": "text_encoders/qwen3vl_8b_abliterated_int8_convrot.safetensors"
+    }
+  ],
+  "ports": [
+    "8188/http",
+    "8189/http",
+    "8000/http"
+  ],
+  "llm": {
+    "_why": "2026-10-23 사용자 '너무 많이 나간다, 스펙 낮춘 걸로' → L40S 48GB 한 장에 그림(약 22GB)과 같이 올리려고 같은 무검열 27B 의 4비트 GPTQ(nchapman W4A16, 19.5GB, 그림 보는 부분 bf16 유지. mma404 판(17.7GB)은 글 전용 Qwen3_5ForCausalLM 이라 그림을 못 받았다)로. 예전 FP8 판(munekazu/Huihui-Qwen3.8-27B-abliterated-FP8, 29GB)은 96GB 파드에서 썼다. vLLM 0.31 · --trust-remote-code. gpu_util 0.53 = 약 23.5GB(0.5 는 32k 한 요청 캐시에 0.1GB 모자라 기동 실패, 0.55 는 KV 6.3만 토큰), 나머지는 ComfyUI.",
+    "repo": "nchapman/Huihui-Qwen3.8-27B-abliterated-W4A16-GPTQ",
+    "name": "qwen3.8-27b",
+    "vllm_version": "0.31.0",
+    "gpu_util": 0.53,
+    "max_len": 32768,
+    "args": "--trust-remote-code"
   },
-  {
-   "repo": "abenzerps/Qwen-Image-2.1-Uncensored-Quantized",
-   "file": "qwen-image-2.1-uncensored-lora.safetensors",
-   "dest": "loras/qwen-image-2.1-uncensored-lora.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/Qwen-Image-2.1",
-   "file": "vae/qwen_image_2.1_vae_bf16.safetensors",
-   "dest": "vae/qwen_image_2.1_vae_bf16.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/Qwen-Image-2.1",
-   "file": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors",
-   "dest": "loras/qwen_image_2.1_turbo_lora_avg_rank_178_bf16.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/Qwen-Image-2.1",
-   "file": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors",
-   "dest": "model_patches/qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
-  },
-  {
-   "repo": "akhaliq/Qwen-Image-2.1-Next-Scene-LoRA",
-   "file": "next_scene_step2500.safetensors",
-   "dest": "loras/qwen21_next_scene_step2500.safetensors"
-  },
-  {
-   "repo": "houseofboern/character-sheet-qwen-image-2.1-edit-lora",
-   "file": "character-sheet-qwen-image-2.1-edit-lora-e9.safetensors",
-   "dest": "loras/qwen21_character_sheet_edit_e9.safetensors"
-  },
-  {
-   "repo": "Alissonerdx/BFS-Best-Face-Swap",
-   "file": "bfs_head_v1.1_qwen_2.1.safetensors",
-   "dest": "loras/bfs_head_v1.1_qwen_2.1.safetensors"
-  },
-  {
-   "repo": "SimpleTuner/Qwen-Image-2.1-training-assistant-v3",
-   "file": "pytorch_lora_weights.safetensors",
-   "dest": "loras/qwen21_training_assistant_v3.safetensors"
-  },
-  {
-   "repo": "NidAll/Qwen3VL-8B-Abliterated-INT8-ConvRot",
-   "file": "qwen3vl_8b_abliterated_int8_convrot.safetensors",
-   "dest": "text_encoders/qwen3vl_8b_abliterated_int8_convrot.safetensors"
-  },
-  {
-   "repo": "Noctaluna/Noct-Q-Uncensored-Qwen-Image-2.1",
-   "file": "NoctQ_V4_int8_convrot.safetensors",
-   "dest": "diffusion_models/NoctQ_V4_int8_convrot.safetensors"
-  },
-  {
-   "repo": "chatrlabs/Qwen-Image-2.1-Uncensored-Omni-LoRA-v0.1",
-   "file": "chatrlabs-omni-lora-v0.1-bf16.safetensors",
-   "dest": "loras/chatrlabs-omni-lora-v0.1-bf16.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/MOSS-Image",
-   "file": "diffusion_models/moss_image_sft_bf16.safetensors",
-   "dest": "diffusion_models/moss_image_sft_bf16.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/MOSS-Image",
-   "file": "text_encoders/qwen3.5_9b_int8_convrot.safetensors",
-   "dest": "text_encoders/qwen3.5_9b_int8_convrot.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/MOSS-Image",
-   "file": "vae/flux2-vae_small.safetensors",
-   "dest": "vae/flux2-vae_small.safetensors"
-  },
-  {
-   "repo": "lodestones/MOSS-Image-SFT-8-steps-dmd",
-   "file": "lora.safetensors",
-   "dest": "loras/moss-image-sft-8step-dmd-lora.safetensors"
-  },
-  {
-   "repo": "axiomofmind/Moss-image-nsfw-uncensored-lora",
-   "file": "MOSS-Image-NSFW-Uncensored-LoRA-ComfyUI.safetensors",
-   "dest": "loras/moss-image-uncensored-lora-comfy.safetensors"
-  },
-  {
-   "repo": "circlestone-labs/Anima",
-   "file": "split_files/diffusion_models/anima-base-v1.0.safetensors",
-   "dest": "diffusion_models/anima-base-v1.0.safetensors"
-  },
-  {
-   "repo": "circlestone-labs/Anima",
-   "file": "split_files/text_encoders/qwen_3_06b_base.safetensors",
-   "dest": "text_encoders/qwen_3_06b_base.safetensors"
-  },
-  {
-   "repo": "circlestone-labs/Anima",
-   "file": "split_files/vae/qwen_image_vae.safetensors",
-   "dest": "vae/qwen-image/qwen_image_vae.safetensors"
-  },
-  {
-   "repo": "Comfy-Org/Anima-LLLite",
-   "file": "model_patches/anima-lllite-inpainting-v2.safetensors",
-   "dest": "model_patches/anima-lllite-inpainting-v2.safetensors"
-  },
-  {
-   "repo": "kohya-ss/Anima-LLLite",
-   "file": "anima-lllite-exp-change-2-000007.safetensors",
-   "dest": "model_patches/anima-lllite-exp-change-2-000007.safetensors"
-  },
-  {
-   "repo": "LuciferTC/Anima-IP-Adapter",
-   "file": "ip_adapter-Character_Reference-10.safetensors",
-   "dest": "ipadapter/ip_adapter-Character_Reference-10.safetensors"
-  },
-  {
-   "repo": "CabalResearch/Anima-Canny-Scribble-Adjustable-Control-LoRA",
-   "file": "Anima Scribble+Canny Variable Control LoRA.safetensors",
-   "dest": "loras/anima-scribble-canny-control-lora.safetensors"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "config.json",
-   "dest": "siglip2/siglip2-base-patch16-512/config.json"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "model.safetensors",
-   "dest": "siglip2/siglip2-base-patch16-512/model.safetensors"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "preprocessor_config.json",
-   "dest": "siglip2/siglip2-base-patch16-512/preprocessor_config.json"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "special_tokens_map.json",
-   "dest": "siglip2/siglip2-base-patch16-512/special_tokens_map.json"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "tokenizer.json",
-   "dest": "siglip2/siglip2-base-patch16-512/tokenizer.json"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "tokenizer.model",
-   "dest": "siglip2/siglip2-base-patch16-512/tokenizer.model"
-  },
-  {
-   "repo": "google/siglip2-base-patch16-512",
-   "file": "tokenizer_config.json",
-   "dest": "siglip2/siglip2-base-patch16-512/tokenizer_config.json"
-  },
-  {
-   "url": "https://civitai.com/api/download/models/2979642?fileId=2859181",
-   "dest": "loras/anima-turbo-lora-v0.2.safetensors",
-   "sha256": "1B55E40BDB1D0E5A78CB498F245FCCFDAAE97823265DB957D2AABDCF4CD3CAF1"
-  }
- ],
- "ports": [
-  "8188/http",
-  "8189/http",
-  "8000/http"
- ],
- "llm": {
-  "_why": "사내 Qwen 게이트웨이(qwen3.8-27b)를 대신하는 무검열 Qwen 3.8 27B. 원본 huihui-ai 무검열판의 FP8(29GB, 그림 보는 부분 유지). vLLM 0.32 는 나온 지 2주가 안 돼 0.31.",
-  "repo": "munekazu/Huihui-Qwen3.8-27B-abliterated-FP8",
-  "name": "qwen3.8-27b",
-  "vllm_version": "0.31.0",
-  "gpu_util": 0.4,
-  "max_len": 32768
- },
- "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용."
+  "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용.",
+  "nvidia_disable_require": true,
+  "_cuda_why": "2026-10-23 L40S: 이미지(cu128)의 NVIDIA_REQUIRE_CUDA 때문에 12.8 미만 드라이버 기계에선 컨테이너가 안 뜨고(31분 runtime 없음), allowed_cuda 를 12.8 이상으로 거르면 L40S secure 재고 0. → 검사를 끄고(nvidia_disable_require) 12.4 이상 기계를 받는다(CUDA 12.x 하위 호환). 12.4 이상으로 걸어도 L40S secure 재고 0이라 필터는 비운다(받은 기계의 드라이버는 부팅 로그 '[boot] driver' 줄로 본다).",
+  "data_centers": [
+    "US-NC-1"
+  ]
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 파드 안에서 Qwen 3.8 무검열(그림도 보는 LLM)을 vLLM 으로 띄운다(OpenAI 호환, 포트 8000). ComfyUI 와 같은 GPU 를 나눠 쓴다.
-# tools/runpod_cloud.py llm 이 파드 에이전트로 이 스크립트를 돌린다. 넘겨받는 env: LLM_REPO, LLM_NAME, VLLM_VERSION, GPU_UTIL, MAX_LEN.
+# tools/runpod_cloud.py llm 이 파드 에이전트로 이 스크립트를 돌린다. 넘겨받는 env: LLM_REPO, LLM_NAME, VLLM_VERSION, GPU_UTIL, MAX_LEN,
+# LLM_ARGS(모델마다 더 붙일 vllm 인자, 설정 llm.args. 예: 4비트 GPTQ 판은 --trust-remote-code).
 # 프록시 주소는 누구나 닿으니 키를 건다: 파드 에이전트 토큰(AGENT_TOKEN, 파드 env). 로컬은 runpod_cloud.py use 가 같은 값을 state/vlm_url.txt 에 적는다.
 # (2026-10-22 회사 vast·사내 Qwen 게이트웨이가 함께 꺼져, 그림 검수·미사일 스튜디오가 쓸 모델을 RunPod 파드에 같이 둔다)
 # --max-num-seqs: 기본 1024 면 Qwen3.8(선형 어텐션 섞임)의 Mamba 캐시 칸(gpu_util 0.4 에서 130)을 넘어 기동 실패
@@ -8,11 +9,15 @@ set -e
 pkill -f 'vllm serve' 2>/dev/null || true  # 다시 부르면 띄워 둔 것을 내리고 새로
 V=/workspace/vllm-venv
 export HF_HOME=/workspace/hf HF_HUB_ENABLE_HF_TRANSFER=1
+# L40S(Ada) 에선 FlashInfer 샘플링 커널을 그 자리에서 빌드하려다 ninja 가 PATH 에 없어 기동 실패(2026-10-23, Blackwell 파드에선 안 거침).
+# venv 를 PATH 에 넣고 ninja 를 깔고, 샘플러는 PyTorch 구현으로 둔다(빌드 없이 뜬다)
+export PATH="$V/bin:$PATH" VLLM_USE_FLASHINFER_SAMPLER=0
 if [ ! -x "$V/bin/vllm" ] || [ "$($V/bin/python -c 'import vllm; print(vllm.__version__)' 2>/dev/null)" != "$VLLM_VERSION" ]; then
   echo "[llm] install vllm==$VLLM_VERSION $(date -u)"
   python3 -m venv "$V"
   "$V/bin/pip" install -q --no-cache-dir "vllm==$VLLM_VERSION" hf_transfer
 fi
+[ -x "$V/bin/ninja" ] || "$V/bin/pip" install -q --no-cache-dir ninja
 echo "[llm] download $LLM_REPO $(date -u)"
 "$V/bin/python" -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['LLM_REPO'])"
 # ComfyUI 가 GPU 에 모델을 올려 두면 vLLM 이 KV 캐시 자리를 못 얻는다(2026-10-22 파드 재시작 직후 "No available memory for the cache blocks").
@@ -30,4 +35,4 @@ echo "[llm] serve $LLM_NAME $(date -u)"
 exec "$V/bin/vllm" serve "$LLM_REPO" --served-model-name "$LLM_NAME" --host 0.0.0.0 --port 8000 --api-key "$AGENT_TOKEN" \
   --gpu-memory-utilization "$GPU_UTIL" --max-model-len "$MAX_LEN" --limit-mm-per-prompt '{"image": 4}' \
   --max-num-seqs 16 \
-  --reasoning-parser qwen3 --default-chat-template-kwargs '{"enable_thinking": false}'
+  --reasoning-parser qwen3 --default-chat-template-kwargs '{"enable_thinking": false}' $LLM_ARGS
