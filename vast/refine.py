@@ -565,8 +565,22 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
         dst.write_bytes(best[1])
         log(f"  {pid}: 가장 나은 판으로 되돌림")
     # 고치기 사다리의 마지막 칸: 다시 그려도 안 고쳐진 시선·방향은 편집으로 돌린다(외출 p004 박 과장: 다시 그리면 또 정면, 편집은 한 번에 됐다)
-    if best[2] and best[2] <= {"시선", "좌우시선"} and fix_facing(c, cache, dst, series, ep_dir, p, seed, log):
-        return set(), ""
+    # 다른 작은 지적(소품 등)이 같이 남아도 돌린다: '시선만 남았을 때'로 묶어 두니 둘 다 카메라를 보는 컷이 그대로 나갔다(2026-10-24 야근의 온도 3화 p004)
+    gaze = {"시선", "좌우시선"}
+    if best[2] & gaze:
+        kept = dst.read_bytes()
+        done = fix_facing(c, cache, dst, series, ep_dir, p, seed, log)
+        if done and best[2] <= gaze:
+            return set(), ""
+        if dst.read_bytes() != kept:  # 다 고쳤거나 나아진 판: 컷 전체를 다시 보고 새 문제가 없을 때만 받는다
+            r2, p2 = staging_check(series, ep_dir, dst, pid)
+            if p2 <= best[2] and (not p2 & gaze or len(p2) < len(best[2])):
+                best, r = (len(p2), dst.read_bytes(), p2), r2
+                if not p2:
+                    return set(), ""
+            else:
+                dst.write_bytes(kept)
+                log(f"  {pid}: 방향을 고친 뒤 다시 보니 {sorted(p2)} → 고치기 전 판으로 되돌림")
     # 인원이 남으면(같은 사람 둘 등) 콕 집은 지우기 편집 + 사람 수만 따로 세서 확인(외출 p008: 다시 그리기·남는 사람 지우기로 안 되던 것이 한 번에 됐다)
     if "인원" in best[2]:
         kept = dst.read_bytes()
@@ -622,23 +636,31 @@ TURN = ("In <image1>, change only where these people look and which way their fa
 
 
 def fix_facing(c, cache, dst: Path, series, ep_dir: Path, p, seed, log=print) -> bool:
-    """시선·몸 방향이 글과 다른 사람만 편집으로 돌린다. 다시 확인해 시선 문제가 없어지면 True(아니면 원본으로 되돌리고 False)."""
+    """시선·몸 방향이 글과 다른 사람만 편집으로 돌린다(두 번까지, 남은 지적만 다시). 시선 문제가 없어지면 True.
+    덜 남은 판은 이어 받는다: 편집 한 번에 한 사람만 돌아서(둘 다 카메라를 보던 컷에서 윤재만) 통째로 되돌리던 것(2026-10-24 야근의 온도 3화 p004).
+    다 못 고치면 False 이고 그림은 가장 덜 남은 판(처음보다 나을 때만, 아니면 원본). 받을지는 부른 쪽이 컷 전체를 다시 보고 정한다."""
     gaze = run_checks(series, dst, p).get("시선", [])
     if not gaze:
         return False
-    before = dst.read_bytes()
-    g = graph(TURN.format(problems="; ".join(dict.fromkeys(gaze)), text=panel_text(p)[:500]), [upload(c, dst, cache)], 0, 0, seed % 100000 + 29, 8, 1024,
-              turbo=True, edit=True, series=series)
-    g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/turned"
-    hist = c.wait(c.queue(g), 600)
-    c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
-    left = run_checks(series, dst, p).get("시선", [])
-    if left:
-        dst.write_bytes(before)
-        log(f"  {p['id']}: 방향 편집도 안 됨({'; '.join(left)[:80]}) → 되돌림")
-        return False
-    log(f"  {p['id']}: 시선·방향을 편집으로 글에 맞춤 → 통과")
-    return True
+    before = best_img = dst.read_bytes()
+    for k in range(2):
+        g = graph(TURN.format(problems="; ".join(dict.fromkeys(gaze)), text=panel_text(p)[:500]), [upload(c, dst, cache)], 0, 0,
+                  seed % 100000 + 29 + k, 8, 1024, turbo=True, edit=True, series=series)
+        g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/turned"
+        hist = c.wait(c.queue(g), 600)
+        c.download(next(i for o in hist["outputs"].values() for i in o.get("images", [])), dst)
+        left = run_checks(series, dst, p).get("시선", [])
+        if not left:
+            log(f"  {p['id']}: 시선·방향을 편집으로 글에 맞춤({k + 1}회) → 통과")
+            return True
+        if len(left) < len(gaze):
+            best_img, gaze = dst.read_bytes(), left
+            log(f"  {p['id']}: 방향 편집 {k + 1}회, 덜 남음({'; '.join(left)[:80]})")
+        else:
+            dst.write_bytes(best_img)
+    dst.write_bytes(best_img)
+    log(f"  {p['id']}: 방향 편집으로 다 못 고침({'; '.join(gaze)[:80]})" + (" → 나아진 판을 둠" if best_img != before else " → 되돌림"))
+    return False
 
 
 def main():

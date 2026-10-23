@@ -39,13 +39,15 @@
    "name": "eye_contact",
    "category": "시선",
    "when": "people",
-   "ask": "Panel text: {text}\nIs any person in this webtoon panel looking straight at the viewer (eye contact with the camera) while the panel text does not ask for that? People normally look at the person or thing they are dealing with, like a candid film still.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+   "ask": "Panel text: {text}\nIs any person in this webtoon panel looking straight at the viewer (eye contact with the camera) while the panel text does not ask for that? People normally look at the person or thing they are dealing with, like a candid film still.\nReport only where faces, eyes and shoulders point; objects, props and where things are placed are checked elsewhere, do not list them.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none).",
+   "why": "열린 질문이라 '캔이 난간이 아니라 벤치에'(소품)까지 시선 항목에 적어, 시선 편집이 고쳐도 '안 됨'으로 되돌렸다(2026-10-24 야근의 온도 3화 p004) → 얼굴·눈·어깨만 보게"
   },
   {
    "name": "facing",
    "category": "시선",
    "when": "two_or_more",
-   "ask": "Panel text: {text}\nFor each person, look at the direction of their FACE and SHOULDERS, not only the eyes. Compare with the panel text: people who deal with each other turn toward each other (profile or three-quarter view) unless the text asks for something else. A person whose shoulders and face are square to the viewer when the text does not ask for it is a mismatch, even if the eyes glance sideways. List only clear mismatches, naming each person by clothes or position.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none)."
+   "ask": "Panel text: {text}\nFor each person, look at the direction of their FACE and SHOULDERS, not only the eyes. Compare with the panel text: people who deal with each other turn toward each other (profile or three-quarter view) unless the text asks for something else. A person whose shoulders and face are square to the viewer when the text does not ask for it is a mismatch, even if the eyes glance sideways. List only clear mismatches, naming each person by clothes or position.\nReport only where faces, eyes and shoulders point; objects, props and where things are placed are checked elsewhere, do not list them.\n{common}\nAnswer JSON only: {{\"problems\": [\"...\"]}} (empty list if none).",
+   "why": "열린 질문이라 '캔이 난간이 아니라 벤치에'(소품)까지 시선 항목에 적어, 시선 편집이 고쳐도 '안 됨'으로 되돌렸다(2026-10-24 야근의 온도 3화 p004) → 얼굴·눈·어깨만 보게"
   },
   {
    "name": "sides",
