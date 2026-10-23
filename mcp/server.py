@@ -594,6 +594,37 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
     q = (query or "").strip()
     if not q:
         return _fail("empty_query")
+    # '작품 이름 + 나머지'(D+18 3화 · 개항 1화 v3 p023f · 무대 뒤 리허설): 앞 낱말들이 작품 이름이면 그 작품으로 좁히고 나머지로 찾는다.
+    # 나머지가 회차면 그 회차 요약을 준다(2026-10-24 스튜디오 시험: 'D+18 3화' 가 nothing_found)
+    if not series:
+        toks = q.split()
+        names = _series_names()
+        for i in range(len(toks) - 1, 0, -1):
+            hit = names.get(_norm_name(" ".join(toks[:i])))
+            if hit:
+                series, q = hit, " ".join(toks[i:])
+                break
+    if series:
+        try:
+            ep = _episode(series, q)
+        except ValueError:
+            ep = None
+        if ep is not None:
+            board = _json(ep / "storyboard.json", {}) or {}
+            panels = board.get("panels", [])
+            flow = []
+            for p_ in panels:
+                sc = p_.get("scene") or "none"
+                if flow and flow[-1]["scene"] == sc:
+                    flow[-1]["to"] = p_["id"]
+                    flow[-1]["cuts"] += 1
+                else:
+                    flow.append({"scene": sc, "from": p_["id"], "to": p_["id"], "cuts": 1})
+            chars = sorted({c for p_ in panels for c in p_.get("characters", [])})
+            first = {c: next(p_["id"] for p_ in panels if c in p_.get("characters", [])) for c in chars}
+            return json.dumps({"query": query, "series": _series(series).name, "episode": ep.name, "title": board.get("title_card", ""),
+                               "cuts": len(panels), "scenes": flow, "characters": chars, "first_appearance": first,
+                               "next": "컷 하나는 panel_info, 그림은 contact_sheet(series, episode, ids=…)"}, ensure_ascii=False)
     key = _pid_key(q) if len(q) <= 6 else None
     toks = [x for x in re.split(r"\s+", q.lower()) if x]
     hits, cast_hits = [], []

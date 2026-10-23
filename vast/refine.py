@@ -41,6 +41,8 @@ def refine_prompt(series, p, expr=True):
         wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
         if wear:
             lines.append(f"   Who is who: {wear}. If two people look like the same person, keep only the one wearing these clothes and remove the other.")
+    elif str(p.get("extras") or "").strip():  # 이름 없는 사람만 나오는 컷(소작인·군중): 그 사람들은 남긴다(2026-10-24 개항 p003a 를 다 지웠다)
+        lines.append(f"1. Keep the unnamed people this panel needs ({p['extras']}). Remove anyone beyond them; fill the removed area with the background.")
     else:
         lines.append("1. There must be no people at all. Remove every person, face and figure; fill the area with the background.")
     if p.get("acting"):
@@ -70,7 +72,11 @@ def find_extras(img_path: Path, series, p) -> list:
         looks = {c: re.split(r"(?<=\.)\s", v.get("who", ""))[0][:140] for c, v in json.loads(sj.read_text(encoding="utf-8")).get("cast", {}).items()}
     who = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])}" + (f" ({looks[c]})" if looks.get(c) else "") + (f" wearing {wear[c]}" if c in wear else "")
                     for c in chars) or "nobody"
-    ask = (f"This webtoon panel should show exactly {len(chars)} {'person' if len(chars) == 1 else 'people'}: {who}."
+    # 이름 없는 사람(extras)도 기대하는 사람으로 첫 문장에 넣는다: 'exactly 0 people: nobody' 로 시작하니 컷 설명에 적은 소작인 넷·하인을
+    # 남는 사람으로 보고 두 번 지웠다(2026-10-24 개항 p003a)
+    extras_txt = str(p.get("extras") or "").strip()
+    expected = (f"exactly {len(chars)} named {'person' if len(chars) == 1 else 'people'}: {who}" if chars else "no named characters")
+    ask = (f"This webtoon panel should show {expected}" + (f", plus these unnamed people, who are expected and NOT extra: {extras_txt}" if extras_txt else "") + "."
            + f"\nPanel text: {panel_text(p)}\nAnyone else the panel text describes (an over-the-shoulder foreground figure, unnamed people) "
              "is also expected and is NOT extra."
            + "\nLook at the image. If it shows no more people than expected, answer with an empty list: different expected people can wear "
