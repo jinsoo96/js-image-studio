@@ -28,7 +28,20 @@
 - status() → 앞 회차의 끝(마지막 컷·대사·옷·장소)을 read_file 로 보고 이어지게 쓴다. new_episode 로 앞 회차 틀을 복사한다.
 - 처음 나오는 인물·장소는 add_to_series 로 더한다(옛 작품은 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄).
 
-## 4. 긴 작업과 대화
+## 4. 저장소(작업실) 둘러보기·다루기
+작품·그림·내보낸 것은 모두 작업실 저장소에 쌓인다. 일마다 따로 된 도구를 찾지 말고 아래 일반 도구로 둘러보고 옮긴다(지우는 도구는 없다: 안 쓰는 것은 `_old/` 로 옮긴다).
+- 구조: `series/<작품>-hf/` = series.json(설정·그림체·인물) · assets/(인물 시트 `<id>_sheet.png` · locations/ 장소 · vast_refs/ 참고 그림·표정 은행 · _candidates/ 시안) ·
+  episodes/<회차>/(make_storyboard.py 콘티 · panels_spec.json 컷 설명 · panels_hf/ 본편 그림 · panels_hf_vast/ 다시 그린 그림 · out/ 합성본). `exports/<날짜>/` 내보낸 PDF·epub·예고편. `worklogs/` 작업 기록.
+- 보기: list_files(path, pattern='*.png') 목록·크기·고친 시각 · read_file 글 · contact_sheet(paths='폴더·파일·* 패턴') 그림(시트·시안·참고 그림·장소도) · file_link 사용자에게 줄 주소.
+- 다루기: copy_file(파일·폴더·패턴 → 작품 폴더·exports·worklogs, 그림 포함) · move_file(옮기기·이름 바꾸기, 같은 이름이 있으면 안 옮김, 그 작품에 작업이 돌면 안 옮김).
+- 예) 회차를 다른 버전으로: copy_file(episodes/ep001 → episodes/ep001_v2) → 콘티·컷 설명에서 바꿀 곳만 edit_file·set_panels → prepare_episode →
+  바뀐 컷만 vast_draw(ids) → compare_panel(redraw) → vast_adopt → compose → export(버전은 파일 이름 끝에 _v2 가 붙어 원본을 덮지 않는다).
+  그림을 처음부터 다시 그릴 버전이면 new_episode(작품, 'ep001_v2', template='ep001') + copy_file(ep001/panels_spec.json → ep001_v2/) 로 그림 없이 연다.
+- 예) 그림체·인물 생김새 바꾸기(작품 전체에 걸린다: 옛 회차를 다시 그려도 새 모습): add_to_series 로 설정 고치기 → redo_candidate 로 시안 →
+  contact_sheet(paths=assets/_candidates) 로 보여 주고 고르기 → move_file(옛 시트 → assets/_old/) · move_file(시안 → assets/) →
+  move_file(assets/vast_refs/<id>_* → assets/_old/refs/) → vast_make_assets(작품, <id>) 로 참고 그림·표정 은행 다시 만들기 → 그 인물이 나온 컷을 다시 그린다.
+
+## 5. 긴 작업과 대화
 - 있는 파일을 옮기거나 틀로 쓸 땐 copy_file(src, dst) 한 번으로 복사하고 고칠 곳만 edit_file 로 고친다(read_file 로 읽어 write_file 로 다시 치지 않는다: 수만 자가 컨텍스트에 들어와 무거워지고 끊긴다).
 - 파일이 길면(콘티 16KB 안팎) write_file 을 part="first" → part="more"(4천 자 안팎씩) → part="last" 로 나눠 쓴다(last 에서 문법 검사). 일부만 고칠 땐 edit_file.
 - 한 번의 답에서 도구를 30번 넘게 부르지 않는다(사내 모델이 마지막 답을 시간 안에 못 시작한다). 콘티·컷 설명이 끝나면 답을 끝내고, 그리기는 다음 답에서.
@@ -44,7 +57,7 @@
 - 그림·모아보기·PDF 를 사용자에게 보여 줄 때는 결과의 link·drawn·links 주소를 준다. 이 MCP 의 파일은 작업실 PC 에 있어 agent app 작업 공간의 ShareFile·Bash·Read 로는 열리지 않는다. 이미 있는 그림은 file_link 로 주소를 받는다. 그림을 직접 봐야 하면 contact_sheet: 결과에 그림이 같이 온다(링크는 잠겨 있어 WebFetch 로는 안 열린다). 한 번 보고 판단한다.
 - 같은 입력(같은 명령·같은 콘티·컷 설명)으로 같은 작업을 다시 부르면 도구가 repeated_job 오류와 이전 작업을 돌려준다. 같은 걸 다시 돌려도 같은 결과다: 사용자와 무엇을 바꿀지 정해 컷 설명을 고치거나 seed 를 바꾼 뒤 부른다.
 
-## 5. 돈·장비·내용
+## 6. 돈·장비·내용
 - 그리기는 GPU 서버(ComfyUI, 크레딧 0) 하나로 한다: vast_draw·make_episode 가 쓰는 서버는 state/comfy_url.txt 가 가리키는 곳(지금은 RunPod 파드)이고 guide 첫 줄에 지금 주소가 나온다. 인스턴스를 켜고 끄거나 만들고 지우지 않는다(도구도 없다).
 - 한 컷을 바꿔 보여 줄 때: 일부만 바꾸면 preview_panel(디자인이면 preview_design) → compare_panel(what="preview") → 고르면 adopt_preview, 통째로 다시 그려 보려면 vast_draw(ids=그 컷) → compare_panel(what="redraw") → 고르면 vast_adopt. 둘 다 고르기 전까지 본편은 안 바뀐다.
 - 인물은 모두 성인. 실존 인물·실제 회사 이름·상표는 쓰지 않는다. 원작이 있는 글은 이름·직함·호칭을 원작대로 둔다.

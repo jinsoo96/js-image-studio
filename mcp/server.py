@@ -501,9 +501,27 @@ def panel_info(series: str, episode: str, panel: str) -> str:
 
 
 @mcp.tool()
-def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "") -> list:
-    """검수용 모아보기를 만들어 그림 자체와 JSON(sheet 경로·link 원격 링크)을 돌려준다(그림을 직접 보고 판단한다). ids(쉼표) 또는 scene(장소 이름)으로 고른다.
-    비우면 새로 그린 컷 전부. folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast). 사용자에게는 link 를 준다."""
+def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str = "", folder: str = "", paths: str = "") -> list:
+    """그림을 모아 한 장으로 보여 준다(그림 자체 + JSON: sheet 경로·link 원격 링크). 회차 컷이면 series·episode 와 ids(쉼표)·scene(장소 이름),
+    아무 그림이면 paths(파일·폴더·* 패턴을 쉼표로): 인물 시트·시안·장소·참고 그림·내보낸 쪽 그림을 볼 때.
+
+    회차 컷: 비우면 새로 그린 컷 전부, folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast).
+    paths 예: series/gaehang-hf/assets/*_sheet.png · series/gaehang-hf/assets/_candidates · series/gaehang-hf/assets/vast_refs/jaeheon_x*.png.
+    한 장에 24개까지(넘으면 앞 24개와 전체 개수를 알린다). 사용자에게는 link 를 준다."""
+    if paths.strip():
+        # 회차 컷이 아닌 그림(시트·시안·참고 그림)을 볼 도구가 없어 에이전트가 그림체·생김새를 확인하지 못했다(2026-10-23 사용자:
+        # "저장소를 둘러볼 수 있는 쓸모 있는 도구를 골라 쓰게")
+        found = []
+        for one in [x.strip() for x in re.split(r"[,\n]+", paths) if x.strip()]:
+            try:
+                for p in _matches(one, series):
+                    found += sorted(c for c in p.iterdir() if c.suffix.lower() in IMG_EXT) if p.is_dir() else [p] if p.suffix.lower() in IMG_EXT else []
+            except (NotFound, ValueError) as e:
+                return [str(e)]
+        if not found:
+            return ["그 경로에 그림(.png .jpg .webp)이 없다. list_files 로 확인"]
+        name = re.sub(r"[^\w.-]+", "_", Path(found[0].parent).relative_to(ROOT.resolve()).as_posix())[-60:]
+        return _sheet([(f.name, f) for f in found[:24]], name, total=len(found))
     ep = _episode(series, episode)
     sub = _folder(folder)
     pj = _panels_json(ep)
@@ -513,31 +531,38 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", fol
         sel_ids = [p["id"] for p in sel] + [i for i in want if i not in {p["id"] for p in sel}]
     else:
         sel_ids = [p["id"] for p in sel]
-    tiles = []
-    try:
-        font = ImageFont.truetype(r"C:\Windows\Fonts\malgunbd.ttf", 24)
-    except Exception:
-        font = ImageFont.load_default()
-    for pid in sel_ids[:24]:
+    items = []
+    for pid in sel_ids:
         f = ep / sub / f"{pid}.png"
         if not f.exists() and sub == "panels_hf":  # 재사용·합성 컷은 panels 에만 있다
             f = ep / "panels" / f"{pid}.png"
-        if not f.exists():
-            continue
+        if f.exists():
+            items.append((pid, f))
+    if not items:
+        return "고른 컷 중 그림이 있는 컷이 없다"
+    return _sheet(items[:24], f"{_series(series).name}_{ep.name}", total=len(items))
+
+
+def _sheet(items: list, name: str, total: int = 0) -> list:
+    """(이름, 그림 경로) 목록을 4열 모아보기로. 결과 = [JSON, 그림]."""
+    tiles = []
+    try:
+        font = ImageFont.truetype(r"C:\Windows\Fonts\malgunbd.ttf", 22)
+    except Exception:
+        font = ImageFont.load_default()
+    for label, f in items:
         im = Image.open(f).convert("RGB")
         im.thumbnail((420, 420))
-        ImageDraw.Draw(im).text((6, 4), pid, fill="yellow", font=font, stroke_width=3, stroke_fill="black")
+        ImageDraw.Draw(im).text((6, 4), label, fill="yellow", font=font, stroke_width=3, stroke_fill="black")
         tiles.append(im)
-    if not tiles:
-        return "고른 컷 중 그림이 있는 컷이 없다"
-    cols = 4
+    cols = min(4, len(tiles))
     rows = (len(tiles) + cols - 1) // cols
     h = max(t.height for t in tiles)
     sheet = Image.new("RGB", (424 * cols, (h + 4) * rows), "gray")
     for k, t in enumerate(tiles):
         sheet.paste(t, ((k % cols) * 424, (k // cols) * (h + 4)))
     SHEETS.mkdir(parents=True, exist_ok=True)
-    out = SHEETS / f"{_series(series).name}_{ep.name}_{time.strftime('%H%M%S')}.jpg"
+    out = SHEETS / f"{name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
     # 그림을 결과에 같이 싣는다: 링크만 주면 링크가 잠겨 있어(Cloudflare Access) 에이전트가 그림을 못 보고 모아보기를 되풀이하다
     # agent app 반복 방지에 끊겼다(2026-10-19). agent app 는 MCP 결과의 그림을 그대로 모델에 넘긴다(agent-workflow connector_mcp injector)
@@ -545,7 +570,10 @@ def contact_sheet(series: str, episode: str, ids: str = "", scene: str = "", fol
     view.thumbnail((1280, 1280))
     buf = io.BytesIO()
     view.save(buf, "JPEG", quality=80)
-    return [json.dumps({"sheet": str(out), "link": _link(out), "panels": len(tiles)}, ensure_ascii=False), McpImage(data=buf.getvalue(), format="jpeg")]
+    info = {"sheet": str(out), "link": _link(out), "panels": len(items), "shown": [lb for lb, _ in items]}
+    if total > len(items):
+        info["total"] = total
+    return [json.dumps(info, ensure_ascii=False), McpImage(data=buf.getvalue(), format="jpeg")]
 
 
 @mcp.tool()
@@ -676,18 +704,80 @@ def _writable(p: Path) -> bool:
     return rel.startswith("worklogs/") or rel in {"LESSONS.md", "reader/index.html"}
 
 
+# ── 저장소 다루기: 작품 폴더·exports·worklogs 안에서는 그림·폴더까지 복사하고 옮긴다(지우는 도구는 두지 않는다) ──
+# 다른 버전·그림체 바꾸기처럼 일마다 도구를 만들지 않고, 저장소를 둘러보고(list_files·contact_sheet) 옮기고(move_file) 복사하는(copy_file)
+# 일반 도구를 에이전트가 골라 쓴다(2026-10-23 사용자). 순서 예시는 HARNESS.md '저장소' 절.
+IMG_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+STORE_RE = re.compile(r"(series/[^/_][^/]*/.+|exports/.+|worklogs/.+)")
+
+
+def _storable(p: Path) -> bool:
+    """그림·폴더까지 복사해 넣거나 옮길 수 있는 곳: 작품 폴더 안 · exports/ · worklogs/ (도구 코드·state·.git 은 안 된다)."""
+    return bool(STORE_RE.fullmatch(p.resolve().relative_to(ROOT.resolve()).as_posix()))
+
+
+def _matches(src: str, series: str = "") -> list:
+    """src 에 * ? [ 가 있으면 작업실(series 를 주면 그 작품 폴더) 기준 패턴, 아니면 있는 파일 또는 폴더 하나."""
+    norm = src.replace("\\", "/").strip().lstrip("/")
+    if any(c in norm for c in "*?["):
+        base = _series(series) if series else ROOT
+        out = []
+        for p in sorted(base.glob(norm)):
+            try:
+                out.append(_inside(p.resolve().relative_to(ROOT.resolve()).as_posix()))
+            except ValueError:  # .git·.venv·models
+                pass
+        return out
+    try:
+        return [_existing(norm, series)]
+    except NotFound as e:
+        try:
+            return [_existing(norm, series, want_dir=True)]
+        except NotFound:
+            raise e
+
+
+def _busy_under(paths: list):
+    """옮기려는 파일이 든 작품에 도는 작업이 있으면 그 작업 번호(그리는 중에 시트·참고 그림이 옮겨지면 그림이 틀어진다)."""
+    roots = {q for p in paths for q in [p, *p.parents] if q.parent == (ROOT / "series").resolve()}
+    for st in JOBS.glob("*.status.json"):
+        s = _json(st, {})
+        if s.get("state") != "running" or not _alive(s.get("pid")):
+            continue
+        d = Path((_json(st.with_name(st.name.replace(".status.json", ".json")), {}) or {}).get("episode_dir") or ".").resolve()
+        if any(r == d or r in d.parents for r in roots):
+            return st.name.replace(".status.json", "")
+    return None
+
+
+def _targets(items: list, dst: str, series: str, pattern: bool = False):
+    """옮기거나 복사할 (원본, 대상) 짝. 패턴이거나 여러 개거나 dst 가 '/' 로 끝나거나 있는 폴더면 그 안에 같은 이름으로."""
+    base = f"series/{_series(series).name}/" if series else ""
+    d = _inside(base + dst.replace("\\", "/").strip().lstrip("/"))
+    into = pattern or len(items) > 1 or dst.strip().endswith("/") or d.is_dir()
+    return [(s, d / s.name if into else d) for s in items]
+
+
 @mcp.tool()
-def list_files(path: str = "series", series: str = "") -> str:
-    """작업실 안 폴더의 파일 목록(작업실 기준 경로, 예: series/d-plus-18-hf/episodes/ep002_v2. series 를 주면 그 작품 폴더 기준). 그림 폴더는 개수만 센다."""
+def list_files(path: str = "series", series: str = "", pattern: str = "") -> str:
+    """작업실 저장소 둘러보기: 폴더 안 파일·폴더 목록(크기·고친 시각). path 는 작업실 기준(예: series/gaehang-hf/assets, exports/2026-10-23),
+    series 를 주면 그 작품 폴더 기준. pattern 을 주면 그 폴더 아래에서 맞는 것만(예: '*.png', '**/p023*.png', 'jaeheon_*').
+
+    작업실 구조: series/<작품>-hf/ (series.json 설정 · assets/ 인물 시트·locations/ 장소·vast_refs/ 참고 그림·표정 은행·_candidates/ 시안 ·
+    episodes/<회차>/ 콘티·컷 설명·panels_hf/ 본편 그림·panels_hf_vast/ 다시 그린 그림·out/ 합성본) · exports/<날짜>/ 내보낸 PDF·epub · worklogs/ 작업 기록."""
     p = _existing(path, series, want_dir=True)
+    items = sorted(p.glob(pattern)) if pattern.strip() else sorted(p.iterdir())
     out = []
-    for c in sorted(p.iterdir()):
+    for c in items[:300]:
+        name = c.relative_to(p).as_posix()
         if c.is_dir():
-            n = sum(1 for _ in c.iterdir())
-            out.append(f"[폴더] {c.name}/ ({n}개)")
+            out.append(f"[폴더] {name}/ ({sum(1 for _ in c.iterdir())}개)")
         else:
-            out.append(f"{c.name} ({c.stat().st_size // 1024}KB){' · 쓰기 가능' if _writable(c.resolve()) else ''}")
-    return "\n".join(out[:300]) or "(비어 있음)"
+            st = c.stat()
+            out.append(f"{name} ({max(1, st.st_size // 1024)}KB, {time.strftime('%m-%d %H:%M', time.localtime(st.st_mtime))})"
+                       f"{' · 쓰기 가능' if _writable(c.resolve()) else ''}")
+    more = f"\n(… {len(items)}개 중 300개. pattern 으로 좁힌다)" if len(items) > 300 else ""
+    return ("\n".join(out) or "(비어 있음)") + more
 
 
 @mcp.tool()
@@ -695,7 +785,7 @@ def read_file(path: str, offset: int = 0, max_chars: int = 12000, series: str = 
     """작업실 안 글 파일 읽기(작업실 기준 경로, series 를 주면 그 작품 폴더 기준). 긴 파일은 offset 으로 이어 읽는다. 콘티(make_storyboard.py)·컷 설명(build_panels.py)·문서를 볼 때."""
     p = _existing(path, series)
     if p.suffix.lower() not in TEXT_EXT:
-        return "글 파일(.py .json .md .txt .html)만 읽는다. 그림은 contact_sheet 로"
+        return "글 파일(.py .json .md .txt .html)만 읽는다. 그림은 contact_sheet(paths=…) 로 본다"
     t = p.read_text(encoding="utf-8")
     part = t[offset:offset + max_chars]
     more = f"\n\n(… 전체 {len(t)}자 중 {offset}~{offset + len(part)}. 이어 읽으려면 offset={offset + len(part)})" if offset + len(part) < len(t) else ""
@@ -795,32 +885,74 @@ def edit_file(path: str, old: str, new: str, series: str = "") -> str:
 
 @mcp.tool()
 def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> str:
-    """작업실 안 파일을 그대로 복사한다. 내용을 읽어 다시 쓰지 않으니 긴 콘티·컷 설명(수만 자)을 옮길 때 이걸 쓴다(read_file → write_file 로 옮기지 않는다).
-    src 는 작업실 안 어디든, dst 는 write_file 이 쓸 수 있는 곳(작품 폴더의 .py .json .md .txt, worklogs/ 등). series 를 주면 두 경로 모두 그 작품 폴더 기준.
-    dst 가 있는 폴더면 같은 이름으로 그 안에. 이미 있는 파일은 overwrite=True 일 때만 덮어쓰고 원본은 state/mcp_backups/ 에 남긴다. 복사한 뒤 고칠 곳만 edit_file."""
+    """작업실 안 파일·폴더를 내용을 읽지 않고 그대로 복사한다: 긴 콘티·컷 설명, 그림, 회차 폴더 통째(다른 버전 만들기). src 는 파일·폴더·* 패턴,
+    dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더.
+
+    series 를 주면 두 경로 모두 그 작품 폴더 기준. 이미 있는 파일은 overwrite=True 일 때만 덮고 원본은 state/mcp_backups/ 에 남긴다. 이미 있는 폴더는 덮지 않는다.
+    예: 회차를 다른 버전으로 → copy_file('series/x-hf/episodes/ep001', 'series/x-hf/episodes/ep001_v2') 뒤 바꿀 컷만 고쳐 다시 그린다.
+    read_file → write_file 로 옮기지 않는다(수만 자가 컨텍스트에 들어와 끊긴다)."""
     # 모델이 3만 자를 읽어 들여 그대로 다시 치면 컨텍스트가 무거워지고 한 번에 다 못 써 끊겼다(2026-10-22 미사일 스튜디오)
     try:
-        s = _existing(src, series)
-    except NotFound as e:
+        pairs = _targets(_matches(src, series), dst, series, pattern=any(c in src for c in "*?["))
+    except (NotFound, ValueError) as e:
         return str(e)
-    if not s.is_file():
-        return f"파일이 아니다: {src}"
-    base = f"series/{_series(series).name}/" if series else ""
-    d = _inside(base + dst.replace("\\", "/").lstrip("/"))
-    if d.is_dir():
-        d = d / s.name
-    if not _writable(d):
-        return f"여기는 쓸 수 없다: {d.relative_to(ROOT.resolve()).as_posix()} (작품 폴더의 글 파일·worklogs 만)"
-    if d.resolve() == s.resolve():
-        return "src 와 dst 가 같은 파일이다"
-    note = ""
-    if d.exists():
-        if not overwrite:
-            return f"이미 있다: {d.relative_to(ROOT.resolve()).as_posix()} (덮어쓰려면 overwrite=True)"
-        note = _backup(d)
-    d.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(s, d)
-    return f"복사했다 {s.relative_to(ROOT.resolve()).as_posix()} → {d.relative_to(ROOT.resolve()).as_posix()} ({d.stat().st_size}바이트){note}"
+    if not pairs:
+        return json.dumps({"error": "no_match", "given": src}, ensure_ascii=False)
+    rel = lambda p: p.resolve().relative_to(ROOT.resolve()).as_posix()  # noqa: E731
+    bad = [rel(d) for _, d in pairs if not (_writable(d) or _storable(d))]
+    if bad:
+        return json.dumps({"error": "not_writable", "dst": bad[:5], "reason": "작품 폴더 안·exports/·worklogs/ 에만 복사한다"}, ensure_ascii=False)
+    for s, d in pairs:
+        if d.resolve() == s.resolve() or s in d.parents:
+            return f"src 와 dst 가 같거나 dst 가 src 안이다: {rel(d)}"
+        if d.exists() and (s.is_dir() or not overwrite):
+            return f"이미 있다: {rel(d)}" + ("" if s.is_dir() else " (덮어쓰려면 overwrite=True)")
+    notes, size = [], 0
+    for s, d in pairs:
+        d.parent.mkdir(parents=True, exist_ok=True)
+        if s.is_dir():
+            shutil.copytree(s, d)
+            size += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        else:
+            notes.append(_backup(d))
+            shutil.copy2(s, d)
+            size += d.stat().st_size
+    shown = ", ".join(f"{rel(s)} → {rel(d)}" for s, d in pairs[:3]) + (f" 외 {len(pairs) - 3}개" if len(pairs) > 3 else "")
+    return f"복사했다 {len(pairs)}개({size // 1024}KB): {shown}{''.join(n for n in notes if n)[:300]}"
+
+
+@mcp.tool()
+def move_file(src: str, dst: str, series: str = "") -> str:
+    """작업실 안 파일·폴더를 옮기거나 이름을 바꾼다(지우는 도구는 없다: 안 쓰는 것은 _old/ 같은 폴더로 옮겨 둔다). src 는 파일·폴더·* 패턴,
+    dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더.
+
+    series 를 주면 두 경로 모두 그 작품 폴더 기준. dst 에 같은 이름이 이미 있으면 하나도 옮기지 않는다(먼저 그것을 다른 곳으로 옮긴다).
+    그 작품에 도는 작업이 있으면 옮기지 않는다(그리는 중에 시트·참고 그림이 바뀌면 그림이 틀어진다).
+    예: 시안으로 인물 시트 바꾸기 → move_file('assets/jaeheon_sheet.png', 'assets/_old/', series='gaehang') 뒤
+    move_file('assets/_candidates/jaeheon_sheet.png', 'assets/', series='gaehang'). 옛 표정 은행 치우기 → move_file('assets/vast_refs/jaeheon_*', 'assets/_old/refs/', series=…)."""
+    try:
+        pairs = _targets(_matches(src, series), dst, series, pattern=any(c in src for c in "*?["))
+    except (NotFound, ValueError) as e:
+        return str(e)
+    if not pairs:
+        return json.dumps({"error": "no_match", "given": src}, ensure_ascii=False)
+    rel = lambda p: p.resolve().relative_to(ROOT.resolve()).as_posix()  # noqa: E731
+    bad = [rel(p) for s, d in pairs for p in (s, d) if not _storable(p)]
+    if bad:
+        return json.dumps({"error": "not_movable", "paths": sorted(set(bad))[:5],
+                           "reason": "작품 폴더 안·exports/·worklogs/ 안에서만 옮긴다(작품 폴더 자체·도구 코드·state 는 안 된다)"}, ensure_ascii=False)
+    clash = [rel(d) for s, d in pairs if d.exists() or s in d.parents or d == s]
+    if clash:
+        return json.dumps({"error": "exists", "dst": clash[:5], "reason": "이미 있거나 자기 안으로 옮긴다. 있는 것을 먼저 다른 곳(_old/ 등)으로 옮긴다"},
+                          ensure_ascii=False)
+    busy = _busy_under([s for s, _ in pairs] + [d for _, d in pairs])
+    if busy:
+        return json.dumps({"error": "busy", "running_job": busy, "reason": "그 작품에 도는 작업이 있다. 끝난 뒤 옮긴다"}, ensure_ascii=False)
+    shown = ", ".join(f"{rel(s)} → {rel(d)}" for s, d in pairs[:3]) + (f" 외 {len(pairs) - 3}개" if len(pairs) > 3 else "")
+    for s, d in pairs:
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(s), str(d))
+    return f"옮겼다 {len(pairs)}개: {shown}"
 
 
 @mcp.tool()
@@ -1537,6 +1669,8 @@ def export(series: str, episode: str) -> str:
     b = _json(ep / "storyboard.json", {}) or {}
     title = re.sub(r"[^\w가-힣]+", "", (b.get("title_card") or ep.name).replace(".", ""))
     name = f"{b.get('title', _series(series).name)}_{title}".replace(" ", "") + ("_vast판" if ep.name.endswith("_vast") else "")  # 본편 내보내기를 덮지 않게
+    # 다른 버전(ep001_v2)은 이름 끝에 _v2: 원본과 같은 날 내보내면 제목·부제가 같아 원본 파일을 덮었다(2026-10-23)
+    name += "_" + re.search(r"_(v\d+)", ep.name).group(1) if re.search(r"_(v\d+)", ep.name) else ""
     day = time.strftime("%Y-%m-%d")
     copy = ("import shutil,sys; from pathlib import Path; ep=Path(sys.argv[1]); d=Path(sys.argv[2]); n=sys.argv[3]; d.mkdir(parents=True,exist_ok=True)\n"
             "for src,ext in [(next(ep.glob('out/*.pdf'),None),'.pdf'),(next(ep.glob('out/*.epub'),None),'.epub'),(ep/'out/trailer.mp4','_예고편.mp4'),(ep/'out/trailer.gif','_예고편.gif')]:\n"
