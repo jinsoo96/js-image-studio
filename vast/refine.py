@@ -509,7 +509,48 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
     표정·옷만 틀리면 편집으로 고치고, 좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시 그린다. 더 나빠지면 나은 판으로 되돌린다.
     끝나면 사람 확인이 남은 컷을 review/staging.json 에 남긴다(record_review)."""
     left, note = _staging_pass(c, cache, dst, series, ep_dir, p, seed, render, retries, log)
+    if left:
+        left, note = reader_filter(ep_dir, dst, p["id"], left, note, log)
     record_review(ep_dir, p["id"], left, note)
+
+
+STRUCTURAL = {"인원", "몸", "빈자리", "좌우", "검사불가"}  # 독자 눈 거르기에서 빼지 않는 것: 그림의 짜임이 깨졌거나 검사를 못 했다
+READER_ASK = """This is one panel of a vertical-scroll webtoon. The reader sees only this picture{talk}.
+An automatic check compared the picture with the artist's written plan and found these differences (category: description):
+{notes}
+For each category ({cats}), decide whether a reader who never saw the written plan would notice something wrong, odd or confusing in the
+picture itself: a body part or object that is impossible or broken, a face or expression that clashes with the dialogue, a person staring
+at the camera for no reason while others talk, an object floating or out of place, people who should talk to each other looking away.
+A difference that only matters against the plan (facing the window instead of the elevator, a cup in the other hand, a slightly different
+camera angle, a detail of the background) is not noticeable.
+Answer JSON only: {{"noticeable": ["<category>", ...]}} (empty list if none)."""
+
+
+def reader_filter(ep_dir: Path, img: Path, pid: str, left: set, note: str, log=print):
+    """고치기 사다리 끝에 남은 지적 중 독자가 그림과 대사만 보고는 못 느끼는 것(글과만 다른 것)을 사람 확인에서 뺀다.
+    검사는 컷의 글과 맞대어 보니 '창 쪽을 본다(글은 엘리베이터 쪽)' 같은 차이까지 걸어 2화 6컷이 다 사람 확인이 됐고, 정작 독자 눈에 띄는
+    결함이 묻혔다(2026-10-24 야근의 온도 회귀 시험). 짜임 결함(STRUCTURAL)은 빼지 않는다. 두 번 물어 한 번이라도 '눈에 띈다'면 남긴다.
+    빠진 것은 메모에 '글과 다름(참고)'으로 남는다."""
+    soft = set(left) - STRUCTURAL
+    if not soft:
+        return set(left), note
+    board = json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8")) if (ep_dir / "storyboard.json").exists() else {}
+    lines = [f"{d.get('type')}: {d.get('text')}" for x in board.get("panels", []) if x.get("id") == pid for d in x.get("dialogue") or []]
+    ask = READER_ASK.format(talk=(" and these lines: " + " / ".join(lines)) if lines else " (no dialogue)", notes=note[:1500],
+                            cats=", ".join(sorted(soft)))
+    keep, answered = set(), 0
+    for _ in range(2):
+        r = _vlm([img], ask, 300)
+        if isinstance(r.get("noticeable"), list):
+            answered += 1
+            keep |= {str(c) for c in r["noticeable"]} & soft
+    if not answered:  # 묻지 못했으면 거르지 않는다
+        return set(left), note
+    minor = soft - keep
+    if minor:
+        log(f"  {pid}: 독자 눈엔 자연스러움(글과만 다름) {sorted(minor)} → 사람 확인에서 뺌")
+    kept = (set(left) & STRUCTURAL) | keep
+    return kept, note + (f" / 글과 다름(독자 눈엔 자연스러움, 참고): {', '.join(sorted(minor))}" if minor else "")
 
 
 def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, retries=1, log=print):
