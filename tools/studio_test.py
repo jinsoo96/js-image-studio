@@ -19,7 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MS = os.environ.get("MS_EXE", r"D:\missile-studio\.venv\Scripts\ms.exe")
-DONE_WORDS = re.compile(r"(다 됐|완료(했|됐|되었)|끝났|다 나왔|다 그렸)")
+# 끝났다고 단정하는 말끝만('"다 됐어?" 하시면' 처럼 사용자 말을 옮긴 것은 세지 않는다)
+DONE_WORDS = re.compile(r"(다 됐(습니다|어요|다)|완료(했|됐|되었)(습니다|어요)|끝났(습니다|어요)|다 나왔(습니다|어요)|다 그렸(습니다|어요))")
 
 
 def ask(text: str, provider: str = "", conversation: str = "", timeout: int = 1500) -> dict:
