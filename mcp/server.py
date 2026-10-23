@@ -553,17 +553,20 @@ def _sheet(items: list, name: str, total: int = 0) -> list:
         font = ImageFont.truetype(r"C:\Windows\Fonts\malgunbd.ttf", 22)
     except Exception:
         font = ImageFont.load_default()
+    cell = 1280 if len(items) == 1 else 420  # 한 장(화풍 비교표 등)은 크게: 420 으로 줄이면 칸 글자·얼굴이 안 보인다
     for label, f in items:
         im = Image.open(f).convert("RGB")
-        im.thumbnail((420, 420))
-        ImageDraw.Draw(im).text((6, 4), label, fill="yellow", font=font, stroke_width=3, stroke_fill="black")
+        im.thumbnail((cell, cell))
+        if len(items) > 1:  # 한 장이면 파일 이름표가 비교표 첫 줄 이름을 가린다
+            ImageDraw.Draw(im).text((6, 4), label, fill="yellow", font=font, stroke_width=3, stroke_fill="black")
         tiles.append(im)
     cols = min(4, len(tiles))
     rows = (len(tiles) + cols - 1) // cols
     h = max(t.height for t in tiles)
-    sheet = Image.new("RGB", (424 * cols, (h + 4) * rows), "gray")
+    cw = max(t.width for t in tiles) + 4
+    sheet = Image.new("RGB", (cw * cols, (h + 4) * rows), "gray")
     for k, t in enumerate(tiles):
-        sheet.paste(t, ((k % cols) * 424, (k // cols) * (h + 4)))
+        sheet.paste(t, ((k % cols) * cw, (k // cols) * (h + 4)))
     SHEETS.mkdir(parents=True, exist_ok=True)
     out = SHEETS / f"{name}_{time.strftime('%H%M%S')}.jpg"
     sheet.save(out, quality=85)
@@ -1027,20 +1030,26 @@ def new_series(spec: str) -> str:
 
 @mcp.tool()
 def add_to_series(series: str, kind: str, key: str, value: str) -> str:
-    """작품에 인물이나 장소를 더한다(새 회차에 처음 나오는 사람·곳). kind = cast | location, key = 영어 id.
-    cast 면 value 는 JSON {"ko","en","role","who","main","exprs"}(new_series 와 같은 칸), location 이면 영어 설명 한 문장.
-    그림은 make_episode 의 에셋 점검이 시안으로 그린다. new_series 로 연 작품만(series.json 이 있는 작품)."""
+    """작품에 인물이나 장소를 더하거나 바꾼다(새 회차에 처음 나오는 사람·곳, 생김새·옷 고치기). kind = cast | location | style | people_rule, key = 영어 id.
+    cast 면 value 는 JSON {"ko","en","role","who","main","exprs"}(new_series 와 같은 칸, 있는 id 면 통째로 바뀜), location 이면 영어 설명 한 문장,
+    style 이면 영어 그림체 문단(style_compare 로 고른 것), people_rule 이면 사람 규칙 영어 문장(누가 미남·미녀이고 나머지는 평범하게 등). style·people_rule 은 key 를 안 쓴다.
+    그림은 make_episode 의 에셋 점검이 시안으로 그린다(이미 있는 시트·장소를 바꾸려면 redo_candidate). new_series 로 연 작품만(series.json 이 있는 작품)."""
     try:
         s = _series(series)
         if not (s / "series.json").exists():
             return f"{s.name} 은 작품 설정(series.json)이 없는 옛 작품이다. 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄 넣는다"
-        if kind not in ("cast", "location"):
-            return "kind 는 cast 또는 location"
+        if kind not in ("cast", "location", "style", "people_rule"):
+            return "kind 는 cast · location · style · people_rule"
+        if kind in ("style", "people_rule") and len(value.strip()) < 20:
+            return f"{kind} 는 영어 문장으로(20자 넘게)"
         files = ns.add(s, kind, key, json.loads(value) if kind == "cast" else value)
     except SystemExit as e:
         return str(e)
     except Exception as e:  # noqa: BLE001
         return f"실패: {type(e).__name__}: {e}"
+    if kind in ("style", "people_rule"):
+        return (f"{s.name} 의 {kind} 를 바꿨다(series.json · prompts {len(files)}개). 이미 그린 시트·장소는 그대로다: "
+                "redo_candidate 로 새 시안 → contact_sheet 로 고르기 → move_file 로 바꿔 넣기 → vast_make_assets")
     return f"{s.name} 에 {kind} {key} 를 더했다. 프롬프트 {len(files)}개. 그림은 make_episode 에셋 점검이 시안으로 그린다"
 
 
@@ -1101,6 +1110,72 @@ def redo_candidate(series: str, kind: str, name: str) -> str:
         rej.mkdir(parents=True, exist_ok=True)
         shutil.move(str(cand), str(rej / f"{cand.stem}_{time.strftime('%m%d%H%M%S')}.png"))
     return f"작업 시작 {job}: 시안 {cand.relative_to(ROOT)} 를 다시 그린다(약 2~4분). job_status('{job}', wait=50)"
+
+
+ASPECTS = ("9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9")  # vast/comfy_panel.SIZES
+
+
+@mcp.tool()
+def style_compare(name: str, styles: str, scenes: str, series: str = "", people_rule: str = "", seed: int = -1, full: bool = False) -> str:
+    """화풍 후보 비교표: 그림체 여러 개 x 장면 몇 개를 같은 시드로 그려, 줄마다 그림체 이름표를 붙인 한 장(compare.jpg)을 만든다(크레딧 0, GPU 서버, 장당 약 10~20초).
+    새 작품의 그림체를 정할 때, 사용자가 "그림체를 바꾸자·후보를 골라 보고해" 할 때 쓴다. 결과는 exports/<오늘>/화풍시안_<name>/ 에 남는다.
+    styles: JSON {"이름": "영어 그림체 문단" 또는 "series:<작품>"(그 작품 그림체 그대로, 지금 그림체를 후보에 넣을 때)}, 2~8개.
+    scenes: JSON {"이름": "영어 장면 글"} 또는 {"이름": {"text": "...", "aspect": "3:2"}}, 1~4개(인물 얼굴이 보이는 장면 + 배경 장면 하나가 고르기 좋다).
+    series 를 주면 그 작품의 사람 규칙(people_rule)을 쓴다. full=True 면 터보 없이 40스텝(고른 그림체를 품질로 확인할 때, 장당 약 1분).
+    끝나면 job_status 의 links 에 compare.jpg, contact_sheet(paths='<그 폴더>/compare.jpg') 로 크게 본다. 고른 그림체는 add_to_series(작품, 'style', 'style', 문단)."""
+    if not re.fullmatch(r"[\w가-힣 ·-]{1,40}", name.strip()):
+        return _fail("bad_name", given=name, hint="이름은 40자 안의 글자·숫자·공백·-(폴더 이름이 된다)")
+    try:
+        st, sc = json.loads(styles), json.loads(scenes)
+    except json.JSONDecodeError as e:
+        return _fail("bad_json", detail=str(e), hint='styles = {"이름": "English style paragraph"}, scenes = {"이름": {"text": "...", "aspect": "3:2"}}')
+    if not isinstance(st, dict) or not 2 <= len(st) <= 8:
+        return _fail("bad_styles", hint="styles 는 그림체 2~8개의 JSON 객체")
+    if not isinstance(sc, dict) or not 1 <= len(sc) <= 4:
+        return _fail("bad_scenes", hint="scenes 는 장면 1~4개의 JSON 객체")
+    probe_styles = {}
+    for k, v in st.items():
+        v = str(v).strip()
+        if v.startswith("series:"):
+            try:
+                sd = _series(v[7:].strip())
+            except ValueError as e:
+                return _fail("unknown_series", given=v, detail=str(e))
+            sp = next((sd / "prompts" / f for f in ("style.txt", "style_v2.txt") if (sd / "prompts" / f).exists()), None)
+            if sp is None:
+                return _fail("no_style", given=v, hint=f"{sd.name}/prompts/style.txt 가 없다")
+            v = re.sub(r"^ART STYLE[^:]*:\s*", "", sp.read_text(encoding="utf-8").strip())
+        if len(v) < 20:
+            return _fail("short_style", given=k, hint="그림체는 영어 문단으로(선·색·빛·얼굴·비율)")
+        probe_styles[k] = v
+    probe_scenes = {}
+    for k, v in sc.items():
+        v = {"text": v} if isinstance(v, str) else dict(v)
+        if len(str(v.get("text", "")).strip()) < 20:
+            return _fail("short_scene", given=k, hint="장면은 영어로: 누가·어디서·무엇을·빛")
+        if v.setdefault("aspect", "3:2") not in ASPECTS:
+            return _fail("bad_aspect", given=v["aspect"], allowed=list(ASPECTS))
+        probe_scenes[k] = {"text": str(v["text"]).strip(), "aspect": v["aspect"]}
+    rule = people_rule.strip()
+    if not rule and series:
+        try:
+            rule = str(_json(_series(series) / "series.json", {}).get("people_rule") or "")
+        except ValueError as e:
+            return _fail("unknown_series", given=series, detail=str(e))
+    probe = {"styles": probe_styles, "scenes": probe_scenes, "seed": seed if seed >= 0 else 20261018, "full": bool(full)}
+    if rule:
+        probe["people_rule"] = rule
+    out = ROOT / "exports" / time.strftime("%Y-%m-%d") / f"화풍시안_{name.strip().replace(' ', '_')}"
+    out.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(probe, ensure_ascii=False, indent=1)
+    import hashlib
+    pf = out / f"probe_{hashlib.sha1(body.encode()).hexdigest()[:8]}.json"  # 내용이 바뀌면 다른 작업(같은 이름으로 후보를 바꿔 다시 그릴 때)
+    pf.write_text(body, encoding="utf-8")
+    n = len(probe_styles) * len(probe_scenes)
+    job = _start_job("style_compare", out, [{"label": f"화풍 비교 {len(probe_styles)}x{len(probe_scenes)}", "cmd": [PY, str(TOOLS / "style_probe.py"), str(pf), str(out)]}])
+    rel = out.relative_to(ROOT).as_posix()
+    return (f"작업 시작 {job}: 그림체 {len(probe_styles)} x 장면 {len(probe_scenes)} = {n}장(약 {max(1, n * (60 if full else 15) // 60)}분). "
+            f"job_status('{job}', wait=50) → links 의 compare.jpg, contact_sheet(paths='{rel}/compare.jpg')")
 
 
 SPEC_STUB = '''"""컷 설명은 panels_spec.json(MCP set_panels 로 채움). 이 파일은 공용 변환기 tools/panels_from_spec.py 를 부른다."""

@@ -111,9 +111,14 @@ def create(spec: dict) -> Path:
 
 
 def add(d: Path, kind: str, key: str, value) -> list:
-    """인물(kind=cast, value=dict) 또는 장소(kind=location, value=영어 설명)를 series.json 에 더하고 프롬프트를 다시 쓴다."""
+    """인물(kind=cast, value=dict) 또는 장소(kind=location, value=영어 설명)를 series.json 에 더하거나 바꾸고 프롬프트를 다시 쓴다.
+    kind=style·people_rule 이면 그 문단(value)을 통째로 바꾼다(key 는 안 쓴다). 그림체를 고르고도 series.json·style.txt·시트 프롬프트를
+    손으로 고쳐야 했다(2026-10-23 개항 무대 뒤 그림체)."""
     spec = json.loads((d / "series.json").read_text(encoding="utf-8"))
-    spec.setdefault("cast" if kind == "cast" else "locations", {})[key] = value
+    if kind in ("style", "people_rule"):
+        spec[kind] = str(value).strip()
+    else:
+        spec.setdefault("cast" if kind == "cast" else "locations", {})[key] = value
     errs = check(spec)
     if errs:
         raise SystemExit("고친다:\n- " + "\n- ".join(errs))

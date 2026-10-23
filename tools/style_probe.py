@@ -42,13 +42,15 @@ def main():
     seed = int(probe.get("seed", 20261018))
     c = Comfy()
     used, cells, queued = {}, {}, []
+    # 같은 이름의 칸이라도 글이 바뀌었으면 다시 그린다(MCP style_compare 로 같은 폴더에 후보 글만 고쳐 다시 부를 때)
+    before = json.loads((out / "prompts.json").read_text(encoding="utf-8")) if (out / "prompts.json").exists() else {}
     for si, (sname, scene) in enumerate(probe["scenes"].items()):
         w, h = SIZES[scene.get("aspect", "3:2")]
         for stname, style in probe["styles"].items():
             dst = out / f"{sname}__{stname}.png"
             pr = prompt_for(scene, style, rule)
             used[dst.name] = pr
-            if not dst.exists():  # 다시 부르면 빠진 것만 그린다
+            if not dst.exists() or before.get(dst.name, pr) != pr:  # 다시 부르면 빠진 것·글이 바뀐 것만 그린다
                 full = bool(probe.get("full"))  # "full": true 면 터보 없이 40스텝(고른 그림체를 품질로 확인할 때)
                 g = graph(pr, [], w, h, seed + si, 40 if full else 8, 1024, turbo=not full)
                 g["9"]["inputs"]["filename_prefix"] = "webtoon_studio/style_probe"
@@ -91,7 +93,7 @@ def main():
             x += cw + 8
         y += rh + 8
     sheet.save(out / "compare.jpg", quality=88)
-    print(out / "compare.jpg")
+    print("내보냄", out / "compare.jpg")  # MCP job_status 가 이 줄을 links 로 준다
 
 
 if __name__ == "__main__":

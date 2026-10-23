@@ -11,7 +11,7 @@
 ## 1. 하네스 단계(어느 에이전트가 붙어도 같다)
 | 단계 | 도구 | 관문·검사(통과해야 다음 단계) |
 |---|---|---|
-| 작품 열기 | new_series(spec) · add_to_series | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(그림체 후보 비교: 작업실의 tools/style_probe.py) |
+| 작품 열기 | new_series(spec) · add_to_series | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(style_compare 로 후보 비교표 → add_to_series(…, 'style')) |
 | 콘티 | new_episode → make_storyboard.py 의 컷 부분을 쓴다(write_file·edit_file) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
 | 컷 설명 | set_panels(5~8컷씩) | prepare_episode 의 **컷 설명 관문**(skills/panel-spec/judge.json + 연출 문법 코드 검사): 마주 보기·얼굴 방향, 앉음 이어짐, 소품 종류·개수, 탈것 방향, 대사 중 뒷모습 금지, 시대 소품 |
 | 그리기 | make_episode (관문을 통과해야 시작한다) | 컷마다 그린 직후 그림 검수: 인원·팔다리·독자 시선·마주 보기·현실 논리·소품·시대. 걸리면 걸린 점을 지시에 붙여 스스로 다시 그린다 |
@@ -37,9 +37,21 @@
 - 예) 회차를 다른 버전으로: copy_file(episodes/ep001 → episodes/ep001_v2) → 콘티·컷 설명에서 바꿀 곳만 edit_file·set_panels → prepare_episode →
   바뀐 컷만 vast_draw(ids) → compare_panel(redraw) → adopt_panel → compose → export(버전은 파일 이름 끝에 _v2 가 붙어 원본을 덮지 않는다).
   그림을 처음부터 다시 그릴 버전이면 new_episode(작품, 'ep001_v2', template='ep001') + copy_file(ep001/panels_spec.json → ep001_v2/) 로 그림 없이 연다.
-- 예) 그림체·인물 생김새 바꾸기(작품 전체에 걸린다: 옛 회차를 다시 그려도 새 모습): add_to_series 로 설정 고치기 → redo_candidate 로 시안 →
+- 예) 인물 한 명 생김새·옷 바꾸기(작품 전체에 걸린다: 옛 회차를 다시 그려도 새 모습): add_to_series(작품, 'cast', <id>, …) → redo_candidate(sheet, <id>) →
   contact_sheet(paths=assets/_candidates) 로 보여 주고 고르기 → move_file(옛 시트 → assets/_old/) · move_file(시안 → assets/) →
   move_file(assets/vast_refs/<id>_* → assets/_old/refs/) → vast_make_assets(작품, <id>) 로 참고 그림·표정 은행 다시 만들기 → 그 인물이 나온 컷을 다시 그린다.
+- 예) 그림체부터 다시 잡기(사용자 "그림체 후보 골라 보고해", "시안부터 다시"). 단계마다 보여 주고 고른 뒤 다음으로 간다:
+  1. 화풍 후보: style_compare(name, styles={후보 4~6개, 지금 그림체는 "series:<작품>"}, scenes={주인공 얼굴 장면 · 조연이 같이 나오는 장면 · 배경 장면}, series=작품)
+     → contact_sheet(paths=…/compare.jpg). 사용자 말("조연이 너무 예쁨", "너무 못난이")은 후보 문단에 넣어 다시 부른다(같은 이름이면 바뀐 칸만 다시 그린다).
+  2. 확정: add_to_series(작품, 'style', 'style', 고른 문단). 누구만 미남·미녀이고 나머지는 평범한지 같은 규칙은 add_to_series(작품, 'people_rule', 'rule', 문장).
+  3. 인물 시안(단계별 후보): 인물마다 prompts/sheet_<id>.txt 를 read_file → 생김새 문장만 단계별로 바꿔 write_file(prompts/sheet_<id>_p1.txt, _p2 …,
+     예: p1 평범한 얼굴 · p2 살짝 못생긴 얼굴) → redo_candidate(sheet, '<id>_p1') … → contact_sheet(paths=assets/_candidates) 로 단계를 나란히 보여 주고 고르기.
+     고른 단계의 문장은 add_to_series(cast, <id>) 의 who 에 넣어 다음 시트·프롬프트도 그 얼굴이 되게 한다.
+  4. 바꿔 넣기: move_file(assets/*_sheet.png → assets/_old/<이름>/) → 고른 시안을 move_file(assets/_candidates/<id>_p2_sheet.png → assets/<id>_sheet.png) →
+     장소도 redo_candidate(location, <장소>) 를 장소마다 → move_file(assets/locations/*.png → assets/_old/<이름>/locations/) · move_file(_candidates/locations/*.png → assets/locations/) →
+     move_file(assets/vast_refs/* → assets/_old/<이름>/refs/) → vast_make_assets(작품, 'all', 'both') · 'subtle' · 'turn'(참고 그림은 시트에서 저절로 잘린다. 전신끼리 맞붙은 시트도 된다).
+  5. 다시 그리기: 옛 그림을 남길 회차는 copy_file 로 새 버전(ep001_v2)을 열고, 같은 회차를 덮으려면 그 회차 panels_hf·panels_hf_vast·panels 를 _old 로 옮긴 뒤
+     prepare_episode(관문) → make_episode. 연기가 어색하다는 말이 있었으면 컷 설명의 얼굴 방향·보는 곳·소품 동작부터 고친다(set_panels).
 
 ## 5. 긴 작업과 대화
 - 있는 파일을 옮기거나 틀로 쓸 땐 copy_file(src, dst) 한 번으로 복사하고 고칠 곳만 edit_file 로 고친다(read_file 로 읽어 write_file 로 다시 치지 않는다: 수만 자가 컨텍스트에 들어와 무거워지고 끊긴다).

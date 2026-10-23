@@ -46,6 +46,49 @@ def one_person(img: Image.Image) -> Image.Image:
     return img.crop((0, 0, cut, h))
 
 
+def bands(ink, x0: int, x1: int, h: int, min_gap: int = 2) -> list:
+    """한 열 안의 위아래 덩어리. 전신은 하나, 얼굴 칸 열은 칸 줄 수만큼. 테두리 친 얼굴 칸 사이 흰 줄은 몇 px 라 틈 2px 부터 가른다
+    (2026-10-23 개항 금수: 어두운 배경 얼굴 칸이 한 덩어리로 잡혀 얼굴 칸을 못 찾았다)."""
+    return runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=min_gap, min_len=int(0.12 * h))
+
+
+def split_valleys(prof, segs: list, min_w: int, ratio: float) -> list:
+    """구간마다 가장 옅은 곳(양 끝 min_w 안쪽)이 양옆 봉우리 중 낮은 쪽의 ratio 밑이면 거기서 가르고, 갈린 조각도 다시 본다."""
+    out, stack = [], list(segs)
+    while stack:
+        a, b = stack.pop(0)
+        if b - a >= 2 * min_w:
+            m = a + min_w + int(np.argmin(prof[a + min_w:b - min_w]))
+            if prof[m] < ratio * min(prof[a:m].max(), prof[m:b].max()):
+                stack[:0] = [(a, m), (m + 1, b)]
+                continue
+        out.append((a, b))
+    return out
+
+
+def person_columns(ink, w: int) -> list:
+    """시트의 열(전신 하나 · 얼굴 칸 열 하나)들. 잉크 열 덩어리를 가장 옅은 골짜기에서 거듭 가른다:
+    전신끼리 팔끝으로, 뒷모습과 얼굴 칸이 맞붙어도 맞닿은 곳은 잉크가 양옆 봉우리의 30% 밑이다
+    (2026-10-23 개항 도경·김치형 시트가 덩어리 1개로 잡혀 참고 그림을 손으로 잘라야 했다).
+    흰 옷 전신은 다리 사이에서 둘로 갈리니, 맞붙은 좁은 조각 둘(각 9% 밑, 합 18% 밑)은 다시 붙인다(사람 하나는 시트 폭의 10% 안팎)."""
+    prof = ink.mean(axis=0)
+    out = split_valleys(prof, runs(prof > 0.015), int(0.05 * w), 0.3)
+    merged = []
+    for a, b in out:
+        if merged and a - merged[-1][1] <= 2 and b - a < 0.09 * w and merged[-1][1] - merged[-1][0] < 0.09 * w and b - merged[-1][0] < 0.18 * w:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def face_start(ink, cols: list, h: int):
+    """얼굴 칸이 시작되는 열 번호. 전신은 위아래 한 덩어리, 얼굴 칸 열은 여러 덩어리. 앞·3/4·옆 전신 셋 뒤부터 찾고,
+    못 찾아도 열이 다섯 이상이면 넷째(전신 넷: 앞·3/4·옆·뒤) 다음부터가 얼굴 칸. 그래도 없으면 None."""
+    fi = next((i for i in range(3, len(cols)) if len(bands(ink, *cols[i], h)) >= 2), None)
+    return fi if fi is not None else (4 if len(cols) >= 5 else None)
+
+
 def crop_refs(sheet: Path, bust: float = 0.19):
     im = Image.open(sheet).convert("RGB")
     a = np.asarray(im).astype(np.int16)
@@ -53,9 +96,10 @@ def crop_refs(sheet: Path, bust: float = 0.19):
     border = np.concatenate([a[:8].reshape(-1, 3), a[-8:].reshape(-1, 3), a[:, :8].reshape(-1, 3), a[:, -8:].reshape(-1, 3)])
     bg = np.median(border, axis=0)
     ink = np.abs(a - bg).sum(axis=2) > 90  # 배경에 은은한 그라데이션·종이 결이 있어 36 은 배경까지 잡았다
-    cols = runs(ink.mean(axis=0) > 0.015)
-    if len(cols) < 2:
-        raise ValueError(f"{sheet.name}: 덩어리 {len(cols)}개(전신과 얼굴 칸을 못 가름)")
+    cols = person_columns(ink, w)
+    if not cols:
+        raise ValueError(f"{sheet.name}: 배경과 다른 덩어리가 없음")
+    fi = face_start(ink, cols, h)
 
     def box(x0, x1, y0=0, y1=None, pad=24):
         y1 = h if y1 is None else y1
@@ -76,19 +120,19 @@ def crop_refs(sheet: Path, bust: float = 0.19):
     # 모자를 쓴 인물은 19% 면 눈 밑에서 잘려 코·입이 빠진다(2026-10-23 개항 재헌: 시트의 뻐드렁니·딸기코가 컷에서 사라져 미남이 됐다)
     # → series.json cast 의 "bust"(전신 높이 비율)로 인물마다 늘린다
     bust = front.crop((0, 0, front.width, int(front.height * bust)))
-    # 얼굴 칸: 전신은 위아래로 한 덩어리, 얼굴 칸 열은 위아래로 여러 덩어리(칸이 2~3줄). 전신끼리 붙어 한 덩어리로 잡혀도 세지 않아도 된다
-    def bands(x0, x1):
-        return runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=6, min_len=int(0.12 * h))
-    grid = [cx for cx in cols[1:] if len(bands(*cx)) >= 2]
-    if not grid:
-        # 얼굴 칸이 엇갈려 놓였거나 뒷모습 전신과 붙은 시트(2026-10-19 외출 오동기·상민): 얼굴 칸 대신 정면 전신의 머리를 얼굴로 쓴다.
+    # 얼굴 칸: 첫 얼굴 칸 열의 첫 줄
+    if fi is None:
+        # 얼굴 칸이 엇갈려 놓였거나 열이 모자란 시트: 얼굴 칸 대신 정면 전신의 머리를 얼굴로 쓴다.
         # 그리기의 기본 참고는 어차피 이 머리(bust)라 멈출 까닭이 없다
         print(f"{sheet.name}: 얼굴 칸 열을 못 찾아 정면 머리를 얼굴 참고로 씀")
         return front, bust.copy(), bust
-    gx0, gx1 = grid[0]
-    ry0, ry1 = bands(gx0, gx1)[0]
+    gx0, gx1 = cols[fi]
+    rows = bands(ink, gx0, gx1, h, min_gap=0)  # 칸 사이 흰 줄이 1~2px 인 시트(개항 금수)도 있다
+    ry0, ry1 = rows[0] if rows else box(gx0, gx1, pad=0)[1::2]
     # 옆 칸과 붙어 있으면 그 줄 안에서 다시 가르고, 그래도 넓으면 정사각에 가깝게 왼쪽만
-    sub = runs(ink[ry0:ry1, gx0:gx1].mean(axis=0) > 0.02, min_gap=3)
+    # (2026-10-23 개항 재헌·미즈시마: 얼굴 둘이 한 장에 잘렸다. 맞닿은 칸 사이는 봉우리의 20% 밑, 긴 머리 얼굴 한가운데(밝은 피부)는 40% 위라 30% 로 가른다)
+    prof = np.convolve(ink[ry0:ry1, gx0:gx1].mean(axis=0), np.ones(9) / 9, mode="same")
+    sub = split_valleys(prof, runs(prof > 0.02, min_gap=3), int(0.3 * (ry1 - ry0)), 0.3)
     if sub:
         gx0, gx1 = gx0 + sub[0][0], gx0 + sub[0][1]
     if gx1 - gx0 > 1.35 * (ry1 - ry0):
@@ -105,17 +149,9 @@ def turn_head(sheet: Path, bust: float = 0.19):
     h, w, _ = a.shape
     border = np.concatenate([a[:8].reshape(-1, 3), a[-8:].reshape(-1, 3), a[:, :8].reshape(-1, 3), a[:, -8:].reshape(-1, 3)])
     ink = np.abs(a - np.median(border, axis=0)).sum(axis=2) > 90
-    bodies = []
-    for x0, x1 in runs(ink.mean(axis=0) > 0.015):
-        if len(runs(ink[:, x0:x1].mean(axis=1) > 0.01, min_gap=6, min_len=int(0.12 * h))) >= 2:
-            break  # 표정 칸 열부터는 전신이 아니다
-        if x1 - x0 > 0.22 * w:  # 전신 둘이 팔끝으로 붙었다(crop_refs 와 같은 가르기)
-            prof = ink[:, x0:x1].mean(axis=0)
-            lo, hi = int((x1 - x0) * 0.3), int((x1 - x0) * 0.7)
-            mid = x0 + lo + int(np.argmin(prof[lo:hi]))
-            bodies += [(x0, mid), (mid, x1)]
-        else:
-            bodies.append((x0, x1))
+    cols = person_columns(ink, w)
+    fi = face_start(ink, cols, h)
+    bodies = cols[:fi] if fi is not None else cols[:4]  # 얼굴 칸 열부터는 전신이 아니다
     if len(bodies) < 2:
         raise ValueError(f"{sheet.name}: 3/4 전신을 못 찾음")
     x0, x1 = bodies[1]
