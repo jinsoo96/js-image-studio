@@ -224,18 +224,33 @@ CAND_GUIDE = """# 시안: 새 {what} (Qwen Image 2.1, 40스텝, 16:9)
 작업실에서는 `vast/new_assets.py <작품> {kind} <이름>` 이 같은 구성으로 돌리고, tools/make_episode.py 가 새 {what}을 만나면 이걸 부르고 멈춘다."""
 
 
+def _example():
+    """워크플로우 예시 그림을 고를 작품: (작품 폴더, 인물 id, 그린 컷 하나, 장소 이름, 시트 인물 id). 예전엔 D+18 우빈·밤거리·팀장으로 박혀
+    D+18 폴더가 없으면 워크플로우를 다시 만들지 못했다(2026-10-24)."""
+    for s in sorted((ROOT / "series").glob("*-hf")):
+        vr = s / "assets" / "vast_refs"
+        cids = sorted(f.name[:-len("_bust.png")] for f in vr.glob("*_bust.png") if (vr / f.name.replace("_bust", "_front")).exists())
+        panels = sorted(s.glob("episodes/*/panels_hf/p*.png"))
+        locs = sorted(f.stem[4:] for f in (s / "prompts").glob("loc_*.txt"))
+        sheets = sorted(f.stem[6:] for f in (s / "prompts").glob("sheet_*.txt"))
+        if cids and panels and locs and sheets:
+            return s, cids[0], panels[0], locs[0], sheets[0]
+    raise SystemExit("예시로 쓸 작품이 없다(참고 그림·그린 컷·장소 글·시트 글이 다 있는 작품)")
+
+
 def library(force=False):
-    """저장 워크플로우 한 벌(생성 · 편집 · 에셋 · 시안)을 서버에 저장한다. 그림은 예시 D+18 우빈 밤거리. 있는 이름은 force 없이는 덮지 않는다."""
+    """저장 워크플로우 한 벌(생성 · 편집 · 에셋 · 시안)을 서버에 저장한다. 그림은 예시(작업실에 있는 작품 중 참고 그림·그린 컷·장소·시트 글이
+    다 있는 첫 작품, _example). 있는 이름은 force 없이는 덮지 않는다."""
     sys.path.insert(0, str(ROOT / "tools"))
     from make_assets import BASE, STRONG, expr_prompt
     from new_assets import SHEET_HEAD, candidate_prompt
     c, cache = Comfy(), {}
-    s = ROOT / "series" / "d-plus-18-hf"
+    s, cid, panel_png, loc_name, sheet_name = _example()
     vr = s / "assets" / "vast_refs"
-    face, front = upload(c, vr / "woobin_bust.png", cache), upload(c, vr / "woobin_front.png", cache)
-    panel = upload(c, s / "episodes" / "ep002_v2_vast" / "panels_hf" / "p043.png", cache)  # 편집 예시: 2화 vast 판 밤거리 우빈 클로즈업
-    loc_prompt, _ = candidate_prompt(s, "location", "night_street")
-    sheet_prompt, sheet_refs = candidate_prompt(s, "sheet", "teamlead")
+    face, front = upload(c, vr / f"{cid}_bust.png", cache), upload(c, vr / f"{cid}_front.png", cache)
+    panel = upload(c, panel_png, cache)  # 편집 예시: 그 작품에서 그린 컷 하나
+    loc_prompt, _ = candidate_prompt(s, "location", loc_name)
+    sheet_prompt, sheet_refs = candidate_prompt(s, "sheet", sheet_name)
     sheet_ref = upload(c, sheet_refs[0], cache)
     remove = ("Remove every person from <image1>. Fill the empty space with the matching background. "
               "Keep everything else in <image1> exactly the same: the place, lighting and framing.")

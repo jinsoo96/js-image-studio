@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -56,8 +57,6 @@ SHEETS = ROOT / "exports" / "_sheets"  # 링크(/files/)가 나가는 곳. state
 # WEBTOON_QUEUE_FRONT: agent app 에서 시킨 작업은 공용 ComfyUI 큐의 앞에 넣는다(comfy_client.queue). 작업실의 큰 배치(장소 시안·한 화 그리기) 뒤에 서서
 # 한 컷이 10분 걸렸고, 에이전트가 기다리다 멈췄다(2026-10-19 agent app)
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "WEBTOON_QUEUE_FRONT": "1"}
-COST_PER_PANEL = 1.25  # Seedream 5.0 Pro 1.5k
-MAX_PANELS = 40
 DOCS = {"LESSONS": "LESSONS.md", "ACTING_GUIDE": "worklogs/acting/GUIDE.md"}
 # 작업실 사람·Claude Code 세션용 문서. 에이전트가 CLAUDE.md 를 읽고 그 안의 'README → LESSONS → OPEN-ISSUES 차례로 읽기'를 따라
 # 도구 한도(25번)를 문서 읽기에 다 썼다(2026-10-23 미사일 스튜디오 새 작품 시험) → read_doc 에선 빼고 guide·스킬로 돌린다
@@ -294,6 +293,13 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
     에이전트가 '사람 눈으로 확인'을 실패로 읽고 같은 컷만 열 번 다시 그렸다(2026-10-19 agent app, D+18 2화 p022). 도구마다 막지 않고 여기 한 곳에서."""
     JOBS.mkdir(parents=True, exist_ok=True)
     _ensure_idle(ep)
+    if kind in GPU_KINDS:
+        why = _gpu_down()
+        if why:
+            raise GpuDown(json.dumps({"error": "gpu_server_down", "server": _gpu_host(), "detail": why,
+                                      "how": "그리기 서버(ComfyUI)가 꺼졌거나 주소가 바뀌었다. 사용자에게 알린다: 파드를 깨우거나(스튜디오 설정 → MCP 의 "
+                                             "webtoon-studio 'Restart (wake)', 또는 tools/runpod_wake.py) 다른 서버 주소를 state/comfy_url.txt 에 적은 뒤 다시"},
+                                     ensure_ascii=False))
     fp = _fingerprint(kind, ep, steps)
     since = time.time() - REPEAT_MIN * 60
     for f in sorted(JOBS.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
@@ -415,14 +421,45 @@ def _ids(text) -> list:
 
 # ── 읽기 도구 ─────────────────────────────────────────────────
 
-def _gpu_host() -> str:
-    """지금 그리기에 쓰는 ComfyUI 서버의 호스트(state/comfy_url.txt → COMFY_URL 순). 도구 설명은 서버 이름을 박지 않고 여기서 읽는다."""
-    import urllib.parse as _up
-    url = ""
+def _gpu_url() -> str:
+    """그리기 서버(ComfyUI) 주소. vast/comfy_client.Comfy 와 같은 차례: 환경변수 COMFY_URL → state/comfy_url.txt.
+    (예전 이 함수는 파일을 먼저 읽어 안내에 보이는 서버와 실제로 그리는 서버가 다를 수 있었다)"""
     sw = ROOT / "state" / "comfy_url.txt"
-    if sw.exists():
-        url = sw.read_text(encoding="utf-8").strip().splitlines()[0] if sw.read_text(encoding="utf-8").strip() else ""
-    url = url or os.environ.get("COMFY_URL", "")
+    txt = sw.read_text(encoding="utf-8").strip() if sw.exists() else ""
+    return os.environ.get("COMFY_URL", "") or (txt.splitlines()[0] if txt else "")
+
+
+GPU_KINDS = {"vast_draw", "make_episode", "style_compare", "redo_candidate", "vast_assets", "edit_panel", "preview_panel", "lora_train",
+             "restyle", "lora_compare"}
+_gpu_seen = {"at": 0.0, "why": ""}
+
+
+def _gpu_down() -> str:
+    """그리기 서버에 닿지 않으면 그 까닭(30초 동안 다시 묻지 않음), 닿으면 ''. 꺼진 서버에 작업을 띄우면 몇 분 뒤 날것의 오류로
+    실패해 에이전트가 무엇이 문제인지 몰랐다(2026-10-24) → 띄우기 전에 묻는다."""
+    if time.time() - _gpu_seen["at"] < 30:
+        return _gpu_seen["why"]
+    why = ""
+    try:
+        from comfy_client import Comfy
+        c = Comfy()
+        with urllib.request.urlopen(urllib.request.Request(c.base + "/system_stats", headers={**c.headers, "User-Agent": "webtoon-studio"}),
+                                    timeout=10) as r:
+            r.read()
+    except Exception as e:  # noqa: BLE001
+        why = f"{type(e).__name__}: {str(e)[:150]}"
+    _gpu_seen.update(at=time.time(), why=why)
+    return why
+
+
+class GpuDown(Exception):
+    """그리기 서버에 닿지 않음. 메시지는 JSON(서버·까닭·하는 법)."""
+
+
+def _gpu_host() -> str:
+    """지금 그리기에 쓰는 ComfyUI 서버의 호스트. 도구 설명은 서버 이름을 박지 않고 여기서 읽는다."""
+    import urllib.parse as _up
+    url = _gpu_url()
     if not url:
         return "주소 없음(state/comfy_url.txt 비어 있음)"
     host = _up.urlparse(url).netloc or url
