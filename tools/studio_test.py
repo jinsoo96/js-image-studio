@@ -92,6 +92,22 @@ def judge(sc: dict, turns: list, seconds: float) -> list:
     return fails
 
 
+def set_aside(sc: dict):
+    """시나리오의 setup.set_aside(작업실 기준 경로 목록)를 series/_tmp/studio_test_<시각>/ 로 옮긴다(지우지 않는다). 새 회차·새 판을 만드는
+    시나리오가 지난 시험의 결과(3화·v2)가 이미 있어 매번 다른 길로 갔다(2026-10-24): 같은 출발점에서 돌게 한다."""
+    stamp = time.strftime("%m%d-%H%M%S")
+    for rel in (sc.get("setup") or {}).get("set_aside", []):
+        src = (ROOT / rel).resolve()
+        if not src.exists():
+            continue
+        if (ROOT / "series").resolve() not in src.parents:
+            raise SystemExit(f"set_aside 는 series/ 안만: {rel}")
+        dst = ROOT / "series" / "_tmp" / f"studio_test_{stamp}" / src.relative_to((ROOT / "series").resolve())
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+        print(f"  옮겨 둠 {rel} → {dst.relative_to(ROOT)}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
@@ -100,10 +116,12 @@ def main():
     ap.add_argument("--gpu", action="store_true", help="GPU 를 쓰는 시나리오(gpu: true)도 돌린다(파드 시간 = 돈)")
     a = ap.parse_args()
     scenarios = json.loads(Path(a.file).read_text(encoding="utf-8"))
-    pick = [s for s in scenarios if (not a.names or s["name"] in a.names) and (a.gpu or a.names or not s.get("gpu"))]
+    # manual: 한 번 생긴 상태(걸린 컷 등)에 기대는 시나리오는 이름으로 부를 때만
+    pick = [s for s in scenarios if (s["name"] in a.names) if a.names] or [s for s in scenarios if not a.names and not s.get("manual") and (a.gpu or not s.get("gpu"))]
     report = [f"# 스튜디오 시험 {time.strftime('%Y-%m-%d %H:%M')} (공급자 {a.provider or '기본'})", ""]
     passed = 0
     for sc in pick:
+        set_aside(sc)
         t0, turns, conv = time.time(), [], ""
         for turn in [sc["prompt"]] + list(sc.get("then") or []):
             # 이어 할 말은 글이나 {"say": 글, "wait_jobs_min": 분}: 앞 차례가 띄운 작업이 끝날 때까지 기다렸다가 말한다

@@ -122,6 +122,16 @@
    ],
    "max_tool_errors": 3,
    "max_seconds": 6000
+  },
+  "setup": {
+   "set_aside": [
+    "series/overtime-heat-hf/episodes/ep002/panels_hf",
+    "series/overtime-heat-hf/episodes/ep002/panels_hf_vast",
+    "series/overtime-heat-hf/episodes/ep002/panels",
+    "series/overtime-heat-hf/episodes/ep002/out",
+    "series/overtime-heat-hf/episodes/ep002/review",
+    "series/overtime-heat-hf/episodes/ep002/render_status.json"
+   ]
   }
  },
  {
@@ -161,6 +171,11 @@
    "answer_has": [
     "v2"
    ]
+  },
+  "setup": {
+   "set_aside": [
+    "series/overtime-heat-hf/episodes/ep001_v2"
+   ]
   }
  },
  {
@@ -185,6 +200,11 @@
    "answer_has": [
     "3화"
    ]
+  },
+  "setup": {
+   "set_aside": [
+    "series/overtime-heat-hf/episodes/ep003"
+   ]
   }
  },
  {
@@ -207,6 +227,7 @@
    "answer_has": [
     "p002"
    ]
-  }
+  },
+  "manual": true
  }
 ]
