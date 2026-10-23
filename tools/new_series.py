@@ -34,7 +34,22 @@ SLUG = re.compile(r"[a-z][a-z0-9-]{1,40}")
 CAST_KEYS = ("ko", "en", "role", "who", "main", "exprs")
 
 
+HANGUL = re.compile(r"[\uac00-\ud7a3]")
+EN_KEYS = ("who", "main", "exprs")  # 그림 모델에 그대로 들어가는 칸(영어 글)
+
+
+def normalize(spec: dict) -> dict:
+    """받아 줄 수 있는 꼴은 고쳐 둔다: exprs 목록 → 쉼표 글. (2026-10-23 미사일 스튜디오 시험: 모델이 exprs 를 목록으로 넣어 프롬프트에 ['calm', ...] 가 들어갈 뻔)"""
+    for c in (spec.get("cast") or {}).values():
+        if isinstance(c, dict) and isinstance(c.get("outfit"), str) and not isinstance(c.get("main"), str):
+            c["main"] = c.pop("outfit")  # 옷 칸을 outfit 이라 부른 설정
+        if isinstance(c, dict) and isinstance(c.get("exprs"), (list, tuple)):
+            c["exprs"] = ", ".join(str(x).strip() for x in c["exprs"] if str(x).strip())
+    return spec
+
+
 def check(spec: dict) -> list:
+    normalize(spec)
     errs = []
     if not SLUG.fullmatch(str(spec.get("slug", ""))):
         errs.append("slug: 영어 소문자·숫자·하이픈(예: office-noir)")
@@ -50,9 +65,24 @@ def check(spec: dict) -> list:
         miss = [k for k in CAST_KEYS if not str((c or {}).get(k, "")).strip()]
         if miss:
             errs.append(f"cast.{cid}: {', '.join(miss)} 가 비어 있다")
+        # 그림 모델 칸은 영어 글이어야 한다: who 를 한국어로, main 을 true(주인공 여부로 읽음)로 넣은 설정이 그대로 통과해
+        # 시트 프롬프트가 'Outfit: True' 가 될 뻔했다(2026-10-23 미사일 스튜디오 시험)
+        for k in EN_KEYS:
+            v = (c or {}).get(k)
+            if v is not None and not isinstance(v, str):
+                errs.append(f"cast.{cid}.{k}: 글이어야 한다(받은 값 {v!r}). main 은 주인공 여부가 아니라 기본 옷차림(영어)")
+            elif isinstance(v, str) and HANGUL.search(v):
+                errs.append(f"cast.{cid}.{k}: 영어로 쓴다(그림 모델에 그대로 들어간다)")
+        if isinstance((c or {}).get("exprs"), str) and len([x for x in c["exprs"].split(",") if x.strip()]) < 4:
+            errs.append(f"cast.{cid}.exprs: 영어 표정 6개 안팎, 쉼표로")
     for name, desc in (spec.get("locations") or {}).items():
         if not ID.fullmatch(name) or not str(desc).strip():
             errs.append(f"locations.{name}: 이름은 영어 소문자·숫자·밑줄, 설명은 영어 한 문장")
+        elif HANGUL.search(str(desc)):
+            errs.append(f"locations.{name}: 설명은 영어로(그림 모델에 그대로 들어간다)")
+    for k in ("style", "people_rule", "era_rule"):
+        if HANGUL.search(str(spec.get(k) or "")):
+            errs.append(f"{k}: 영어로(그림 모델에 그대로 들어간다)")
     return errs
 
 

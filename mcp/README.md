@@ -11,7 +11,7 @@
 | `review_panels` | 그림 검수: 그림을 보는 모델(`qwen3.8-27b`, agent platform 공인망 게이트웨이)이 컷 그림 + 컷 설명을 맞대어 인원·좌우·시선·옷·표정·배경 판정과 고칠 점. 8컷 이하는 바로, 더 많으면 작업(`state\mcp_reviews\`). 본체 `vision_review.py`(명령줄로도 돈다) | 0 |
 | `list_files` · `read_file` · `write_file` · `copy_file` | 작업실 안 파일 보기·읽기·쓰기. 쓰기는 작품 폴더의 글 파일(.py .json .md .txt)·worklogs·LESSONS·reader 만, 도구·그림·에셋·.git 금지. 덮어쓰기 전 원본은 `state\mcp_backups\`, 파이썬·JSON 은 문법 검사, em dash 거절. `copy_file` 은 내용을 읽지 않고 그대로 복사(긴 콘티를 옮길 때) | 0 |
 | `new_episode` | 새 회차 폴더를 앞 회차 틀(make_storyboard·build_panels·trailer)로 연다. 있는 회차는 건드리지 않음 | 0 |
-| `prepare_episode` | make_storyboard.py → build_panels.py | 0 |
+| `set_storyboard` · `prepare_episode` | 콘티를 표(storyboard_spec.json)로 넣기 · make_storyboard.py(표면 tools/storyboard_from_spec.py) → build_panels.py → 관문 | 0 |
 | `compose` · `export` | 합성·PDF·기계 점검 / 예고편·epub·exports 복사(작업) | 0 |
 | `job_status` | 작업 상태와 로그 끝(작업 기록은 `state\mcp_jobs\`). `wait` 초(50까지)를 주면 끝날 때까지 기다렸다 답한다(옛 job_wait 를 합침) | 0 |
 

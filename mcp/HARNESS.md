@@ -12,7 +12,7 @@
 | 단계 | 도구 | 관문·검사(통과해야 다음 단계) |
 |---|---|---|
 | 작품 열기 | new_series(spec) · add_to_series | 설정 칸 검사(인물 who·main·exprs, 장소 영어 설명). 그림체는 사용자와 고른다(style_compare 로 후보 비교표 → add_to_series(…, 'style')) |
-| 콘티 | new_episode → make_storyboard.py 의 컷 부분을 쓴다(write_file·edit_file) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
+| 콘티 | new_episode → set_storyboard(컷 목록을 표로, 몇 컷씩 나눠도 됨. 파이썬을 쓰지 않는다) | prepare_episode 의 **콘티 관문**(skills/storyboard/judge.json): 설정·직함 일치, 이유 있는 행동, 장면 연결, 결론 내레이션 금지, 직접 감정 고백 금지, 대사 길이 |
 | 컷 설명 | set_panels(5~8컷씩) | prepare_episode 의 **컷 설명 관문**(skills/panel-spec/judge.json + 연출 문법 코드 검사): 마주 보기·얼굴 방향, 앉음 이어짐, 소품 종류·개수, 탈것 방향, 대사 중 뒷모습 금지, 시대 소품 |
 | 그리기 | make_episode (관문을 통과해야 시작한다) | 컷마다 그린 직후 그림 검수: 인원·팔다리·독자 시선·마주 보기·현실 논리·소품·시대. 걸리면 걸린 점을 지시에 붙여 스스로 다시 그린다 |
 | 이어짐 | make_episode 안에서 | 같은 장면 앞뒤 컷 비교: 자세·소품·옷·얼굴·그림체·좌우 |
@@ -31,7 +31,7 @@
 ## 4. 저장소(작업실) 둘러보기·다루기
 작품·그림·내보낸 것은 모두 작업실 저장소에 쌓인다. 일마다 따로 된 도구를 찾지 말고 아래 일반 도구로 둘러보고 옮긴다(지우는 도구는 없다: 안 쓰게 된 옛 판은 `_old/` 로 옮긴다(자동으로 안 지움, 10일 넘으면 목록만 알림). 시험용 결과물은 `_tmp/` 로 옮기면 10일 뒤 저절로 지워진다(예약작업 WEBTOON-clean-old).
 - 구조: `series/<작품>-hf/` = series.json(설정·그림체·인물) · assets/(인물 시트 `<id>_sheet.png` · locations/ 장소 · vast_refs/ 참고 그림·표정 은행 · _candidates/ 시안) ·
-  episodes/<회차>/(make_storyboard.py 콘티 · panels_spec.json 컷 설명 · panels_hf/ 본편 그림 · panels_hf_vast/ 다시 그린 그림 · out/ 합성본). `exports/<날짜>/` 내보낸 PDF·epub·예고편. `worklogs/` 작업 기록.
+  episodes/<회차>/(storyboard_spec.json 콘티 표(옛 회차는 make_storyboard.py) · panels_spec.json 컷 설명 · panels_hf/ 본편 그림 · panels_hf_vast/ 다시 그린 그림 · out/ 합성본). `exports/<날짜>/` 내보낸 PDF·epub·예고편. `worklogs/` 작업 기록.
 - 보기: list_files(path, pattern='*.png') 목록·크기·고친 시각 · read_file 글 · contact_sheet(paths='폴더·파일·* 패턴') 그림(시트·시안·참고 그림·장소도) · file_link 사용자에게 줄 주소.
 - 다루기: copy_file(파일·폴더·패턴 → 작품 폴더·exports·worklogs, 그림 포함) · move_file(옮기기·이름 바꾸기, 같은 이름이 있으면 안 옮김, 그 작품에 작업이 돌면 안 옮김).
 - 예) 회차를 다른 버전으로: copy_file(episodes/ep001 → episodes/ep001_v2) → 콘티·컷 설명에서 바꿀 곳만 edit_file·set_panels → prepare_episode →

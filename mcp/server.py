@@ -57,8 +57,10 @@ SHEETS = ROOT / "exports" / "_sheets"  # 링크(/files/)가 나가는 곳. state
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "WEBTOON_QUEUE_FRONT": "1"}
 COST_PER_PANEL = 1.25  # Seedream 5.0 Pro 1.5k
 MAX_PANELS = 40
-DOCS = {"CLAUDE": "CLAUDE.md", "README": "README.md", "LESSONS": "LESSONS.md", "OPEN_ISSUES": "worklogs/OPEN-ISSUES.md",
-        "ACTING_GUIDE": "worklogs/acting/GUIDE.md"}
+DOCS = {"LESSONS": "LESSONS.md", "ACTING_GUIDE": "worklogs/acting/GUIDE.md"}
+# 작업실 사람·Claude Code 세션용 문서. 에이전트가 CLAUDE.md 를 읽고 그 안의 'README → LESSONS → OPEN-ISSUES 차례로 읽기'를 따라
+# 도구 한도(25번)를 문서 읽기에 다 썼다(2026-10-23 미사일 스튜디오 새 작품 시험) → read_doc 에선 빼고 guide·스킬로 돌린다
+INTERNAL_DOCS = {"CLAUDE", "README", "OPEN_ISSUES"}
 SERIES_DOCS = {"README": "README.md", "SERIES": "SERIES.md", "STYLE": "STYLE.md", "ASSETS": "ASSETS.md"}
 # 원격 주소(예: https://webtoon.js-96.com). 있으면 결과 파일을 링크로 준다: 다른 PC 의 agent app 에선 D:\ 경로를 못 연다
 PUBLIC = os.environ.get("WEBTOON_PUBLIC_URL", "").rstrip("/")
@@ -67,7 +69,12 @@ FILE_TYPES = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4"}
 
 mcp = FastMCP("webtoon-studio", instructions=(
     "웹툰 하네스(이미지 스튜디오의 웹툰 템플릿). 붙이면 끝: 별도 시스템 프롬프트 없이 이 MCP 만으로 새 작품·다음 화를 만든다. "
-    "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 작업 결과는 JSON(state·review·drawn·links)이다. "
+    "일을 시작하기 전에 guide() 를 한 번 부른다(단계·관문·규칙). 문서는 guide 와 지금 단계의 스킬(read_doc('skill:<이름>'))만 읽고 바로 도구로 일한다"
+    "(다른 작품 파일을 두루 읽지 않는다). "
+    "차례: 새 작품 = new_series(설정 객체) → new_episode(작품, 'ep001') → set_storyboard(컷 목록) → set_panels(컷 설명) → prepare_episode(관문) → "
+    "사용자가 그리자고 하면 make_episode. 다음 화 = new_episode → set_storyboard(replace=True) → set_panels → prepare_episode. "
+    "컷 고치기 = panel_info → preview_panel 또는 edit_panel → compare_panel → adopt_panel. 그림체 고르기 = style_compare. "
+    "작업 결과는 JSON(state·review·drawn·links)이다. "
     "콘티·컷 설명은 prepare_episode 의 관문(격리 judge)을 통과해야 make_episode 가 그린다. 그린 그림은 검수가 스스로 다시 그린다. "
     "오래 걸리는 일은 job_id 를 돌려주니 기다리지 말고 알린 뒤 답을 끝낸다. 사용자에게는 한국어로 답한다."))
 
@@ -258,7 +265,7 @@ def _fingerprint(kind: str, ep: Path, steps: list) -> str:
     """작업의 지문 = 종류 + 명령 + 그 작업이 읽는 입력 파일(콘티·컷 설명) 내용. 입력이 바뀌면(컷 설명 수정·시드 변경) 다른 작업이다."""
     import hashlib
     h = hashlib.sha1(json.dumps([kind, [s.get("cmd") for s in steps]], ensure_ascii=False, default=str).encode())
-    for name in ("make_storyboard.py", "build_panels.py", "storyboard.json", "panels.json", "panels_spec.json", "series.json"):
+    for name in ("make_storyboard.py", "storyboard_spec.json", "build_panels.py", "storyboard.json", "panels.json", "panels_spec.json", "series.json"):
         if (ep / name).exists():
             h.update((ep / name).read_bytes())
     # 작품 단위 작업(시안 다시 그리기 등)은 그림체·인물 글(prompts/*.txt)이 입력이다. 글을 고쳐 다시 그리게 했는데 명령이 같다고
@@ -418,10 +425,10 @@ def guide() -> str:
 
 @mcp.tool()
 def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000) -> str:
-    """작업실 문서·스킬을 읽는다. doc: CLAUDE · README · LESSONS · OPEN_ISSUES · ACTING_GUIDE(작업실 공통),
-    series 를 주면 README · SERIES · STYLE · ASSETS(그 작품), 'skill' 이면 스킬 목록과 웹툰 템플릿, 'skill:<이름>' 이면 그 스킬
-    (storyboard 콘티 · panel-spec 컷 설명 · continuity 이어 그리기 · asset 에셋 · staging-review 연출 검수 · lettering-publish 식자·출판).
-    그 일을 시작하기 전에 해당 스킬을 읽고 순서·규칙대로 한다. 긴 문서는 offset 으로 이어 읽는다."""
+    """그 단계의 스킬·작품 문서를 읽는다. 'skill:<이름>' 이 기본(storyboard 콘티 · panel-spec 컷 설명 · continuity 이어 그리기 · asset 에셋 ·
+    staging-review 연출 검수 · lettering-publish 식자·출판), 'skill' 이면 스킬 목록. series 를 주면 README · SERIES · STYLE · ASSETS(그 작품 설정).
+    LESSONS(사용자가 짚은 문제 모음, 길다)·ACTING_GUIDE(연기). 지금 하는 단계의 스킬 하나만 읽는다: 순서는 guide(), 규칙은 관문이 강제한다.
+    긴 문서는 offset 으로 이어 읽는다."""
     d = doc.strip().upper()
     if d == "SKILL" or d.startswith("SKILL:"):
         t = _skill_text(doc.strip()[6:])
@@ -433,8 +440,11 @@ def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000
             return f"작품 문서는 {', '.join(SERIES_DOCS)} 중 하나"
         p = _series(series) / SERIES_DOCS[d]
     else:
+        if d in INTERNAL_DOCS:
+            return ("그 문서는 작업실 사람용 내부 문서라 에이전트 일에 쓰지 않는다. 일하는 순서는 guide(), 단계별 규칙은 read_doc('skill:<이름>'), "
+                    "작품 설정은 read_doc('SERIES', series=작품), 지금 상태는 status()")
         if d not in DOCS:
-            return f"문서는 {', '.join(DOCS)} 중 하나(작품 문서는 series 를 같이 준다)"
+            return f"문서는 {', '.join(DOCS)} 중 하나(작품 문서는 series 를 같이 준다, 스킬은 'skill:<이름>')"
         p = ROOT / DOCS[d]
     t = p.read_text(encoding="utf-8")
     part = t[offset:offset + max_chars]
@@ -474,7 +484,6 @@ def status() -> str:
                          f"합성 {'있음 ' + pdf.name if pdf else '없음'}")
     running = [st.name.replace('.status.json', '') for st in JOBS.glob('*.status.json') if (_json(st, {}) or {}).get('state') == 'running']
     lines.append(f"\n진행 중인 작업: {', '.join(running) or '없음'}")
-    lines.append("정본·다음 할 일은 read_doc('OPEN_ISSUES') 와 각 작품 README.")
     return "\n".join(lines)
 
 
@@ -529,7 +538,7 @@ def _images_of(ep: Path, pid: str) -> dict:
 
 @mcp.tool()
 def find(query: str, series: str = "", limit: int = 12) -> str:
-    """찾기: 컷 번호('p22'·'22p'·'p022'), 인물·장소 이름, 대사·행동 글의 낱말로 작품·회차·컷을 찾아 정확한 식별자와 상태를 준다. 파일을 읽어 짐작하지 말고 이걸로 먼저 찾는다.
+    """찾기: 작품 이름(제목·별명), 컷 번호('p22'·'22p'·'p022'), 인물·장소 이름, 대사·행동 글의 낱말로 작품·회차·컷을 찾아 정확한 식별자와 상태를 준다. 파일을 읽어 짐작하지 말고 이걸로 먼저 찾는다.
     컷 번호를 주면 그 번호가 있는 모든 회차(vast 판 복사본 포함)와 컷마다 status(new = 컷 설명이 있어 그린다 · reuse = 앞 화·다른 판 그림을 그대로 · composite = 합성 재료 ·
     no_description)와 그림이 어디 있는지(images)를 준다. 글을 주면 낱말이 모두 든 컷(대사·행동·연기·장소·인물 이름)을 준다. series 로 좁힌다."""
     q = (query or "").strip()
@@ -561,11 +570,24 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
             for c, v in cast.items():
                 if isinstance(v, dict) and all(t in f"{c} {v.get('ko', '')} {v.get('en', '')}".lower() for t in toks):
                     cast_hits.append({"series": s.name, "character": c, "ko": v.get("ko"), "role": v.get("role")})
+    # 작품 이름(제목·별명·slug)도 찾는다: '개항' 을 찾으면 컷 글에 그 낱말이 없어 nothing_found 였다(2026-10-23 스튜디오 시험, Claude)
+    series_hits = []
+    if key is None and not series:
+        sname = _series_names().get(_norm_name(q))
+        if sname:
+            sd = ROOT / "series" / sname
+            sj = _json(sd / "series.json", {}) if (sd / "series.json").exists() else {}
+            series_hits.append({"series": sname, "title": sj.get("title") or sname,
+                                "episodes": sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir()),
+                                "characters": [c for c in (_json(sd / "cast.json", {}) or {}) if not c.startswith("_")],
+                                "assets": f"series/{sname}/assets (인물 시트 *_sheet.png · locations/ · vast_refs/)"})
     n = max(1, min(int(limit), 40))
     out = {"query": q, "total": len(hits), "hits": hits[:n]}
+    if series_hits:
+        out["series"] = series_hits
     if cast_hits:
         out["characters"] = cast_hits[:n]
-    if not hits and not cast_hits:
+    if not hits and not cast_hits and not series_hits:
         out["error"] = "nothing_found"
     return json.dumps(out, ensure_ascii=False)
 
@@ -573,13 +595,15 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
 @mcp.tool()
 def panel_info(series: str, episode: str, panel: str) -> str:
     """컷 하나의 모든 것(JSON): status(new · reuse · composite · no_description), 콘티(장면·구도·인물·대사), 컷 설명(장소·옷·행동·연기·카메라), 그림이 있는 곳(images 링크),
-    재사용이면 출처, 검수에서 사람 확인으로 남은 것(review). 컷 설명 파일(build_panels.py, 22KB)을 읽어 그 컷을 찾는 대신 이걸 쓴다. 번호는 p22·22 처럼 줘도 풀어 준다."""
+    재사용이면 출처, 검수에서 사람 확인으로 남은 것(review). 컷 설명 파일(build_panels.py, 22KB)을 읽어 그 컷을 찾는 대신 이걸 쓴다. 번호는 p22·22 처럼 줘도 풀어 준다.
+    여러 컷은 쉼표로('p001,p005', 관문에 걸린 컷을 한 번에 볼 때) → 목록."""
     ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    c = _catalog(ep)[pid]
-    return json.dumps({"series": _series(series).name, "episode": ep.name, "panel": pid, "status": c["status"], "storyboard": c["board"], "description": c["spec"],
-                       "reuse_source": c["reuse"], "images": _images_of(ep, pid),
-                       "review": (_json(ep / "review" / "staging.json", {}) or {}).get(pid)}, ensure_ascii=False)
+    cat = _catalog(ep)
+    review = _json(ep / "review" / "staging.json", {}) or {}
+    out = [{"series": _series(series).name, "episode": ep.name, "panel": pid, "status": cat[pid]["status"], "storyboard": cat[pid]["board"],
+            "description": cat[pid]["spec"], "reuse_source": cat[pid]["reuse"], "images": _images_of(ep, pid), "review": review.get(pid)}
+           for pid in _pids(ep, panel, "any")]
+    return json.dumps(out[0] if len(out) == 1 else out, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -1072,11 +1096,12 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     eps = sorted(d.name for d in (s / "episodes").iterdir() if d.is_dir() and not d.name.endswith("_vast"))
     if not eps and not template.strip():  # 새 작품의 첫 회차: 빈 콘티 틀(제목·크레딧은 series.json 에서 읽음)
         dst.mkdir(parents=True)
-        shutil.copy2(ROOT / "skills" / "storyboard" / "make_storyboard_template.py", dst / "make_storyboard.py")
+        (dst / "make_storyboard.py").write_text(STORYBOARD_STUB, encoding="utf-8")
+        (dst / "storyboard_spec.json").write_text(json.dumps({"cuts": []}, ensure_ascii=False, indent=1), encoding="utf-8")
         (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
         (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
-        return (f"새 회차 {dst.relative_to(ROOT)} (첫 회차라 빈 콘티 틀). read_doc('skill:storyboard') 를 읽고 make_storyboard.py 의 '컷' 부분을 "
-                "이야기대로 쓴 뒤(write_file, 길면 part='first'·'more'·'last') prepare_episode, 컷 설명은 set_panels 로 채운다")
+        return (f"새 회차 {dst.relative_to(ROOT)} (첫 회차). read_doc('skill:storyboard') 를 읽고 set_storyboard 로 컷 목록을 넣은 뒤(몇 컷씩 나눠도 된다) "
+                "set_panels 로 컷 설명 → prepare_episode")
     tpl = template.strip() or eps[-1]
     src = s / "episodes" / tpl
     if not src.is_dir():
@@ -1092,17 +1117,18 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
     (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
     return (f"새 회차 {dst.relative_to(ROOT)} (틀 {tpl}): {', '.join(copied)} 복사, 컷 설명 표(panels_spec.json) 준비. "
-            "make_storyboard.py 를 새 이야기로 고친 뒤(write_file, 길면 part='first'·'more'·'last') prepare_episode 로 storyboard.json 을 만들고, "
-            "컷 설명은 set_panels 로 몇 컷씩 채운다(틀 회차의 컷 설명 예시는 read_file 로 그 회차 build_panels.py 를 본다)")
+            "콘티는 set_storyboard(replace=True) 로 새 이야기의 컷 목록을 넣는다(파이썬을 쓰지 않는다. 틀 회차의 대사·컷 흐름은 read_file 로 본다). "
+            "컷 설명은 set_panels 로 몇 컷씩 채운 뒤 prepare_episode")
 
 
 @mcp.tool()
-def new_series(spec: str) -> str:
+def new_series(spec: dict | str) -> str:
     """새 웹툰(작품)을 연다. spec 은 작품 설정 JSON(문자열):
     {"slug": "영어-소문자-하이픈", "title": "제목", "logline": "한 줄 소개", "genre": "장르·수위", "credit": "글: …  그림: …",
      "style": "English art style paragraph (line, coloring, light, faces, proportions)",
      "cast": {"<id>": {"ko": "이름", "en": "English Name (age)", "role": "역할", "who": "English appearance (adult: ethnicity, age, height, build, hair, eyes, face)",
-                       "main": "English default outfit", "exprs": "six English expressions, comma separated"}},
+                       "main": "English default outfit(기본 옷차림 글. 주인공 여부가 아니다)", "exprs": "six English expressions, comma separated"}},
+     그림 모델에 들어가는 칸(who·main·exprs·locations·style·people_rule·era_rule)은 영어로 쓴다(한국어면 되돌려 보낸다).
      "locations": {"<name>": "English description: place, time of day, light, furniture"},
      "era": "시대(한국어, 예: 2000년대 후반 서울)", "era_rule": "English period rule for every image (phones, cars, signs of that time)",
      "people_rule": "English rule for people (ages, proportions, restrained expressions)",
@@ -1295,6 +1321,16 @@ def style_compare(name: str, styles: dict | list | str, scenes: dict | list | st
             f"job_status('{job}', wait=50) → links 의 compare.jpg, contact_sheet(paths='{rel}/compare.jpg')")
 
 
+STORYBOARD_STUB = '''"""콘티는 storyboard_spec.json(MCP set_storyboard 로 채움). 이 파일은 공용 변환기 tools/storyboard_from_spec.py 를 부른다."""
+import runpy
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.argv = ["storyboard_from_spec.py", str(HERE)]
+runpy.run_path(str(HERE.parents[3] / "tools" / "storyboard_from_spec.py"), run_name="__main__")
+'''
+
 SPEC_STUB = '''"""컷 설명은 panels_spec.json(MCP set_panels 로 채움). 이 파일은 공용 변환기 tools/panels_from_spec.py 를 부른다."""
 import runpy
 import sys
@@ -1304,6 +1340,78 @@ HERE = Path(__file__).resolve().parent
 sys.argv = ["panels_from_spec.py", str(HERE)]
 runpy.run_path(str(HERE.parents[3] / "tools" / "panels_from_spec.py"), run_name="__main__")
 '''
+
+
+@mcp.tool()
+def set_storyboard(series: str, episode: str, cuts: list | dict | str, title_card: str = "", replace: bool = False) -> str:
+    """콘티(컷 목록)를 넣는다. 파이썬을 쓰지 않는다: 이 표(storyboard_spec.json)에서 storyboard.json 을 만든다. 몇 컷씩 나눠 불러도 된다(같은 id 는 그 자리에서 덮고,
+    새 id 는 뒤에 붙는다. 처음부터 다시 쓰려면 replace=True). 표지(제목 카드)는 없으면 맨 앞에 저절로 붙는다.
+    cuts: [{"id": "p001", "shot": "wide|medium|close|full|insert", "scene": "<장소 이름 또는 none>", "chars": ["<인물 id>"],
+            "dialogue": [{"type": "speech|thought|narration|monologue|sfx", "text": "대사", "who": "<말하는 인물 id>"}], "gap_after": 400(장면 끝)}]
+      대사 한 줄은 ["speech", "대사", "top-left", "<인물 id>"] 처럼 목록이어도 된다. 장면마다 넓은 컷 하나, 두 사람 대화는 who 를 꼭 쓴다.
+    규칙·노하우는 read_doc("skill:storyboard"). 다 넣으면 set_panels 로 컷 설명 → prepare_episode(관문)."""
+    try:
+        ep = _episode(series, episode)
+    except ValueError as e:
+        return str(e)
+    sd = _series(series)
+    try:
+        add = json.loads(cuts) if isinstance(cuts, str) else cuts
+    except ValueError as e:
+        return _fail("bad_json", detail=str(e), hint='cuts = [{"id": "p001", "shot": "wide", "scene": "office_night", "chars": [], "dialogue": []}]')
+    if isinstance(add, dict):  # {"p001": {...}} 꼴
+        add = [{"id": k, **v} for k, v in add.items() if isinstance(v, dict)]
+    if not isinstance(add, list) or not all(isinstance(c, dict) for c in add):
+        return _fail("bad_cuts", hint="cuts 는 컷 객체의 목록")
+    cast = {k for k in (_json(sd / "cast.json", {}) or {}) if not k.startswith("_")}
+    locs = {p.stem for p in (sd / "assets" / "locations").glob("*.png")} | set((_json(sd / "series.json", {}) or {}).get("locations") or {})
+    notes, clean = [], []
+    for k, c in enumerate(add, 1):
+        cid = str(c.get("id") or "").strip()
+        if not cid:
+            return _fail("missing_id", index=k, hint="컷마다 id(p001 같은)")
+        c = {**c, "id": (_ids(cid) or [cid])[0]}
+        bad = [x for x in (c.get("chars") or c.get("characters") or []) if x not in cast]
+        if bad:
+            return _fail("unknown_character", panel=c["id"], given=bad, candidates=sorted(cast), hint="새 인물은 add_to_series(작품, 'cast', id, …) 먼저")
+        sc = c.get("scene") or c.get("location") or "none"
+        if sc != "none" and sc not in locs:
+            notes.append(f"{c['id']}: 장소 '{sc}' 가 작품 설정에 없다(add_to_series(작품, 'location', '{sc}', 영어 설명) 하거나 있는 장소를 쓴다: "
+                         f"{', '.join(sorted(locs)) or '없음'})")
+        if "—" in json.dumps(c, ensure_ascii=False):
+            return "em dash(—) 는 쓰지 않는다. 쉼표·마침표로 바꿔 다시"
+        clean.append(c)
+    f = ep / "storyboard_spec.json"
+    spec = {} if replace else (_json(f, {}) or {})
+    have = spec.get("cuts") or []
+    pos = {c["id"]: i for i, c in enumerate(have)}
+    for c in clean:
+        if c["id"] in pos:
+            have[pos[c["id"]]] = c
+        else:
+            pos[c["id"]] = len(have)
+            have.append(c)
+    spec["cuts"] = have
+    if title_card.strip():
+        spec["title_card"] = title_card.strip()
+    f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
+    mk = ep / "make_storyboard.py"
+    if not mk.exists() or mk.read_text(encoding="utf-8") != STORYBOARD_STUB:  # 코드로 된 콘티가 있으면 백업하고 표를 쓰게 바꾼다
+        if mk.exists():
+            bk = BACKUPS / time.strftime("%Y%m%d-%H%M%S") / mk.relative_to(ROOT.resolve())
+            bk.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(mk, bk)
+            notes.append(f"이 회차의 make_storyboard.py 는 표를 쓰게 바꿨다(원본 백업 {bk.relative_to(ROOT)})")
+        mk.write_text(STORYBOARD_STUB, encoding="utf-8")
+    out = _run([PY, str(TOOLS / "storyboard_from_spec.py"), str(ep)], timeout=25)
+    board = _json(ep / "storyboard.json", {}) or {}
+    spec_p = (_json(ep / "panels_spec.json", {}) or {}).get("panels") or {}
+    need = [p["id"] for p in board.get("panels", []) if not p.get("composite") and p["id"] not in spec_p]
+    nl = "\n"
+    return (f"콘티 {len(clean)}컷 넣음(지금 {len(have)}컷). {out.strip()[-200:]}"
+            + (nl + nl.join(notes) if notes else "")
+            + (f"{nl}다음: set_panels 로 컷 설명(아직 없는 컷: {', '.join(need[:30])}{' …' if len(need) > 30 else ''}) → prepare_episode." if need
+               else f"{nl}다음: prepare_episode 로 관문 채점을 받는다."))
 
 
 @mcp.tool()
@@ -1982,6 +2090,18 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     if spec.get("kind") == "prepare" and state in ("done", "failed"):
         out["gates"] = gates.status(epd)
         tail_lines = max(tail_lines, 80)
+        # 걸린 컷을 고치는 길을 결과에 적는다: 에이전트가 panels_spec.json 을 read_file 로 몇 조각씩 읽어 edit_file 로 고치려다
+        # 도구 한도를 다 썼다(2026-10-23 미사일 스튜디오 새 작품 시험)
+        bad = sorted({m.group(1) for ln in lines for m in [re.match(r"^\s*-\s*(p\w+)\s*\[", ln)] if m}, key=_pid_key)
+        g = out["gates"] or {}
+        if bad and g.get("storyboard") is False:
+            out["next"] = (f"콘티 관문에 걸린 컷 {', '.join(bad)}: 그 컷만 고친 컷 객체로 set_storyboard(cuts=[…]) 를 다시 부른 뒤(같은 id 는 덮는다) "
+                           "prepare_episode. 파일을 read_file·edit_file 로 고치지 않는다")
+        elif bad and g.get("panels") is False:
+            out["next"] = (f"컷 설명 관문에 걸린 컷 {', '.join(bad)}: panel_info 로 그 컷 설명을 보고, 걸린 점만 고친 그 컷 객체를 set_panels(panels={{…}}) 로 다시 넣은 뒤 "
+                           "prepare_episode(장면 배치 문장이 원인이면 scenes 도). 파일을 read_file·edit_file 로 고치지 않는다")
+        elif g and all(g.values()):
+            out["next"] = "관문 통과. 사용자가 그리자고 하면 make_episode"
     cands = [ln.split("확인: ", 1)[1].strip() for ln in lines if "시안 확인: " in ln]
     if cands:  # 승인할 시안: 이 PC 경로와 원격에서 여는 링크(링크는 사용자가 브라우저로 본다)
         out["candidates"] = [{"path": c, "link": _link(c if Path(c).is_absolute() else ROOT / c)} for c in cands]
