@@ -113,6 +113,14 @@ def hard_sha():
     return hashlib.sha256(json.dumps({k: c.get(k) for k in ("image", "container_disk_gb", "volume_gb", "keep_pod")}, sort_keys=True).encode()).hexdigest()[:12]
 
 
+def network_volume() -> dict:
+    """설정 network_volume {id, data_center}: 모델·설치물을 둔 데이터센터 네트워크 볼륨. 있으면 파드를 그 데이터센터에 만들어 /workspace 에 붙인다.
+    멈춘 파드를 다시 켜면 그 기계 GPU 를 남이 빌려 가 있어 거의 매번 새 파드·처음부터 설치였다(2026-10-23 L40S 하루 10번 넘게).
+    네트워크 볼륨은 그 데이터센터의 아무 GPU 에나 붙으니 설치를 다시 하지 않는다. 놀면 파드는 지우고(볼륨은 남음) 다음에 새로 만든다."""
+    nv = cfg().get("network_volume") or {}
+    return nv if nv.get("id") else {}
+
+
 def pod_env(mode, token):
     """파드 env(부트스트랩이 읽는 값). 만들 때와, 설정이 바뀐 멈춘 파드를 다시 켤 때 같이 쓴다."""
     c = cfg()
@@ -129,7 +137,7 @@ def pod_env(mode, token):
         "EXTRA_MODELS": json.dumps(c.get("extra_models", [])),
         "IDLE_MIN": str(c["idle_min"]),
         "MAX_HOURS": str(c["max_hours"]),
-        "ON_IDLE": "stop" if c["keep_pod"] else "terminate",
+        "ON_IDLE": "stop" if c["keep_pod"] and not network_volume() else "terminate",
         # 이미지가 CUDA 12.8 을 요구(NVIDIA_REQUIRE_CUDA)해 드라이버가 12.4~12.7 인 기계에선 컨테이너가 아예 안 떴다(2026-10-23 L40S 31분 runtime 없음),
         # 12.8 이상만 고르면 L40S 재고가 0. Ada(L40S) 까지는 CUDA 12.x 하위 호환으로 cu128 torch 가 돌아 그 검사만 끈다(설정 nvidia_disable_require)
         **({"NVIDIA_DISABLE_REQUIRE": "1"} if c.get("nvidia_disable_require") else {}),
@@ -172,6 +180,12 @@ def create_pod(mode="comfy", image=None):
         # 첫 바퀴만 그곳에서 찾고, 없으면 다음 바퀴부터는 어디서든 찾는다
         if c.get("data_centers") and len(errors) < len(types):
             body["dataCenterIds"] = c["data_centers"]
+        # 네트워크 볼륨: 앞 두 바퀴는 그 데이터센터에서 볼륨을 붙여 찾고, 그래도 없으면 볼륨 없이(처음부터 설치) 어디서든
+        nv = network_volume()
+        if nv and len(errors) < 2 * len(types):
+            body.update({"networkVolumeId": nv["id"], "dataCenterIds": [nv["data_center"]], "volumeInGb": 0})
+        elif nv and len(errors) == 2 * len(types):
+            print(f"  네트워크 볼륨 데이터센터({nv['data_center']})에 빈 GPU 가 없어 볼륨 없이 만든다(처음부터 설치)", flush=True)
         try:
             pod = api("POST", "/pods", body)
         except RuntimeError as e:
@@ -397,6 +411,8 @@ def ensure_pod(mode="comfy", image=None):
     # 지우는 모드(keep_pod false)에선 남의 파드를 건드리지 않는다. 켜져 있는 파드는 다른 작업이 쓰는 중일 수 있다
     # (2026-10-07 두 묶음을 동시에 돌리자 두 번째가 첫 번째 파드를 지워 첫 번째가 502 로 끊겼다)
     pod = get_pod(s["pod_id"]) if c["keep_pod"] and s.get("pod_id") else None
+    if network_volume() and pod and pod.get("desiredStatus") != "RUNNING":
+        pod = None  # 네트워크 볼륨이면 멈춘 파드를 다시 켜지 않고 새로 만든다(설치·모델은 볼륨에 있어 몇 분이면 뜬다)
     if pod and s.get("setup_sha") != setup_sha():
         # 예전엔 무엇이 바뀌든 파드를 지우고 새로 만들어, 볼륨에 받아 둔 모델(약 190GB)·학습 자료까지 날아갔다
         # (2026-10-22 놀면 멈춤 60→30분만 바꿨는데 켜져 있던 파드가 지워짐). 이미지·디스크가 그대로면 지우지 않는다:
@@ -448,7 +464,7 @@ def ensure_pod(mode="comfy", image=None):
 
 
 def release(pod_id):
-    if cfg()["keep_pod"]:
+    if cfg()["keep_pod"] and not network_volume():
         stop(pod_id)
     else:
         terminate(pod_id)

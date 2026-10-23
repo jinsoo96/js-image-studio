@@ -203,7 +203,9 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
         old = _json(f, {})
         if not isinstance(old, dict):  # 작업 기록이 아닌 JSON(손으로 둔 명령 목록 등)이 섞여도 모든 작업 도구가 멈추지 않게(2026-10-22 'list' has no attribute 'get')
             continue
-        if old.get("fingerprint") == fp:
+        # 실패한 작업은 다시 돌린다: 같은 입력이라도 GPU 서버가 꺼져 있던 탓(404)이면 결과가 달라진다
+        # (2026-10-23 파드가 멈춘 사이 시안 13장이 실패하자, 서버를 켜고 다시 불러도 이 검사가 실패 결과를 그대로 돌려줬다)
+        if old.get("fingerprint") == fp and (_json(f.with_name(f.name.replace(".json", ".status.json")), {}) or {}).get("state") != "failed":
             raise RepeatedJob(json.dumps({"error": "repeated_job", "previous_job": old.get("id"),
                                           "previous": json.loads(job_status(old.get("id"), tail_lines=5))}, ensure_ascii=False))
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
