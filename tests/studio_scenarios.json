@@ -123,5 +123,41 @@
    "max_tool_errors": 3,
    "max_seconds": 6000
   }
+ },
+ {
+  "name": "컷_미리보기_비교",
+  "gpu": true,
+  "prompt": "야근의 온도 1화 p003 서진 표정을 더 지친 표정(눈 밑 그늘, 축 처진 눈)으로 바꾸면 어떤지 본편은 그대로 두고 미리 보여 줘. 원래랑 비교해서.",
+  "checks": {
+   "must_call": [
+    "preview_panel",
+    "compare_panel"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 400
+  }
+ },
+ {
+  "name": "다른_버전_만들기",
+  "gpu": true,
+  "prompt": "야근의 온도 1화를 원본은 그대로 두고 v2 버전으로 하나 만들어 줘. v2 에서는 p008 컷만 윤재가 캔커피를 서진 볼에 살짝 대는 장난스러운 구도로 바꿔서 그리고, 합성해서 내보내 줘.",
+  "then": [
+   {
+    "say": "다 됐어? 원본이랑 v2 파일 이름 알려 줘.",
+    "wait_jobs_min": 40
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "copy_file",
+    "vast_draw",
+    "export"
+   ],
+   "max_tool_errors": 3,
+   "max_seconds": 3000,
+   "answer_has": [
+    "v2"
+   ]
+  }
  }
 ]
