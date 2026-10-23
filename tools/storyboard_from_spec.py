@@ -54,7 +54,8 @@ def norm_cut(c: dict) -> dict:
 
 
 def build(ep: Path) -> dict:
-    spec = json.loads((ep / "storyboard_spec.json").read_text(encoding="utf-8"))
+    f = ep / "storyboard_spec.json"
+    spec = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {"cuts": []}  # 표가 아직 없으면 빈 콘티(표지만)
     sj = json.loads((ep.parents[1] / "series.json").read_text(encoding="utf-8-sig")) if (ep.parents[1] / "series.json").exists() else {}
     n = int(re.search(r"\d+", ep.name).group())
     cuts = [norm_cut(c) for c in spec.get("cuts", [])]

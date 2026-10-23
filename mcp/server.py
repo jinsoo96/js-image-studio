@@ -944,11 +944,20 @@ def _storable(p: Path) -> bool:
     return bool(STORE_RE.fullmatch(p.resolve().relative_to(ROOT.resolve()).as_posix()))
 
 
+TOP_DIRS = ("series/", "exports/", "worklogs/", "state/")
+
+
+def _workspace_based(path: str) -> bool:
+    """작업실 기준 경로인가(series/… · exports/… 로 시작). series 를 같이 줘도 이런 경로는 작품 폴더 기준으로 다시 붙이지 않는다:
+    copy_file(dst='series/x/episodes/ep001_v2', series='x') 가 series/x/series/x/episodes/ep001_v2 를 만들었다(2026-10-24 스튜디오 시험)."""
+    return path.replace("\\", "/").strip().lstrip("/").startswith(TOP_DIRS)
+
+
 def _matches(src: str, series: str = "", fuzzy: bool = False) -> list:
     """src 에 * ? [ 가 있으면 작업실(series 를 주면 그 작품 폴더) 기준 패턴, 아니면 있는 파일 또는 폴더 하나(fuzzy: 뚜렷한 오타는 고쳐 찾음, 보기 도구만)."""
     norm = src.replace("\\", "/").strip().lstrip("/")
     if any(c in norm for c in "*?["):
-        base = _series(series) if series else ROOT
+        base = _series(series) if series and not _workspace_based(norm) else ROOT
         out = []
         for p in sorted(base.glob(norm)):
             try:
@@ -980,7 +989,7 @@ def _busy_under(paths: list):
 
 def _targets(items: list, dst: str, series: str, pattern: bool = False):
     """옮기거나 복사할 (원본, 대상) 짝. 패턴이거나 여러 개거나 dst 가 '/' 로 끝나거나 있는 폴더면 그 안에 같은 이름으로."""
-    base = f"series/{_series(series).name}/" if series else ""
+    base = f"series/{_series(series).name}/" if series and not _workspace_based(dst) else ""
     d = _inside(base + dst.replace("\\", "/").strip().lstrip("/"))
     into = pattern or len(items) > 1 or dst.strip().endswith("/") or d.is_dir()
     return [(s, d / s.name if into else d) for s in items]
@@ -1211,6 +1220,13 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
     src = s / "episodes" / tpl
     if not src.is_dir():
         return f"틀 회차가 없다: {tpl}"
+    # 같은 화의 다른 판(ep001 → ep001_v2): 콘티 표·컷 설명·그림까지 옮겨 바꿀 컷만 고치게 한다. 다음 화를 여는 것처럼 비워 두니
+    # 판을 만들려던 에이전트가 콘티 표가 없다는 오류에 걸려 v2 를 끝내지 못했다(2026-10-24 스튜디오 시험 '다른 버전 만들기')
+    same = re.match(r"ep\d{3}", tpl) and re.match(r"ep\d{3}", episode.strip()) and tpl[:5] == episode.strip()[:5]
+    if same:
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_old", "_rejected", "out", "review", "_stage1", "*.log"))
+        return (f"새 판 {dst.relative_to(ROOT)} ({tpl} 를 통째로 옮김: 콘티·컷 설명·그림). 바꿀 컷만 set_storyboard·set_panels 로 고치고(같은 id 는 덮음) "
+                "prepare_episode → 그 컷만 vast_draw(ids) → compose → export(파일 이름 끝에 판 번호가 붙어 원본을 덮지 않는다)")
     dst.mkdir(parents=True)
     copied = []
     for n in ("make_storyboard.py", "trailer.json"):
@@ -1218,6 +1234,8 @@ def new_episode(series: str, episode: str, template: str = "") -> str:
             t = (src / n).read_text(encoding="utf-8").replace(f"episodes/{tpl}", f"episodes/{episode}").replace(f"episodes\\{tpl}", f"episodes\\{episode}")
             (dst / n).write_text(t, encoding="utf-8")
             copied.append(n)
+    if (src / "storyboard_spec.json").exists():  # 표 콘티 틀: 다음 화는 빈 표에서(옛 컷이 섞이지 않게)
+        (dst / "storyboard_spec.json").write_text(json.dumps({"cuts": []}, ensure_ascii=False, indent=1), encoding="utf-8")
     # 컷 설명은 코드(build_panels.py)를 쓰지 않고 표(panels_spec.json)를 set_panels 로 채운다(2026-10-16 agent app 시험)
     (dst / "build_panels.py").write_text(SPEC_STUB, encoding="utf-8")
     (dst / "panels_spec.json").write_text(json.dumps({"scenes": {}, "reuse": {}, "panels": {}}, ensure_ascii=False, indent=1), encoding="utf-8")
