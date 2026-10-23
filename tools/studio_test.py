@@ -99,6 +99,10 @@ def set_aside(sc: dict):
     # 글로브(series/*lantern*): 새 작품 시나리오는 에이전트가 고르는 작품 이름(slug)이 판마다 달랐다(deungbul-shop · lantern-shop · deungbul-store)
     paths = [p for rel in (sc.get("setup") or {}).get("set_aside", [])
              for p in (sorted(ROOT.glob(rel)) if any(ch in rel for ch in "*?[") else [ROOT / rel])]
+    # set_aside_title: 작품 제목(series.json title)으로 고른다. 글로브로 쫓아도 다음 판엔 또 다른 이름(denpo-shop)이 나왔다
+    titles = set((sc.get("setup") or {}).get("set_aside_title", []))
+    paths += [sj.parent for sj in sorted((ROOT / "series").glob("*/series.json"))
+              if titles and json.loads(sj.read_text(encoding="utf-8")).get("title") in titles and sj.parent not in paths]
     for src in paths:
         rel = src.relative_to(ROOT).as_posix()
         src = src.resolve()

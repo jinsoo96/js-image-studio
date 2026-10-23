@@ -572,7 +572,7 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
     while True:
         r, probs = staging_check(series, ep_dir, dst, pid)
         if best is None or len(probs) < best[0]:
-            best = (len(probs), dst.read_bytes(), probs)
+            best, best_r = (len(probs), dst.read_bytes(), probs), r
         if not probs:
             log(f"  {pid}: 연출 확인 통과" + (f" (애매, 사람 눈으로: {r.get('기타', '')[:120]})" if r.get("판정") == "애매" else ""))
             return set(), ""
@@ -613,9 +613,15 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
         except TypeError:  # note·turned 를 모르는 옛 render
             render(seed + 7919 * attempt)
         log(f"  {pid}: 다시 그림({attempt}회)")
-    if best and best[1] != dst.read_bytes() and best[0] < len(probs):
-        dst.write_bytes(best[1])
-        log(f"  {pid}: 가장 나은 판으로 되돌림")
+    # 되돌린 판의 검수 결과(best_r)를 같이 쓴다: 버린 판의 메모('손이 3개')가 남아 독자 눈 거르기가 그걸 보고 되돌린 판을
+    # 사람 확인으로 남겼다(2026-10-24 등불 상점 5판 p003). 같은 개수면 지금 판과 그 결과로 맞춘다
+    if best and best[1] != dst.read_bytes():
+        if best[0] < len(probs):
+            dst.write_bytes(best[1])
+            r = best_r
+            log(f"  {pid}: 가장 나은 판으로 되돌림")
+        else:
+            best, best_r = (len(probs), dst.read_bytes(), probs), r
     # 다시 그려도 인물이 참고 그림과 다른 모습(생김새)이면 참고 그림을 준 머리·얼굴 편집. 컷 전체를 다시 보고 새 문제가 없을 때만 받는다
     if "생김새" in best[2]:
         kept = dst.read_bytes()
