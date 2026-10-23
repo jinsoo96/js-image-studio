@@ -29,7 +29,7 @@
 - 처음 나오는 인물·장소는 add_to_series 로 더한다(옛 작품은 그 작품의 make_sheet_prompts.py·make_location_prompts.py 에 한 줄).
 
 ## 4. 저장소(작업실) 둘러보기·다루기
-작품·그림·내보낸 것은 모두 작업실 저장소에 쌓인다. 일마다 따로 된 도구를 찾지 말고 아래 일반 도구로 둘러보고 옮긴다(지우는 도구는 없다: 안 쓰는 것은 `_old/` 로 옮기면 10일 뒤 저절로 지워진다, 예약작업 WEBTOON-clean-old).
+작품·그림·내보낸 것은 모두 작업실 저장소에 쌓인다. 일마다 따로 된 도구를 찾지 말고 아래 일반 도구로 둘러보고 옮긴다(지우는 도구는 없다: 안 쓰게 된 옛 판은 `_old/` 로 옮긴다(자동으로 안 지움, 10일 넘으면 목록만 알림). 시험용 결과물은 `_tmp/` 로 옮기면 10일 뒤 저절로 지워진다(예약작업 WEBTOON-clean-old).
 - 구조: `series/<작품>-hf/` = series.json(설정·그림체·인물) · assets/(인물 시트 `<id>_sheet.png` · locations/ 장소 · vast_refs/ 참고 그림·표정 은행 · _candidates/ 시안) ·
   episodes/<회차>/(make_storyboard.py 콘티 · panels_spec.json 컷 설명 · panels_hf/ 본편 그림 · panels_hf_vast/ 다시 그린 그림 · out/ 합성본). `exports/<날짜>/` 내보낸 PDF·epub·예고편. `worklogs/` 작업 기록.
 - 보기: list_files(path, pattern='*.png') 목록·크기·고친 시각 · read_file 글 · contact_sheet(paths='폴더·파일·* 패턴') 그림(시트·시안·참고 그림·장소도) · file_link 사용자에게 줄 주소.

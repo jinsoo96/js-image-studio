@@ -40,7 +40,7 @@ import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷
 sys.path.insert(0, str(ROOT / "tools"))
 import new_series as ns  # noqa: E402  새 작품 열기(설정 한 장 → 작품 폴더)
 import gates  # noqa: E402  하네스 관문(콘티·컷 설명 격리 judge, 통과해야 그린다)
-import clean_old  # noqa: E402  _old 로 옮긴 파일의 처음 본 시각(10일 뒤 지운다)
+import clean_old  # noqa: E402  _tmp·_old 로 옮긴 파일의 처음 본 시각(_tmp 만 10일 뒤 지운다)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
@@ -924,7 +924,7 @@ def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> 
 
 @mcp.tool()
 def move_file(src: str, dst: str, series: str = "") -> str:
-    """작업실 안 파일·폴더를 옮기거나 이름을 바꾼다. 지우는 도구는 없다: 안 쓰는 것은 _old/ 로 옮기면 10일 뒤 저절로 지워진다. src 는 파일·폴더·* 패턴,
+    """작업실 안 파일·폴더를 옮기거나 이름을 바꾼다. 지우는 도구는 없다: 안 쓰게 된 옛 판은 _old/(자동으로 안 지움), 시험용 결과물은 _tmp/(10일 뒤 저절로 지움)로 옮긴다. src 는 파일·폴더·* 패턴,
     dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더.
 
     series 를 주면 두 경로 모두 그 작품 폴더 기준. dst 에 같은 이름이 이미 있으면 하나도 옮기지 않는다(먼저 그것을 다른 곳으로 옮긴다).
@@ -953,10 +953,12 @@ def move_file(src: str, dst: str, series: str = "") -> str:
     for s, d in pairs:
         d.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(s), str(d))
-    olds = [d for _, d in pairs if "_old" in d.resolve().relative_to(ROOT.resolve()).parts]
-    if olds:
-        clean_old.note(olds)
-    return f"옮겼다 {len(pairs)}개: {shown}" + (" (_old 안의 것은 10일 뒤 지운다: tools/clean_old.py)" if olds else "")
+    parts = [d.resolve().relative_to(ROOT.resolve()).parts for _, d in pairs]
+    binned = [d for (_, d), pt in zip(pairs, parts) if "_old" in pt or "_tmp" in pt]
+    if binned:
+        clean_old.note(binned)
+    tmp = any("_tmp" in pt for pt in parts)
+    return f"옮겼다 {len(pairs)}개: {shown}" + (" (_tmp 안의 것은 10일 뒤 저절로 지운다: tools/clean_old.py)" if tmp else "")
 
 
 @mcp.tool()
