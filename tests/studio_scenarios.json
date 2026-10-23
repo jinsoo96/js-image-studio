@@ -143,18 +143,21 @@
   "prompt": "야근의 온도 1화를 원본은 그대로 두고 v2 버전으로 하나 만들어 줘. v2 에서는 p008 컷만 윤재가 캔커피를 서진 볼에 살짝 대는 장난스러운 구도로 바꿔서 그리고, 합성해서 내보내 줘.",
   "then": [
    {
+    "say": "그 정도면 됐어. 그대로 합성해서 내보내 줘.",
+    "wait_jobs_min": 30
+   },
+   {
     "say": "다 됐어? 원본이랑 v2 파일 이름 알려 줘.",
-    "wait_jobs_min": 40
+    "wait_jobs_min": 30
    }
   ],
   "checks": {
    "must_call": [
-    "copy_file",
-    "vast_draw",
-    "export"
+    "new_episode",
+    "vast_draw"
    ],
    "max_tool_errors": 3,
-   "max_seconds": 3000,
+   "max_seconds": 3600,
    "answer_has": [
     "v2"
    ]

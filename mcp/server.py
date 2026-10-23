@@ -998,12 +998,18 @@ def _targets(items: list, dst: str, series: str, pattern: bool = False):
 @mcp.tool()
 def list_files(path: str = "series", series: str = "", pattern: str = "") -> str:
     """작업실 저장소 둘러보기: 폴더 안 파일·폴더 목록(크기·고친 시각). path 는 작업실 기준(예: series/<작품>/assets, exports/2026-10-23),
-    series 를 주면 그 작품 폴더 기준. pattern 을 주면 그 폴더 아래에서 맞는 것만(예: '*.png', '**/p023*.png', '<인물 id>_*').
+    series 를 주면 그 작품 폴더 기준. pattern 을 주면 그 폴더와 아래 폴더에서 맞는 것만(예: '*.pdf' 는 out/ 안까지, '<인물 id>_*'. 맨 위만 보려면 './*.png').
 
     작업실 구조: series/<작품>-hf/ (series.json 설정 · assets/ 인물 시트·locations/ 장소·vast_refs/ 참고 그림·표정 은행·_candidates/ 시안 ·
     episodes/<회차>/ 콘티·컷 설명·panels_hf/ 본편 그림·panels_hf_vast/ 다시 그린 그림·out/ 합성본) · exports/<날짜>/ 내보낸 PDF·epub · worklogs/ 작업 기록."""
     p = _existing(path, series, want_dir=True)
-    items = sorted(p.glob(pattern)) if pattern.strip() else sorted(p.iterdir())
+    pat = pattern.strip()
+    # '/' 없는 패턴('*.pdf')은 아래 폴더까지 찾는다(_old·_rejected 같은 보관 폴더는 뺌): 맨 위만 보다가 out/ep001.pdf 를 못 찾고
+    # '원본 PDF 가 아직 없다'고 답했다(2026-10-24 스튜디오 시험)
+    if pat and "/" not in pat:
+        items = sorted(c for c in p.rglob(pat) if not any(x.startswith("_") for x in c.relative_to(p).parts[:-1]))  # _candidates·_old 같은 곁 폴더는 뺌(들어가려면 path 로)
+    else:
+        items = sorted(p.glob(pat)) if pat else sorted(p.iterdir())
     out = []
     for c in items[:300]:
         name = c.relative_to(p).as_posix()
