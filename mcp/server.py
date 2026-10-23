@@ -681,8 +681,11 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
             head = next((h[0][2:].strip() for h in heads if h and h[0].startswith("# ")), "")
             series_hits.append({"series": sname, "title": sj.get("title") or head or sname,
                                 "episodes": sorted(d.name for d in (sd / "episodes").iterdir() if d.is_dir()),
-                                "characters": [c for c in (_json(sd / "cast.json", {}) or {}) if not c.startswith("_")],
-                                "assets": f"series/{sname}/assets (인물 시트 *_sheet.png · locations/ · vast_refs/)"})
+                                # 인물은 id 와 이름을 같이: id 만 주니 모델이 한자 이름을 지어 붙였다(2026-10-24 스튜디오 시험)
+                                "characters": [{"id": c, "name": v.get("ko", ""), "role": v.get("role", "")}
+                                               for c, v in (_json(sd / "cast.json", {}) or {}).items() if not c.startswith("_") and isinstance(v, dict)],
+                                "next": (f"시트 모아 보기 = contact_sheet(paths='series/{sname}/assets/*_sheet.png'), 파일 목록 = list_files(path='series/{sname}/assets'), "
+                                         f"회차 요약 = find('{sname} 1화')(이 MCP 의 도구로 본다)")})
     n = max(1, min(int(limit), 40))
     out = {"query": q, "total": len(hits), "hits": hits[:n]}
     if series_hits:
@@ -1897,14 +1900,16 @@ FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 panel_versio
 
 
 @mcp.tool()
-def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: str = "", seed: int = -1) -> str:
+def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: str | list = "", seed: int = -1) -> str:
     """그린 컷의 일부만 고친다(다시 그리지 않음, 크레딧 0, 컷당 약 30초): 그 판의 편집 워크플로우에 지금 본편 그림(<image1>)과 지시를 준다.
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
     얼굴이 다른 사람 같으면 refs 에 그 인물 id 를 주고 얼굴만 <image2> 처럼 다시 그리게 한다. 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(vast_draw).
-    끝나면 compare_panel 로 전/후를 본다. """
+    결과는 바로 본편에 들어간다(adopt_panel 이 필요 없다, 옛 본편은 panels_hf/_rejected/, 되돌리려면 adopt_panel(source='version')).
+    본편을 건드리지 않고 먼저 보고 싶으면 preview_panel. 끝나면 compare_panel 로 전/후를 보여 주고, 합성본에 넣으려면 compose."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
+    refs = ",".join(map(str, refs)) if isinstance(refs, list) else refs  # 목록으로 줘도 받는다(refs=[] 로 불러 한 번 헛돌았다, 2026-10-24)
     if not (instruction or "").strip():
         return _fail("empty_instruction")
     cmd = [PY, str(VAST / "panel_edit.py"), "edit", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
@@ -1973,7 +1978,7 @@ def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> l
 
 
 @mcp.tool()
-def preview_panel(series: str, episode: str, panel: str, instruction: str = "", refs: str = "", character: str = "", design: str = "", seed: int = -1) -> str:
+def preview_panel(series: str, episode: str, panel: str, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1) -> str:
     """본편은 그대로 두고 한 컷을 바꾼 모습만 미리 본다(크레딧 0, 약 30초): '이 컷 이렇게 바꾸면 어때, 보여줘'. instruction(영어, edit_panel 과 같은 지시)
     또는 인물 디자인 바꾸기 character(인물 id) + design(영어, 예 "short silver-white hair instead of black hair"). 끝나면 compare_panel(what='preview').
 
@@ -1982,6 +1987,7 @@ def preview_panel(series: str, episode: str, panel: str, instruction: str = "", 
     (예전 preview_design 을 합쳤다, 2026-10-23)"""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
+    refs = ",".join(map(str, refs)) if isinstance(refs, list) else refs
     if (design or "").strip():
         if not (character or "").strip():
             return _fail("character_required", reason="design 을 주면 character(인물 id)도 준다")
