@@ -281,8 +281,8 @@
    "kind": "ref_each",
    "ref": "bust",
    "verify": false,
-   "why": "고양이 수인 모쿠가 사람 노인 얼굴로 그려졌는데 컷 검사는 글(자세·시선·소품)만 보고 넘겼고, 장면 이어짐 점검만 '사람에서 고양이로 바뀜'이라 적고 아무 일도 안 했다(2026-10-24 등불 상점 1화 p002). 인물마다 상반신 참고 그림을 같이 보여 주고 '같은 종류의 존재(사람 얼굴·짐승 얼굴·귀·뿔·털빛)인가' 하나만 묻는다. 사람 작품 컷 22개에서 잘못 건 것 0",
-   "observe": "Image 2 is the reference portrait of {name} ({kind}). Image 1 is a webtoon panel that should show {name}.\nPeople in image 1 should be: {looks}. Panel text: {text}\nFind {name} in image 1 (use the panel text, positions and clothes to tell who is who). Compare only what kind of being {name} is drawn as: a human face or an animal face (fur, muzzle, whiskers), animal ears, horns, skin or fur color. Ignore clothes, pose, expression, camera angle and small drawing details.\nAnswer JSON only: {{\"found\": true|false, \"same_kind\": true|false, \"differs\": \"what is different, empty if the same\"}}",
+   "why": "고양이 수인 모쿠가 사람 노인 얼굴로 그려졌는데 컷 검사는 글(자세·시선·소품)만 보고 넘겼고, 장면 이어짐 점검만 '사람에서 고양이로 바뀜'이라 적고 아무 일도 안 했다(2026-10-24 등불 상점 1화 p002). 인물마다 상반신 참고 그림을 같이 보여 주고 '같은 종류의 존재(사람 얼굴·짐승 얼굴·귀·뿔·털빛)인가' 하나만 묻는다. 사람 작품 컷 22개에서 잘못 건 것 0 / 설정 글(여우 귀 하나)과 시트(귀 둘)가 다른 작품에서 글을 따라 '귀가 둘'을 걸었다(등불 상점 3판 p004) → 생김새 글은 빼고 참고 그림만 기준",
+   "observe": "Image 2 is the reference portrait of {name}: it decides how {name} looks. Image 1 is a webtoon panel that should show {name}.\nPeople in image 1: {names}. Panel text: {text}\nFind {name} in image 1 (use the panel text, positions and clothes to tell who is who). Compare only what kind of being {name} is drawn as, against image 2: a human face or an animal face (fur, muzzle, whiskers), animal ears, horns, skin or fur color. Ignore clothes, pose, expression, camera angle and small drawing details.\nAnswer JSON only: {{\"found\": true|false, \"same_kind\": true|false, \"differs\": \"what is different, empty if the same\"}}",
    "problem": "{name} 가 참고 그림과 다른 모습으로 그려짐: {differs}"
   },
   {

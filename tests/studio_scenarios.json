@@ -291,7 +291,7 @@
   "checks": {
    "must_call": [
     "new_series",
-    "vast_make_assets",
+    "draw_candidates",
     "set_storyboard",
     "set_panels",
     "make_episode"

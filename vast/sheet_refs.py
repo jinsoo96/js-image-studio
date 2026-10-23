@@ -43,7 +43,32 @@ def one_person(img: Image.Image) -> Image.Image:
     if len(heads) < 2:
         return img
     cut = (heads[0][1] + heads[1][0]) // 2
+    # 앞 덩어리가 뒤 덩어리보다 훨씬 작으면 사람이 아니라 옆에 세운 소품(등불 단 지팡이)이다: 그 소품을 '정면 전신'으로 잘라
+    # 고양이 수인 모쿠의 참고 그림이 지팡이가 됐고, 컷에서 모쿠가 사람 노인으로 그려졌다(2026-10-24 등불 상점)
+    if ink[:, :cut].sum() < 0.4 * ink[:, cut:].sum():
+        return img.crop((cut, 0, w, h))
     return img.crop((0, 0, cut, h))
+
+
+HEAD_ASK = ("This picture shows one character standing (full body). Give the bounding box of the character's whole head: top of the hair or ears or hat "
+            "down to the chin, in coordinates from 0 to 1000 relative to the picture width and height. "
+            'Answer JSON only: {"head": [x0, y0, x1, y1]}')
+
+
+def head_ratio(front: Image.Image, tmp: Path) -> float | None:
+    """정면 전신에서 머리(머리카락·귀·모자 꼭대기 ~ 턱)가 끝나는 높이의 비율 + 약간(목까지). 그림 보는 모델에 머리 상자를 묻는다.
+    전신 높이의 19% 로 박아 두니 머리가 큰 그림체·큰 귀 수인은 코 위에서 잘렸다(2026-10-24 등불 상점 하루·모쿠, 상반신 참고 그림에 눈만).
+    답이 없거나 상자가 이상하면(사람이 아닌 소품을 잘랐을 때 등) None."""
+    from refine import _vlm
+    front.save(tmp)
+    b = _vlm([tmp], HEAD_ASK, 80).get("head")
+    tmp.unlink(missing_ok=True)
+    if not (isinstance(b, list) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b)):
+        return None
+    x0, y0, x1, y1 = b
+    if not (0 <= y0 < y1 <= 1000 and 50 <= y1 - y0 <= 600 and x1 - x0 >= 100):
+        return None
+    return min(0.6, y1 / 1000 + 0.01)  # 턱 바로 아래까지(더 내리면 시트의 기본 옷이 보여 그 옷 입은 사람이 하나 더 생겼다, p003)
 
 
 def bands(ink, x0: int, x1: int, h: int, min_gap: int = 2) -> list:
@@ -194,12 +219,20 @@ def main():
         cid = s.name[: -len("_sheet.png")]
         if want and cid not in want:
             continue
-        ratio = float((cast.get(cid) or {}).get("bust") or 0.19)
+        set_ratio = (cast.get(cid) or {}).get("bust")  # 작품 설정에 손으로 적은 비율이 있으면 그것
+        ratio = float(set_ratio or 0.19)
         try:
             front, face, bust = crop_refs(s, ratio)
         except Exception as e:
             print(cid, "실패", e)
             continue
+        if not set_ratio:
+            r = head_ratio(front, out / f"_{cid}_front_tmp.png")
+            if r:
+                ratio = r
+                bust = front.crop((0, 0, front.width, int(front.height * r)))
+            else:
+                print(cid, f"머리 상자를 못 받아 정면 전신의 위 {ratio:.0%} 를 머리로 씀")
         front.save(out / f"{cid}_front.png")
         face.save(out / f"{cid}_face.png")
         bust.save(out / f"{cid}_bust.png")

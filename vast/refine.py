@@ -338,15 +338,13 @@ def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
             if isinstance(n, int) and n > same:
                 out.append(c["problem"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch)), n=n))
     elif kind == "ref_each":  # 인물마다 참고 그림(vast_refs/<id>_<ref>.png)을 같이 보여 주고 묻는다. 참고 그림이 없는 인물은 건너뛴다
-        sj = Path(series) / "series.json"
-        cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
+        # 생김새 글은 넘기지 않는다: 글과 시트가 다르면(여우 귀 하나 ↔ 시트는 둘) 글을 따라 걸었다. 참고 그림이 정본
         for ch in p.get("chars") or []:
             ref = Path(series) / "assets" / "vast_refs" / f"{ch}_{c.get('ref', 'bust')}.png"
             if not ref.exists():
                 continue
             name = re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch))
-            kind_txt = str((cast.get(ch) or {}).get("who", "")).split(",")[0].strip() or "a person"
-            r = _vlm([img_path, ref], c["observe"].format(name=name, kind=kind_txt, looks=fill["looks"], text=fill["text"][:500]), 150)
+            r = _vlm([img_path, ref], c["observe"].format(name=name, names=fill["names"], text=fill["text"][:500]), 150)
             if r.get("found") is True and r.get("same_kind") is False:
                 out.append(c["problem"].format(name=name, differs=str(r.get("differs") or "")[:200]))
     elif kind == "fixed":
