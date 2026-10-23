@@ -103,7 +103,7 @@ DiT bf16 + 글 인코더 int8 이면 둘 다 32GB VRAM 에 같이 올라간다. 
 - 시드에 따라 인물이 하나 더 나오거나 머리 잔상이 낀다 → 그린 뒤 인원을 세고 시드만 바꿔 다시.
 - 비슷하게 생긴 여자 멤버 여럿이 한 컷에 나오면 1단에서 사람이 늘어난다(무대 뒤 p063 멤버 3인 소파가 시드를 바꿔도 5~7명). `--fix` 2단 다듬기로 3명이 됐다. 남녀·나이가 뚜렷이 다른 3인(무대 뒤 p091 카페, D+18 p003)은 맞게 나왔다.
 - `--expr` 표정 칸엔 시트 기본 옷이 같이 들어 있어 옷이 따라올 수 있다(p091 태식이 흰 티 대신 후드티, review_panels 가 잡음).
-- agent app 의 Qwen 에이전트도 쓸 수 있다: MCP 도구 `comfy_server`·`vast_draw`·`vast_make_assets`·`vast_adopt`·`make_episode`·부분 고치기(`edit_panel`·`derive_panel`·`fix_faces`)(`mcp\README.md`). 한 화를 PDF 까지는 `make_episode` 하나로.
+- agent app 의 Qwen 에이전트도 쓸 수 있다: MCP 도구 `comfy_server`·`vast_draw`·`vast_make_assets`·`adopt_panel`·`make_episode`·부분 고치기(`edit_panel`·`preview_panel`)(`mcp\README.md`). 한 화를 PDF 까지는 `make_episode` 하나로.
 - 옷 시트를 못 쓴다 → 옷은 글(`outfit`)로만.
 - 한 화 통째: D+18 2화 v2 를 `ep002_v2_vast` 로 그려 PDF·epub·예고편까지 냈다(2026-10-16, `exports\2026-10-16\*_vast판.*`). 새 컷 31개 중 4개가 걸려 다시 그렸다(LESSONS 16). 재사용 컷 35개는 힉스필드 그림 그대로라 한 화 안에 두 엔진 그림이 섞여 있다.
 

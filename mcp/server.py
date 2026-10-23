@@ -40,6 +40,7 @@ import vision_review  # noqa: E402  그림 검수(그림을 보는 모델에 컷
 sys.path.insert(0, str(ROOT / "tools"))
 import new_series as ns  # noqa: E402  새 작품 열기(설정 한 장 → 작품 폴더)
 import gates  # noqa: E402  하네스 관문(콘티·컷 설명 격리 judge, 통과해야 그린다)
+import clean_old  # noqa: E402  _old 로 옮긴 파일의 처음 본 시각(10일 뒤 지운다)
 PY = str(ROOT / ".venv" / "Scripts" / "python.exe") if (ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
 TOOLS = ROOT / "tools"
 JOBS = ROOT / "state" / "mcp_jobs"
@@ -597,7 +598,7 @@ def review_panels(series: str, episode: str, ids: str = "", scene: str = "", fol
     """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
     folder="vast" 면 GPU 서버로 그린 컷을 본다(다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
-    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel·derive_panel·fix_faces 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw."""
+    3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw."""
     ep = _episode(series, episode)
     sd = _series(series)
     sub = _folder(folder)
@@ -923,7 +924,7 @@ def copy_file(src: str, dst: str, overwrite: bool = False, series: str = "") -> 
 
 @mcp.tool()
 def move_file(src: str, dst: str, series: str = "") -> str:
-    """작업실 안 파일·폴더를 옮기거나 이름을 바꾼다(지우는 도구는 없다: 안 쓰는 것은 _old/ 같은 폴더로 옮겨 둔다). src 는 파일·폴더·* 패턴,
+    """작업실 안 파일·폴더를 옮기거나 이름을 바꾼다. 지우는 도구는 없다: 안 쓰는 것은 _old/ 로 옮기면 10일 뒤 저절로 지워진다. src 는 파일·폴더·* 패턴,
     dst 는 작품 폴더 안·exports/·worklogs/. 여러 개면 dst 는 폴더.
 
     series 를 주면 두 경로 모두 그 작품 폴더 기준. dst 에 같은 이름이 이미 있으면 하나도 옮기지 않는다(먼저 그것을 다른 곳으로 옮긴다).
@@ -952,7 +953,10 @@ def move_file(src: str, dst: str, series: str = "") -> str:
     for s, d in pairs:
         d.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(s), str(d))
-    return f"옮겼다 {len(pairs)}개: {shown}"
+    olds = [d for _, d in pairs if "_old" in d.resolve().relative_to(ROOT.resolve()).parts]
+    if olds:
+        clean_old.note(olds)
+    return f"옮겼다 {len(pairs)}개: {shown}" + (" (_old 안의 것은 10일 뒤 지운다: tools/clean_old.py)" if olds else "")
 
 
 @mcp.tool()
@@ -1197,7 +1201,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
               check: bool = True, model: str = "", refine: bool = False, continuity: bool = True, continue_closeups: bool = False,
               restyle: bool = False) -> str:
     """컷을 GPU 서버(ComfyUI)로 그린다(크레딧 0, 기본 작화 도구). 결과는 panels_hf_vast/ 에 쌓이고 본편(panels_hf)은 안 바뀐다: 한 컷을 다시 그려
-    보여 줄 때도 이것(ids='p022', seed 를 바꾸면 다른 그림) → compare_panel(what='redraw') 로 본편과 나란히 보여 주고, 사용자가 고르면 vast_adopt.
+    보여 줄 때도 이것(ids='p022', seed 를 바꾸면 다른 그림) → compare_panel(what='redraw') 로 본편과 나란히 보여 주고, 사용자가 고르면 adopt_panel.
     model: 비우면 컷마다 판을 자동으로 고른다(vast/router.py: 작품 그림체와 같은 판, 인물 컷은 참고 그림을 받는 판,
     그림체 LoRA 를 학습한 판. 컷마다 고른 판과 이유가 작업 로그에 남는다). 사용자가 판을 말했을 때만 판 이름(draw_models 목록)을 준다. 같은 panels.json 을 쓴다.
     refine=True 면 2차 다듬기(그림을 1.3배로 키워 낮은 강도로 한 번 더 그린다): 얼굴 선·머리카락·옷·배경 질감이 또렷해지고 구도·표정은 그대로. 컷당 시간이 약 2배라 기본은 끄고, 클로즈업·표지·중요한 컷에 쓴다.
@@ -1210,7 +1214,7 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     continue_closeups=True 면 같은 사람 연속 클로즈업을 앞 컷에서 잇기도 쓴다(얼굴·배경은 잘 이어지나 얼굴 얼룩·옷 바뀜이 섞여 기본은 끔).
     restyle=True 면 그린 뒤 그 작품 Restyle LoRA(restyle 도구로 학습한 것)로 그림체를 마무리해 panels_hf_vast_restyle/ 에 따로 둔다(컷당 +약 40초).
     견줘 볼 땐 contact_sheet(folder='vast') 와 contact_sheet(folder='vast_restyle').
-    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 vast_adopt."""
+    그래도 이상하면 seed 만 바꿔 그 컷을 다시 부른다. 본편으로 쓰려면 사용자가 고른 컷만 adopt_panel."""
     ep = _episode(series, episode)
     sd = _series(series)
     pj = [p["id"] for p in _panels_json(ep)]
@@ -1426,13 +1430,33 @@ def comfy_server(action: str = "status", lines: int = 60, old: bool = False, for
 
 
 @mcp.tool()
-def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
-    """GPU 서버로 그린 컷(panels_hf_vast)을 본편으로 쓴다: 지금 본편 그림(panels_hf)은 panels_hf/_rejected/ 로 옮기고 vast 그림을 그 자리에 복사한 뒤 합성용으로 놓는다.
-    사용자가 고른 컷만 넘긴다(본편이 바뀐다). 지우는 것은 없다. 끝나면 compose 로 다시 합성."""
+def adopt_panel(series: str, episode: str, ids: str, source: str = "vast", name: str = "", reason: str = "") -> str:
+    """다른 판을 본편으로 쓴다(사용자가 고른 것만, 본편이 바뀐다). source: vast(vast_draw 로 다시 그린 판, ids 에 여러 컷) · preview(preview_panel 미리 보기,
+    한 컷, name 비우면 마지막 것) · version(panel_versions 의 예전 판 name 으로 되돌리기, 한 컷). 지금 본편은 panels_hf/_rejected/ 로 옮긴다. 끝나면 compose.
+
+    예전 vast_adopt · adopt_preview · revert_panel 을 합쳤다(셋 다 '다른 판을 본편 자리에 넣고 지금 본편은 _rejected 로', 2026-10-23 도구 정리)."""
     ep = _episode(series, episode)
     want = _pids(ep, ids, "any")
     if not want:
-        return "채택할 컷 번호를 준다"
+        return "본편으로 쓸 컷 번호를 준다"
+    if source not in ("vast", "preview", "version"):
+        return _fail("bad_source", given=source, candidates=["vast", "preview", "version"])
+    if source != "vast":
+        if len(want) != 1:
+            return f"source={source} 는 한 컷씩 준다"
+        pid = want[0]
+        if source == "version":
+            if not name:
+                return "name 에 panel_versions 의 예전 판 이름을 준다"
+            job = _start_job("revert_panel", ep, [{"label": f"{pid} 되돌리기", "cmd": [PY, str(VAST / "panel_edit.py"), "revert", str(_series(series)), ep.name, pid, name]}])
+            return f"작업 시작 {job}. job_status('{job}') → compare_panel"
+        d = ep / "review" / "previews"
+        pick = name or next((f.stem for f in sorted(d.glob(f"{pid}_*.png"), key=lambda f: f.stat().st_mtime, reverse=True)), "") if d.exists() else name
+        if not pick:
+            return "이 컷의 미리 보기가 없다(preview_panel 먼저)"
+        r = subprocess.run([PY, str(VAST / "panel_edit.py"), "adopt", str(_series(series)), ep.name, pid, pick], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=ENV)
+        return (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout + r.stderr).strip() else f"종료 {r.returncode}"
     miss = [i for i in want if not (ep / "panels_hf_vast" / f"{i}.png").exists()]
     if miss:
         return f"GPU 서버 그림이 없는 컷: {', '.join(miss)}(vast_draw 로 먼저 그린다)"
@@ -1451,9 +1475,10 @@ def vast_adopt(series: str, episode: str, ids: str, reason: str = "") -> str:
 
 # ── 부분 고치기(vast/panel_edit.py, 그 판의 '편집' 워크플로우). 다시 그리지 않고 본편 그림의 일부만 바꾼다(2026-10-20 사용자
 #    "부분부분만 고치는 것도 가능하냐, MCP 도 알아서 컨피 워크플로우를 활용해야"). 고친 판은 본편에 들어가고 옛 판은 panel_versions 로 되돌린다.
-FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 revert_panel ② 일부만 틀림(소품·사람 하나 지우기·입·손·크기)은 edit_panel ③ 자리·테이블·배경이 "
-              "같은 장면의 다른 컷과 어긋나면 그 잘 된 컷에서 잘라 derive_panel ④ 얼굴이 다른 사람 같으면 fix_faces ⑤ 구도·카메라가 통째로 틀리면 "
-              "컷 설명을 고치고 vast_draw. 고친 뒤엔 compare_panel 로 전/후를 꼭 눈으로 본다. 다 고친 뒤 compose 는 한 번만.")
+FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 panel_versions → adopt_panel(source='version') ② 일부만 틀림(소품·사람 하나 지우기·입·손·크기)은 "
+              "edit_panel ③ 얼굴이 다른 사람 같으면 edit_panel(refs=그 인물 id, 'redraw only the face to match <image2>') ④ 자리·테이블·구도·카메라가 "
+              "틀리면 컷 설명을 고치고 vast_draw(같은 장면 앞 컷으로 자리를 맞춘다) → compare_panel(what='redraw') → adopt_panel. "
+              "고친 뒤엔 compare_panel 로 전/후를 꼭 눈으로 본다. 다 고친 뒤 compose 는 한 번만.")
 
 
 @mcp.tool()
@@ -1461,7 +1486,8 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
     """그린 컷의 일부만 고친다(다시 그리지 않음, 크레딧 0, 컷당 약 30초): 그 판의 편집 워크플로우에 지금 본편 그림(<image1>)과 지시를 준다.
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
-    사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(derive_panel 이나 vast_draw). 끝나면 compare_panel 로 전/후를 본다. """
+    얼굴이 다른 사람 같으면 refs 에 그 인물 id 를 주고 얼굴만 <image2> 처럼 다시 그리게 한다. 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(vast_draw).
+    끝나면 compare_panel 로 전/후를 본다. """
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if not (instruction or "").strip():
@@ -1472,43 +1498,14 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
     return f"작업 시작 {job}(약 30초~1분). job_status('{job}') → 끝나면 compare_panel('{series}', '{episode}', '{pid}')"
 
 
-@mcp.tool()
-def derive_panel(series: str, episode: str, panel: str, source_panel: str, box: str, instruction: str, refs: str = "", seed: int = -1) -> str:
-    """같은 장면의 잘 된 컷(source_panel)에서 상자를 잘라 키우고, 이 컷의 순간으로 다시 그린다(자리·테이블·음식·배경·빛이 그 컷과 같아진다).
-    인물이 컷마다 다른 테이블로 옮겨 앉거나 배경이 바뀌는 문제를 고칠 때 쓴다. box 는 source_panel 그림 기준 0~1000 비율 "x0,y0,x1,y1"
-    (예: 오른쪽 절반 "500,150,1000,750"). instruction 은 이 순간의 동작·표정(영어). refs 는 얼굴 참고 인물 id. """
-    ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    src = _pids(ep, source_panel, "any")[0]
-    if not re.fullmatch(r"\s*\d+(\.\d+)?\s*(,\s*\d+(\.\d+)?\s*){3}", box or ""):
-        return _fail("bad_box", hint="0~1000 비율 네 숫자 'x0,y0,x1,y1'")
-    cmd = [PY, str(VAST / "panel_edit.py"), "derive", str(_series(series)), ep.name, pid, instruction, "--from", src, "--box", box.replace(" ", ""), "--refs", refs]
-    cmd += ["--seed", str(seed)] if seed >= 0 else []
-    job = _start_job("derive_panel", ep, [{"label": f"{pid} 를 {src} 에서 잘라 다시", "cmd": cmd}], instruction[:120])
-    return f"작업 시작 {job}(약 1분). job_status('{job}') → 끝나면 compare_panel('{series}', '{episode}', '{pid}')"
-
-
-@mcp.tool()
-def fix_faces(series: str, episode: str, panels: str) -> str:
-    """얼굴이 다른 사람처럼 보이는 컷: 그 인물 기준 얼굴(상반신 참고 그림)로 얼굴·머리만 다시 그리고, 얼굴 동일인 거리(CCIP)를 재 가까워진 판만
-    남긴다(멀어지면 원본 그대로). panels: "p061:eunyoung,p496:sangsu"(인물을 빼면 그 컷의 첫 인물). 컷당 약 1분. 결과의 distance 는 작을수록 같은 사람. """
-    ep = _episode(series, episode)
-    items = []
-    for it in [x.strip() for x in (panels or "").split(",") if x.strip()]:
-        p, _, who = it.partition(":")
-        items.append(_pids(ep, p, "any")[0] + (f":{who}" if who else ""))
-    if not items:
-        return _fail("no_panels")
-    if len(items) > VAST_MAX:
-        return f"한 번에 {VAST_MAX}컷까지"
-    job = _start_job("fix_faces", ep, [{"label": f"얼굴 맞추기 {len(items)}컷", "cmd": [PY, str(VAST / "panel_edit.py"), "faces", str(_series(series)), ep.name, ",".join(items)]}])
-    return f"작업 시작 {job}(컷당 약 1분). job_status('{job}') 의 RESULT 줄에 거리 전/후, 끝나면 compare_panel"
+# derive_panel(잘 된 컷에서 잘라 다시)·fix_faces(얼굴 거리 재며 얼굴만 다시)는 2026-10-23 도구 정리에서 MCP 에서 뺐다:
+# 10-16 이후 한 번도 안 불렸고, 자리 맞추기는 vast_draw 의 같은 장면 이어 그리기, 얼굴은 edit_panel(refs=인물 id)이 한다. 손으로는 vast/panel_edit.py derive·faces.
 
 
 @mcp.tool()
 def panel_versions(series: str, episode: str, panel: str) -> str:
     """이 컷의 예전 판들(새 것부터, name·time): 본편에서 밀려난 판(_rejected), 고치기 전(_qa_before), 장면 기준판 전(_preplate), 1단 판(_stage1).
-    예전 판이 더 나으면 revert_panel 로 그 name 을 준다. 그림은 file_link(series/<작품>/episodes/<회차>/<폴더>/<name>) 로."""
+    예전 판이 더 나으면 adopt_panel(source='version', name=…) 로 되돌린다. 그림은 contact_sheet(paths=series/<작품>/episodes/<회차>/<폴더>/<name>) 로."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     # panel_edit.versions 와 같은 자리(툴 안에서 무거운 모듈을 import 하지 않는다: Windows 워커 스레드 데드락)
@@ -1521,20 +1518,11 @@ def panel_versions(series: str, episode: str, panel: str) -> str:
 
 
 @mcp.tool()
-def revert_panel(series: str, episode: str, panel: str, version: str) -> str:
-    """컷을 예전 판으로 되돌린다(version = panel_versions 의 name). 지금 판은 _rejected 로 옮겨 지지 않는다. 끝나면 compose."""
-    ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    job = _start_job("revert_panel", ep, [{"label": f"{pid} 되돌리기", "cmd": [PY, str(VAST / "panel_edit.py"), "revert", str(_series(series)), ep.name, pid, version]}])
-    return f"작업 시작 {job}. job_status('{job}') → compare_panel"
-
-
-@mcp.tool()
 def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> list:
     """이 컷의 전/후 나란히 그림을 그림 자체로 돌려준다(사용자에게 보여 줄 때도 이것). what:
-    fix(기본, 마지막 고치기 전/후: edit_panel·derive_panel·fix_faces·revert_panel 이 남긴 것) · preview(마지막 미리 보기: preview_panel·preview_design, 이름 목록도 준다)
+    fix(기본, 마지막 고치기 전/후: edit_panel·되돌리기가 남긴 것) · preview(마지막 미리 보기: preview_panel, 이름 목록도 준다)
     · redraw(본편 | GPU 로 새로 그린 판 panels_hf_vast: 한 컷을 vast_draw 로 다시 그려 본 뒤). 고친 뒤엔 반드시 본다: 지시한 곳이 고쳐졌는지,
-    다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → revert_panel, 미리 보기는 adopt_preview, 다시 그린 판은 vast_adopt 로 본편에."""
+    다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → adopt_panel(source='version'), 미리 보기·다시 그린 판은 adopt_panel(source='preview'·'vast') 로 본편에."""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if what not in ("fix", "preview", "redraw"):
@@ -1559,7 +1547,7 @@ def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> l
         d = ep / "review" / ("edits" if what == "fix" else "previews")
         cands = sorted(d.glob(f"{pid}_*.jpg"), key=lambda f: f.stat().st_mtime) if d.exists() else []
         if not cands:
-            return "이 컷의 고치기 기록이 없다" if what == "fix" else "이 컷의 미리 보기가 없다(preview_panel·preview_design 먼저)"
+            return "이 컷의 고치기 기록이 없다" if what == "fix" else "이 컷의 미리 보기가 없다(preview_panel 먼저)"
         im = Image.open(cands[-1]).convert("RGB")
         info = {"panel": pid, "compare": str(cands[-1]), "link": _link(cands[-1])}
         info.update({"edits": len(cands)} if what == "fix" else {"latest": cands[-1].stem, "all": [f.stem for f in cands]})
@@ -1570,48 +1558,28 @@ def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> l
 
 
 @mcp.tool()
-def preview_panel(series: str, episode: str, panel: str, instruction: str, refs: str = "", seed: int = -1) -> str:
-    """본편은 그대로 두고 한 컷을 고친 모습만 미리 본다(크레딧 0, 약 30초). 사용자가 '이 컷 이렇게 바꾸면 어때, 보여줘'라고 할 때.
-    instruction 은 edit_panel 과 같은 영어 지시('무엇을 어떻게 바꾸고 나머지는 그대로'). 결과는 <회차>/review/previews/ 에만 쌓인다.
-    끝나면 compare_panel(what='preview') 로 전/후를 그림으로 보여 주고, 사용자가 고르면 adopt_preview 로 본편에 넣는다."""
+def preview_panel(series: str, episode: str, panel: str, instruction: str = "", refs: str = "", character: str = "", design: str = "", seed: int = -1) -> str:
+    """본편은 그대로 두고 한 컷을 바꾼 모습만 미리 본다(크레딧 0, 약 30초): '이 컷 이렇게 바꾸면 어때, 보여줘'. instruction(영어, edit_panel 과 같은 지시)
+    또는 인물 디자인 바꾸기 character(인물 id) + design(영어, 예 "short silver-white hair instead of black hair"). 끝나면 compare_panel(what='preview').
+
+    결과는 <회차>/review/previews/ 에만 쌓인다. 사용자가 고르면 adopt_panel(source='preview') 로 본편에 넣는다.
+    디자인이 마음에 들어 작품 전체에 쓰려면 add_to_series 로 그 인물 설명을 바꾸고 시안·참고 그림을 다시 만드는 일이 따로 필요하다(사용자에게 묻는다).
+    (예전 preview_design 을 합쳤다, 2026-10-23)"""
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
-    if not (instruction or "").strip():
-        return _fail("empty_instruction")
-    cmd = [PY, str(VAST / "panel_edit.py"), "preview", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
+    if (design or "").strip():
+        if not (character or "").strip():
+            return _fail("character_required", reason="design 을 주면 character(인물 id)도 준다")
+        cmd = [PY, str(VAST / "panel_edit.py"), "design", str(_series(series)), ep.name, pid, design, "--who", character]
+        label, note = f"{pid} {character} 디자인 미리 보기", design
+    elif (instruction or "").strip():
+        cmd = [PY, str(VAST / "panel_edit.py"), "preview", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
+        label, note = f"{pid} 미리 보기", instruction
+    else:
+        return _fail("empty_instruction", reason="instruction 이나 character+design 을 준다")
     cmd += ["--seed", str(seed)] if seed >= 0 else []
-    job = _start_job("preview_panel", ep, [{"label": f"{pid} 미리 보기", "cmd": cmd}], instruction[:120])
-    return f"작업 시작 {job}(약 30초~1분, 본편은 그대로). job_status('{job}') → 끝나면 compare_panel(what='preview')('{series}', '{episode}', '{pid}')"
-
-
-@mcp.tool()
-def preview_design(series: str, episode: str, panel: str, character: str, change: str, seed: int = -1) -> str:
-    """인물 디자인(머리 색·머리 모양·옷·안경·소품 등)을 바꾸면 어떻게 보일지 그 인물이 나오는 한 컷으로 미리 본다(본편·시트는 그대로).
-    character: 인물 id. change: 영어로 바꿀 디자인(예 "short silver-white hair instead of black hair", "a burgundy three-piece suit").
-    끝나면 compare_panel(what='preview') 로 본다. 마음에 들어 작품 전체에 쓰려면 시트·series.json 의 그 인물 설명을 바꾸는 일이 따로 필요하다(사용자에게 묻는다)."""
-    ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    if not (change or "").strip() or not (character or "").strip():
-        return _fail("empty_instruction")
-    cmd = [PY, str(VAST / "panel_edit.py"), "design", str(_series(series)), ep.name, pid, change, "--who", character]
-    cmd += ["--seed", str(seed)] if seed >= 0 else []
-    job = _start_job("preview_design", ep, [{"label": f"{pid} {character} 디자인 미리 보기", "cmd": cmd}], change[:120])
-    return f"작업 시작 {job}(약 30초~1분, 본편·시트는 그대로). job_status('{job}') → 끝나면 compare_panel(what='preview')('{series}', '{episode}', '{pid}')"
-
-
-@mcp.tool()
-def adopt_preview(series: str, episode: str, panel: str, preview: str = "") -> str:
-    """미리 보기를 본편에 넣는다(사용자가 고른 것만). preview: compare_panel(what='preview') 가 준 이름(비우면 마지막 것). 옛 본편은 panels_hf/_rejected/ 로,
-    되돌리기는 panel_versions → revert_panel."""
-    ep = _episode(series, episode)
-    pid = _pids(ep, panel, "any")[0]
-    d = ep / "review" / "previews"
-    name = preview or next((f.stem for f in sorted(d.glob(f"{pid}_*.png"), key=lambda f: f.stat().st_mtime, reverse=True)), "") if d.exists() else preview
-    if not name:
-        return "이 컷의 미리 보기가 없다"
-    r = subprocess.run([PY, str(VAST / "panel_edit.py"), "adopt", str(_series(series)), ep.name, pid, name], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", env=ENV)
-    return (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout + r.stderr).strip() else f"종료 {r.returncode}"
+    job = _start_job("preview_panel", ep, [{"label": label, "cmd": cmd}], note[:120])
+    return f"작업 시작 {job}(약 30초~1분, 본편은 그대로). job_status('{job}') → 끝나면 compare_panel('{series}', '{episode}', '{pid}', what='preview')"
 
 
 
@@ -1831,14 +1799,18 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
 
 
 @mcp.tool()
-def job_status(job_id: str, wait: int = 0, tail_lines: int = 40) -> str:
-    """작업(job)의 상태(JSON). wait 를 주면 끝날 때까지 최대 wait 초(50까지) 기다렸다가 답한다: 짧은 작업(컷 몇 장)은 wait=50 으로 부르고,
+def job_status(job_id: str = "", wait: int = 0, tail_lines: int = 40, series: str = "", episode: str = "", running_only: bool = False, limit: int = 8) -> str:
+    """작업(job)의 상태(JSON). job_id 를 비우면 최근 작업 목록(최신순, series·episode 로 좁히고 running_only 면 도는 것만): 작업 번호를 잃었거나 새 대화에서
+    '아까 시킨 거 어디까지 됐어?' 에 답할 때. wait 를 주면 끝날 때까지 최대 wait 초(50까지) 기다렸다가 답한다: 짧은 작업(컷 몇 장)은 wait=50 으로 부르고,
     같은 작업으로 최대 4번(약 5분)까지. 그래도 running 이면 사용자에게 작업 번호·panels_done/panels_total·eta_s 를 알리고 답을 끝낸다(작업은 대화와 상관없이
     이어 돈다). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 알린다. wait 없이 몇 초 간격으로 되풀이하지 않는다.
     state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나 candidates 의 시안을 사용자에게 보여 준다).
     panels_done/panels_total/eta_s = 진행(그리는 작업), stalled = 로그가 오래 안 늘었거나 프로세스가 죽음, gates = 준비 작업의 관문 통과 여부,
     review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), drawn · links = 그린 컷·내보낸 파일 링크.
-    (예전 job_status(wait=50) 를 여기에 합침, 2026-10-22. 2026-10-16 agent app 시험: 몇 초 간격 되풀이가 반복 방지에 걸려 다 그린 결과를 보고하지 못했다)"""
+    (예전 job_status(wait=50) 를 여기에 합침, 2026-10-22. 2026-10-16 agent app 시험: 몇 초 간격 되풀이가 반복 방지에 걸려 다 그린 결과를 보고하지 못했다.
+    예전 list_jobs 도 job_id 를 비운 꼴로 합침, 2026-10-23)"""
+    if not job_id.strip():
+        return _list_jobs(series, episode, running_only, limit)
     if not re.fullmatch(r"[\w-]+", job_id):
         return json.dumps({"error": "bad_job_id"})
     end = time.time() + max(0, min(int(wait or 0), 50))
@@ -1849,10 +1821,8 @@ def job_status(job_id: str, wait: int = 0, tail_lines: int = 40) -> str:
     return json.dumps(_job_info(job_id, tail_lines), ensure_ascii=False)
 
 
-@mcp.tool()
-def list_jobs(series: str = "", episode: str = "", running_only: bool = False, limit: int = 8) -> str:
-    """최근 작업 목록(JSON, 최신순): 작업 번호·종류·작품·회차·state·진행(panels_done/panels_total)·eta_s·stalled. 작업 번호를 잃었거나 새 대화에서 '아까 시킨 거 어디까지
-    됐어?' 에 답할 때 쓴다(작업은 대화와 상관없이 이어 돈다). series·episode 로 좁히고, running_only 면 도는 것만. 자세한 건 그 번호로 job_status."""
+def _list_jobs(series: str = "", episode: str = "", running_only: bool = False, limit: int = 8) -> str:
+    """최근 작업 목록(JSON, 최신순): 작업 번호·종류·작품·회차·state·진행(panels_done/panels_total)·eta_s·stalled. job_status(job_id='') 가 부른다."""
     want_ep = _episode(series, episode).resolve() if series and episode else None
     want_series = _series(series).name if series and not episode else None
     rows = []
@@ -1892,7 +1862,7 @@ def _first_para(text: str, n: int = 360) -> str:
 for _t in mcp._tool_manager._tools.values():
     # 고치기 도구들은 예전엔 docstring 뒤에 FIX_LADDER 를 '+' 로 붙였는데, 그러면 docstring 이 아니게 되어 모델에게 설명이 비어 갔다
     # (2026-10-22: 옷 바꾸기 같은 부분 수정을 시켜도 edit_panel 을 모르던 원인). 전체 글에만 순서를 붙인다.
-    _FULL_DOCS[_t.name] = (_t.description or "") + ("\n\n" + FIX_LADDER if _t.name in ("edit_panel", "derive_panel", "fix_faces") else "")
+    _FULL_DOCS[_t.name] = (_t.description or "") + ("\n\n" + FIX_LADDER if _t.name in ("edit_panel",) else "")
     _short_desc = _first_para(_t.description or "")
     _t.description = _short_desc + (" (전체 설명·규칙: tool_help)" if _short_desc != " ".join((_t.description or "").split()) else "")
 

@@ -22,6 +22,8 @@ series/*/episodes/*/render_status.json
 series/*/lora/*/data/
 series/*/lora/*/loss.png
 **/_rejected/
+# 안 쓰는 것을 옮겨 두는 곳(10일 뒤 tools/clean_old.py 가 지운다)
+**/_old/
 **/_candidates/
 # 원작 원고(남의 글): 콘티 관문이 장면 목록(beats.json)과 대조하는 정본. 작업 PC 에만
 series/*/source/*.md

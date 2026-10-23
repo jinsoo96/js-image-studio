@@ -72,13 +72,13 @@ agent app 의 MCP 목록은 PC 마다 따로고(서버 동기화 없음), 서버
 | 도구 | 하는 일 |
 |---|---|
 | `comfy_server` | 서버 상태(인스턴스·VRAM·큐·모델 파일) · 받는 중인 모델 · 버전 전환 · 재시작 · 로그 · 상류 수정 붙이기 |
-| `edit_panel` · `derive_panel` · `fix_faces` | 그린 컷의 일부만 고치기(편집 워크플로우): 지시 편집 · 잘 된 옆 컷에서 잘라 다시 · 얼굴을 기준 얼굴로(거리 재서 가까워질 때만) |
-| `panel_versions` · `revert_panel` · `compare_panel` | 예전 판 보기·되돌리기 · 고치기 전/후 그림 |
+| `edit_panel` · `preview_panel` | 그린 컷의 일부만 고치기(편집 워크플로우, refs 로 인물 얼굴 맞추기) · 본편은 그대로 두고 미리 보기(지시 또는 인물 디자인) |
+| `panel_versions` · `compare_panel` | 예전 판 보기 · 고치기 전/후 그림 |
 | `vast_draw` | 같은 panels.json 을 vast ComfyUI(Qwen Image 2.1)로 그림 → `panels_hf_vast\`. turbo·expr 기본, aspect 로 세로, seed 로 다시. 한 번에 80컷까지 |
 | `vast_make_assets` | 시트에서 참고 그림 자르기 + 베이스 몸·센 표정 12가지 |
 | `new_series` · `add_to_series` · `redo_candidate` | 새 작품 열기(작품 설정 한 장 → `series\<slug>-hf`, `tools\new_series.py`) · 인물·장소 더하기 · 마음에 안 드는 시안 다시 그리기 |
 | `make_episode` | **한 화를 한 번에**(어느 작품이든): 콘티 준비 → 에셋 점검(새 장소·인물은 시안 후 멈춤, `accept_new`) → vast 그리기 → 합성·점검 → 내보내기. 본편 그림이 있는 컷은 안 건드림 |
-| `vast_adopt` | 사용자가 고른 vast 컷을 본편(panels_hf)으로, 원본은 `_rejected\*_before_vast.png` |
+| `adopt_panel` | 사용자가 고른 판을 본편(panels_hf)으로: source=vast(다시 그린 판) · preview(미리 보기) · version(예전 판으로 되돌리기). 원본은 `_rejected\` |
 
 `contact_sheet`·`review_panels` 에 `folder="vast"` 를 주면 vast 그림을 본다. 인스턴스를 켜고 끄는 도구는 두지 않는다. 에이전트 프롬프트(`AGENT_PROMPT.md`) v1.4 에 vast 쓰는 때와 순서를 넣었다("vast 로", "크레딧 없이" 라고 하면 vast_draw).
 
