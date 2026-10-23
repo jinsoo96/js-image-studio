@@ -314,6 +314,8 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
             raise RepeatedJob(json.dumps({"error": "repeated_job", "previous_job": old.get("id"),
                                           "previous": json.loads(job_status(old.get("id"), tail_lines=5))}, ensure_ascii=False))
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    if kind in ("lora_train", "restyle", "lora_compare"):  # 학습은 로그가 드문드문 나온다: 멈춤 지킴이(job_runner) 한도를 넉넉히
+        steps = [{**s, "stall_min": s.get("stall_min", 120)} for s in steps]
     spec = {"id": job_id, "kind": kind, "episode_dir": str(ep), "note": note, "steps": steps, "fingerprint": fp}
     f = JOBS / f"{job_id}.json"
     f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")

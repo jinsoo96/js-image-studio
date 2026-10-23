@@ -558,8 +558,15 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
     if best[2] and best[2] <= {"시선", "좌우시선"} and fix_facing(c, cache, dst, series, ep_dir, p, seed, log):
         return set(), ""
     # 인원이 남으면(같은 사람 둘 등) 콕 집은 지우기 편집 + 사람 수만 따로 세서 확인(외출 p008: 다시 그리기·남는 사람 지우기로 안 되던 것이 한 번에 됐다)
-    if "인원" in best[2] and fix_count(c, cache, dst, p, seed, log):
-        return set(), ""
+    if "인원" in best[2]:
+        kept = dst.read_bytes()
+        if fix_count(c, cache, dst, p, seed, log):
+            # 사람을 지운 뒤 컷 전체를 다시 본다: 지우기만 보고 통과시키니 주인공까지 지워진 빈 골목이 '통과'로 들어갔다(2026-10-24 개항 p023f)
+            _, p2 = staging_check(series, ep_dir, dst, pid)
+            if not p2:
+                return set(), ""
+            dst.write_bytes(kept)
+            log(f"  {pid}: 사람을 지운 뒤 다시 보니 {sorted(p2)} → 지우기 전 판으로 되돌림")
     log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
     return best[2], str(r.get("고칠점") or "")
 
