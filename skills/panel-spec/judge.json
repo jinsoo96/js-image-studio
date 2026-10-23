@@ -67,6 +67,12 @@
    "weight": 0.5,
    "hard": false,
    "description": "같은 이름 없는 사람이 여러 컷에 되풀이되면 작품 인물로 올려(add_to_series) 시트로 생김새를 고정한다. 아니면 컷마다 얼굴·머리가 달라진다. 군중·손 인서트는 상관없다."
+  },
+  {
+   "name": "self_consistent",
+   "weight": 1.0,
+   "hard": true,
+   "description": "한 컷 안의 칸끼리 어긋나지 않는다: action·acting·camera 에 적은 옷·머리·소품(색 포함)이 outfit 과 같고, 인물의 좌우 자리·바라보는 쪽이 action 과 camera 에서 같다. 어긋나면 그림 모델이 둘 중 하나를 골라 그려 검수에서 걸린다."
   }
  ]
 }

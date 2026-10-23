@@ -205,6 +205,25 @@ def judge_storyboard(ep: Path) -> dict:
             "hash": _hash(ep / "storyboard.json", ep.parents[1] / "source" / "beats.json")}
 
 
+CONSIST = """Below are webtoon panel descriptions (JSON per panel). Inside ONE panel, find fields that contradict each other:
+- a person's clothes, hair or carried item described in action/acting/camera with a different colour or garment than that person's outfit
+  (e.g. outfit says "white dress shirt" but action says "his dark shirt");
+- a person on the LEFT in action but on the RIGHT in camera (or facing opposite ways).
+Only report clear contradictions between fields of the same panel, not style or missing detail.
+
+{material}
+
+Answer JSON only: {{"problems": [{{"panel": "p012", "fix": "action says dark shirt but outfit says white dress shirt: make them the same"}}]}}"""
+
+
+def consistency(mat: str) -> list:
+    """한 컷 안의 칸끼리 어긋난 곳(옷 색·좌우)만 따로 묻는다. 기준 열한 개를 한 번에 묻는 채점에서는 outfit '흰 셔츠' ↔ action
+    'dark shirt' 를 놓쳐 그림이 둘 중 하나를 골랐다(2026-10-24 야근의 온도 3화 p002). 연출 확인(run_checks)처럼 한 번에 한 가지를 묻는다."""
+    r = _llm(CONSIST.format(material=mat), max_tokens=900)
+    return [{"criterion": "self_consistent", "panel": str(p.get("panel", "")), "fix": str(p.get("fix", ""))}
+            for p in r.get("problems", []) if isinstance(p, dict) and p.get("fix")]
+
+
 def _talk(panel: dict) -> str:
     """컷의 말·생각 대사를 말풍선 자리와 함께('(top-right) 눈 좀 붙여.'). 말풍선 자리 관문(balloon_side)이 본다."""
     lines = [f"({d.get('pos', '?')}) {d.get('text', '')}" for d in panel.get("dialogue", []) if d.get("type") in ("speech", "thought")]
@@ -223,14 +242,14 @@ def judge_panels(ep: Path) -> dict:
     # 대사 한 줄 고치는 일이 관문 왕복 34번이 됐다(2026-10-24 스튜디오 시험). 바뀐 묶음·문제가 있던 묶음만 다시 본다
     cache_f = ep / "review" / "gates_panels_cache.json"
     cache = _json_file(cache_f) if cache_f.exists() else {}
-    crit_key = hashlib.sha1(json.dumps(crit, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:10]
+    crit_key = hashlib.sha1((json.dumps(crit, ensure_ascii=False, sort_keys=True) + ASK + CONSIST).encode()).hexdigest()[:10]  # 묻는 말이 바뀌면 다시 채점
     new_cache = {}
     results = []
     for k in range(0, len(panels), CHUNK):
         part = panels[k:k + CHUNK]
         mat = "\n".join(
             f"{p['id']} 대사:{_talk(board.get(p['id'], {}))}\n"
-            f"  {json.dumps({x: p.get(x) for x in ('chars', 'location', 'view', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
+            f"  {json.dumps({x: p.get(x) for x in ('chars', 'outfit', 'location', 'view', 'shot', 'action', 'acting', 'camera', 'extras')}, ensure_ascii=False)}"
             for p in part)
         mat = re.sub(r" SPACE \(identical.*?\"", '"', mat)
         # 장면 배치(자리표)는 장소마다 한 번: 공간 기준(누가 어디 앉아 있고 어느 각도에서 누가 보여야 하나)을 채점하려면 필요하다
@@ -243,7 +262,8 @@ def judge_panels(ep: Path) -> dict:
             r = cache[key]
         else:
             r = _llm(ASK.format(what="컷 설명", criteria=json.dumps(crit["criteria"], ensure_ascii=False, indent=1), setting=setting, material=mat))
-            r["problems"] = _verify(crit, setting, mat, [p for p in r.get("problems", []) if isinstance(p, dict)])
+            first = [p for p in r.get("problems", []) if isinstance(p, dict) and p.get("criterion") != "self_consistent"]
+            r["problems"] = _verify(crit, setting, mat, first + consistency(mat))
         new_cache[key] = r
         results.append(r)
     (ep / "review").mkdir(exist_ok=True)

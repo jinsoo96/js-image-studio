@@ -162,5 +162,51 @@
     "v2"
    ]
   }
+ },
+ {
+  "name": "새_회차_끝까지",
+  "gpu": true,
+  "prompt": "야근의 온도 3화를 4컷으로 짧게 만들어서 그려 줘. 금요일 밤 회사 옥상, 서진이 윤재에게 그날 캔커피 고마웠다고 처음으로 먼저 말을 건네고, 윤재가 살짝 웃는 이야기. 관문 통과하면 바로 그리고 합성·내보내기까지.",
+  "then": [
+   {
+    "say": "다 됐어? 파일 링크 알려 줘.",
+    "wait_jobs_min": 40
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "set_storyboard",
+    "set_panels",
+    "prepare_episode",
+    "make_episode"
+   ],
+   "max_tool_errors": 4,
+   "max_seconds": 4000,
+   "answer_has": [
+    "3화"
+   ]
+  }
+ },
+ {
+  "name": "걸린_컷_고치기",
+  "gpu": true,
+  "prompt": "야근의 온도 3화 p002 컷이 이상해. 어깨 너머로 보이는 윤재 몸통이 둘로 겹쳐 그려졌어. 검수 기록이랑 컷 설명도 확인해서 틀린 데 있으면 같이 고치고, 그 컷만 다시 그려서 합성하고 내보내 줘.",
+  "then": [
+   {
+    "say": "다 됐어? p002 어떻게 고쳤는지랑 PDF 링크 알려 줘.",
+    "wait_jobs_min": 30
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "panel_info",
+    "vast_draw"
+   ],
+   "max_tool_errors": 3,
+   "max_seconds": 3000,
+   "answer_has": [
+    "p002"
+   ]
+  }
  }
 ]

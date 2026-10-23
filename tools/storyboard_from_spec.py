@@ -40,7 +40,23 @@ def norm_line(x) -> dict:
     return {k: v for k, v in d.items() if v not in ("", None)}
 
 
-def norm_cut(c: dict) -> dict:
+TITLE_WORDS = ("title", "cover", "제목", "표지")
+
+
+def is_title(c: dict) -> bool:
+    """에이전트가 표지를 컷으로 적은 것(shot 이나 대사 종류가 title·cover). 그대로 두면 그리는 컷이 되어 '3화…' 말풍선이 달린 그림이 나왔다(2026-10-24)."""
+    return str(c.get("shot", "")).strip().lower() in TITLE_WORDS or any(
+        isinstance(d, dict) and str(d.get("type", "")).strip().lower() in TITLE_WORDS for d in (c.get("dialogue") or []))
+
+
+def norm_cut(c: dict, sj: dict | None = None, title_card: str = "") -> dict:
+    if is_title(c) and not c.get("composite"):
+        text = next((str(d.get("text", "")) for d in (c.get("dialogue") or []) if isinstance(d, dict) and d.get("text")), "")
+        sj = sj or {}
+        return {"id": c["id"], "shot": "wide", "aspect": "wide", "mode": "drama", "scene": "none", "characters": [], "dialogue": [],
+                "gap_after": c.get("gap_after", 400),
+                "composite": {"tool": "phone_ui", "kind": "title", "title": sj.get("title", ""), "subtitle": text or title_card or sj.get("logline", ""),
+                              "credit": sj.get("credit", "")}}
     shot = SHOTS.get(str(c.get("shot", "medium")).strip().lower(), "medium")
     out = {"id": c["id"], "shot": shot, "aspect": c.get("aspect") or ASPECT_OF[shot], "mode": "drama", "scene": c.get("scene") or c.get("location") or "none",
            "characters": list(c.get("chars") or c.get("characters") or []),
@@ -58,9 +74,11 @@ def build(ep: Path) -> dict:
     spec = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {"cuts": []}  # 표가 아직 없으면 빈 콘티(표지만)
     sj = json.loads((ep.parents[1] / "series.json").read_text(encoding="utf-8-sig")) if (ep.parents[1] / "series.json").exists() else {}
     n = int(re.search(r"\d+", ep.name).group())
-    cuts = [norm_cut(c) for c in spec.get("cuts", [])]
+    cuts = [norm_cut(c, sj, spec.get("title_card", "")) for c in spec.get("cuts", [])]
     if spec.get("cover", True) and not (cuts and cuts[0].get("composite")):
-        cuts.insert(0, {"id": "p000", "shot": "wide", "aspect": "wide", "mode": "drama", "scene": "none", "characters": [], "dialogue": [], "gap_after": 400,
+        ids = {c["id"] for c in cuts}
+        cuts.insert(0, {"id": "p000" if "p000" not in ids else "cover", "shot": "wide", "aspect": "wide", "mode": "drama", "scene": "none", "characters": [],
+                        "dialogue": [], "gap_after": 400,
                         "composite": {"tool": "phone_ui", "kind": "title", "title": sj.get("title", ep.parents[1].name),
                                       "subtitle": spec.get("title_card") or sj.get("logline", ""), "credit": sj.get("credit", "")}})
     board = {"series": sj.get("slug", ep.parents[1].name), "episode": n, "version": re.search(r"_(v\d+)", ep.name).group(1) if "_v" in ep.name else "v1",

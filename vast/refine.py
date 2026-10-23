@@ -55,8 +55,9 @@ def refine_prompt(series, p, expr=True):
 
 
 
-def find_extras(img_path: Path, series, p) -> list:
-    """그림을 보는 사내 Qwen 에게 컷 설명에 없는 사람을 옷·자리로 짧게 묘사하게 한다. 없으면 []."""
+def find_extras(img_path: Path, series, p, hint: str = "") -> list:
+    """그림을 보는 사내 Qwen 에게 컷 설명에 없는 사람을 옷·자리로 짧게 묘사하게 한다. 없으면 [].
+    hint: 앞선 검수(연출 확인)가 적은 인원 문제. 두 검사가 따로 보니 검수는 '같은 사람 둘'이라 하고 여기서는 '없음'이라 해서 아무것도 안 지웠다."""
     import base64
     import io
     import urllib.request
@@ -78,13 +79,16 @@ def find_extras(img_path: Path, series, p) -> list:
     expected = (f"exactly {len(chars)} named {'person' if len(chars) == 1 else 'people'}: {who}" if chars else "no named characters")
     ask = (f"This webtoon panel should show {expected}" + (f", plus these unnamed people, who are expected and NOT extra: {extras_txt}" if extras_txt else "") + "."
            + f"\nPanel text: {panel_text(p)}\nAnyone else the panel text describes (an over-the-shoulder foreground figure, unnamed people) "
-             "is also expected and is NOT extra."
+             "is also expected and is NOT extra. Each expected person has one head and one body."
+           + (f"\nAn earlier check of this image reported: {hint[:300]}. Look for it; if it is right, describe that extra person or body." if hint.strip() else "")
            + "\nLook at the image. If it shows no more people than expected, answer with an empty list: different expected people can wear "
            "the same uniform, so do not call someone a duplicate just because the clothes match; compare faces, hair and build. "
            "Otherwise list every EXTRA person who should not be there: true duplicates of the same person (keep the one whose clothes match), "
-           "strangers, and small background figures. Describe each extra person in one short phrase by clothes and position "
-           "(e.g. 'the old woman in a red coat standing at the far left'). "
+           "strangers, small background figures, and extra bodies: a second torso or pair of shoulders with no head of its own beside or "
+           "behind a person (one person drawn with two bodies). Describe each one in one short phrase by clothes and position "
+           "(e.g. 'the old woman in a red coat standing at the far left', 'the headless second torso in a white shirt behind the man at the left'). "
            'Answer only JSON: {"extra": ["...", "..."]} or {"extra": []}.')
+    # 어깨 너머 앞사람이 몸통 둘로 그려진 컷을 '어깨 너머 인물은 기대하는 사람'으로 보고 넘겼다(2026-10-24 야근의 온도 3화 p002)
     return [x for x in _vlm([img_path], ask).get("extra", []) if isinstance(x, str) and x.strip()]
 
 
@@ -560,26 +564,31 @@ def _staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, re
     # 인원이 남으면(같은 사람 둘 등) 콕 집은 지우기 편집 + 사람 수만 따로 세서 확인(외출 p008: 다시 그리기·남는 사람 지우기로 안 되던 것이 한 번에 됐다)
     if "인원" in best[2]:
         kept = dst.read_bytes()
-        if fix_count(c, cache, dst, p, seed, log):
+        hint = " ".join(s for s in re.split(r"(?<=[.!?])\s+|\s(?=[가-힣A-Za-z]+:)", str(r.get("고칠점") or "")) if "인원" in s)
+        if fix_count(c, cache, dst, p, seed, log, hint=hint) and dst.read_bytes() != kept:
             # 사람을 지운 뒤 컷 전체를 다시 본다: 지우기만 보고 통과시키니 주인공까지 지워진 빈 골목이 '통과'로 들어갔다(2026-10-24 개항 p023f)
-            _, p2 = staging_check(series, ep_dir, dst, pid)
-            if not p2:
-                return set(), ""
+            r2, p2 = staging_check(series, ep_dir, dst, pid)
+            # 인원이 풀리고 새로 생긴 문제가 없으면 받는다: '전부 통과'만 받으니 원래 남아 있던 옷·논리 지적 때문에 잘 지운 판까지 버렸다(야근의 온도 3화 p002)
+            if "인원" not in p2 and p2 <= best[2]:
+                if not p2:
+                    return set(), ""
+                log(f"  {pid}: 남는 사람을 지움, 남은 것 {sorted(p2)} → 사람 눈으로 확인")
+                return p2, str(r2.get("고칠점") or "")
             dst.write_bytes(kept)
             log(f"  {pid}: 사람을 지운 뒤 다시 보니 {sorted(p2)} → 지우기 전 판으로 되돌림")
     log(f"  {pid}: 연출 확인 남음 {sorted(best[2])} → 사람 눈으로 확인")
     return best[2], str(r.get("고칠점") or "")
 
 
-def fix_count(c, cache, dst: Path, p: dict, seed, log=print) -> bool:
+def fix_count(c, cache, dst: Path, p: dict, seed, log=print, hint: str = "") -> bool:
     """글에 없는 사람(중복·낯선 사람)이 남으면 한 명씩 위치·옷으로 짚어 지우고, 글에 없는 사람이 없어질 때까지 최대 3번(맞으면 True,
     아니면 원본으로 되돌리고 False). '글에 적힌 사람보다 많은가'는 find_extras 가 컷의 글을 읽고 판단한다(사람 수를 글의 숫자 낱말로 세지 않는다).
-    이 순간 없어야 할 이름 있는 인물(absent_cast: 먼저 떠난 사람 등)도 같이 지운다."""
+    이 순간 없어야 할 이름 있는 인물(absent_cast: 먼저 떠난 사람 등)도 같이 지운다. hint 는 연출 확인이 적은 인원 문제(find_extras 에 넘긴다)."""
     series, ep_dir = Path(dst).parents[3], Path(dst).parents[1]
     before = dst.read_bytes()
 
     def left():
-        return find_extras(dst, series, p) + [f"{x['name']} ({x.get('where', '')})" for x in absent_cast(series, ep_dir, p["id"], dst)]
+        return find_extras(dst, series, p, hint) + [f"{x['name']} ({x.get('where', '')})" for x in absent_cast(series, ep_dir, p["id"], dst)]
 
     for k in range(3):
         extra = left()

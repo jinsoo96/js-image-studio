@@ -491,21 +491,24 @@ def guide(topic: str = "") -> str:
 
 
 @mcp.tool()
-def read_doc(doc: str, series: str = "", offset: int = 0, max_chars: int = 12000) -> str:
+def read_doc(doc: str = "", series: str = "", offset: int = 0, max_chars: int = 12000) -> str:
     """그 단계의 스킬·작품 문서를 읽는다. 'skill:<이름>' 이 기본(storyboard 콘티 · panel-spec 컷 설명 · continuity 이어 그리기 · asset 에셋 ·
     staging-review 연출 검수 · lettering-publish 식자·출판), 'skill' 이면 스킬 목록. series 를 주면 README · SERIES · STYLE · ASSETS(그 작품 설정).
     LESSONS(사용자가 짚은 문제 모음, 길다)·ACTING_GUIDE(연기). 지금 하는 단계의 스킬 하나만 읽는다: 순서는 guide(), 규칙은 관문이 강제한다.
     긴 문서는 offset 으로 이어 읽는다."""
-    d = doc.strip().upper()
+    d = (doc.strip() or ("SERIES" if series else "SKILL")).upper()  # series 만 주면 그 작품 설정, 아무것도 없으면 스킬 목록
     if d == "SKILL" or d.startswith("SKILL:"):
         t = _skill_text(doc.strip()[6:])
         part = t[offset:offset + max_chars]
         return part + (f"\n\n(… 전체 {len(t)}자 중 {offset}~{offset + len(part)}. 이어 읽으려면 offset={offset + len(part)})"
                        if offset + len(part) < len(t) else "")
     if series:
-        if d not in SERIES_DOCS:
-            return f"작품 문서는 {', '.join(SERIES_DOCS)} 중 하나"
-        p = _series(series) / SERIES_DOCS[d]
+        sd = _series(series)
+        have = [k for k, f in SERIES_DOCS.items() if (sd / f).exists()]
+        if d not in SERIES_DOCS or not (sd / SERIES_DOCS[d]).exists():
+            # 없는 문서를 열면 날것의 FileNotFoundError 였다(새 작품엔 ASSETS.md 가 없다, 2026-10-24) → 있는 문서를 알린다
+            return f"{sd.name} 의 작품 문서는 {', '.join(have) or '없음'}(설정 원본은 read_file('series/{sd.name}/series.json'))"
+        p = sd / SERIES_DOCS[d]
     else:
         if d in INTERNAL_DOCS:
             return ("그 문서는 작업실 사람용 내부 문서라 에이전트 일에 쓰지 않는다. 일하는 순서는 guide(), 단계별 규칙은 read_doc('skill:<이름>'), "
@@ -2074,7 +2077,23 @@ def compose(series: str, episode: str) -> str:
              {"label": "기계 점검", "cmd": [PY, str(TOOLS / "qa_gate.py"), str(ep)], "allow_fail": True},
              {"label": "말풍선 점검", "cmd": [PY, str(TOOLS / "check_bubbles.py"), str(ep)], "allow_fail": True}]
     job = _start_job("compose", ep, steps)
-    return f"작업 시작 {job}(약 1~3분). job_status('{job}')"
+    return f"작업 시작 {job}(약 1~3분). job_status('{job}')" + _review_left(ep)
+
+
+def _review_left(ep: Path) -> str:
+    """검수가 사람 확인으로 남긴 컷(review/staging.json)을 합성·내보내기 답에 붙인다. 걸린 컷(몸통이 둘인 어깨 너머 컷)이 기록만 되고
+    아무 말 없이 PDF 로 나갔다(2026-10-24 야근의 온도 3화 p002). 기록 뒤에 그림이 바뀐 컷은 따로 표시한다(고쳤을 수 있다)."""
+    cur = _json(ep / "review" / "staging.json", {}) or {}
+    if not cur:
+        return ""
+    items = []
+    for pid, v in sorted(cur.items()):
+        # 그린·고친 판(panels_hf_vast)만 본다: panels_hf 는 합성 때 컷 놓기(hf_place)가 늘 다시 써서 매번 '바뀜'이 된다
+        f = ep / "panels_hf_vast" / f"{pid}.png"
+        newer = f.exists() and time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime)) > v.get("at", "")
+        items.append(f"{pid}({'·'.join(v.get('issues', []))}{', 기록 뒤 그림 바뀜' if newer else ''})")
+    return (f"\n검수에서 사람 확인이 남은 컷 {len(items)}개: {', '.join(items)}. panel_info 로 review 를 보고 고칠 컷은 "
+            "set_panels(글이 틀렸으면)·edit_panel·vast_draw(ids) 뒤 다시 compose, 그대로 둘 거면 사용자에게 그 컷을 알린다.")
 
 
 @mcp.tool()
@@ -2091,7 +2110,7 @@ def export(series: str, episode: str) -> str:
              {"label": "내보내기 복사", "cmd": [PY, "-c", copy, str(ep), str(ROOT / "exports" / day), name]}]
     job = _start_job("export", ep, steps)
     pdf = _link(ROOT / "exports" / day / f"{name}.pdf")
-    return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "")
+    return f"작업 시작 {job}. 끝나면 exports/{day}/{name}.* . job_status('{job}')" + (f"\n끝난 뒤 볼 링크(PDF): {pdf}" if pdf else "") + _review_left(ep)
 
 
 # ── Ailism Original 에 게시(tools/ailism_publish.py, API 키로) ─────────────────
