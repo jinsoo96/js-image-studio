@@ -1,6 +1,6 @@
 """회차 오프닝 이미지: 흑백 처리한 멤버들을 배경에 깔고 주인공을 컬러로 작게 앞에 세운다.
 
-    python tools/splash.py <series_dir> <out.png> --title "무대 뒤" [--sub "부제"] [--hero hero]
+    python tools/splash.py <series_dir> <out.png> --title "무대 뒤" [--sub "부제"] [--hero <인물 id>]
 
 배경 = characters/<멤버>/intro_v1.png 를 흑백·어둡게 해서 세로 띠로 나란히.
 주인공 = characters/<hero>/full_v1.png (단색 배경 전신) 에서 rembg 로 오려낸 컷.
@@ -34,12 +34,15 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--title", required=True)
     ap.add_argument("--sub", default="")
-    ap.add_argument("--hero", default="hero")
+    ap.add_argument("--hero", default="", help="주인공 인물 id(비우면 그 작품 cast.json·characters.json 의 첫 인물)")
     ap.add_argument("--credit", default="", help="작가 표기(예: 글/그림: 김진수)")
     args = ap.parse_args()
 
     series = Path(args.series_dir)
     chars = load_json(series / "characters.json")
+    if not args.hero:  # 예전 기본값 'hero' 는 무대 뒤 인물 id 였다(작품을 박지 않는다, 2026-10-24)
+        cast = load_json(series / "cast.json") if (series / "cast.json").exists() else {}
+        args.hero = next((c for c in list(cast) + list(chars) if not c.startswith("_")), "")
     members = [cid for cid, c in chars.items()
                if cid != args.hero and not c.get("skip_gender_style") and (series / "characters" / cid / "intro_v1.png").exists()]
     canvas = Image.new("RGB", (W, H), (14, 12, 20))

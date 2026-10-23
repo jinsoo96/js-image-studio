@@ -1,6 +1,6 @@
 """소개컷으로 콜라주 표지를 만든다. SDXL 은 한 장에 8명을 제대로 못 그리므로 따로 그린 컷을 합친다.
 
-    python tools/collage.py <series_dir> <out.png> --title "무대 뒤" [--sub "부제"] [--hero hero]
+    python tools/collage.py <series_dir> <out.png> --title "무대 뒤" [--sub "부제"] [--hero <인물 id>]
 
 위쪽에 멤버들(hero 를 뺀 모든 캐릭터) 상반신을 4열로, 아래쪽에 주인공을 크게 놓고 가운데에 제목을 얹는다.
 """
@@ -45,12 +45,15 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--title", required=True)
     ap.add_argument("--sub", default="")
-    ap.add_argument("--hero", default="hero")
+    ap.add_argument("--hero", default="", help="주인공 인물 id(비우면 그 작품 cast.json·characters.json 의 첫 인물)")
     ap.add_argument("--view", default="intro")
     args = ap.parse_args()
 
     series = Path(args.series_dir)
     chars = load_json(series / "characters.json")
+    if not args.hero:  # 예전 기본값 'hero' 는 무대 뒤 인물 id 였다(작품을 박지 않는다, 2026-10-24)
+        cast = load_json(series / "cast.json") if (series / "cast.json").exists() else {}
+        args.hero = next((c for c in list(cast) + list(chars) if not c.startswith("_")), "")
     members = [cid for cid in chars if cid != args.hero and (series / "characters" / cid / f"{args.view}_v1.png").exists()]
     canvas = gradient()
 

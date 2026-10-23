@@ -7,9 +7,10 @@
 (2026-10-07 사용자 "그림체가 왜 다 다른 느낌이냐"). 태그 조정·IP-Adapter 로는 한계라, 승인·선별한 컷의 그림체를 LoRA 로 가르친다.
 
 학습 세트: 컷 목록 파일의 각 줄이 "series/.../panels/p012.png" 같은 그림 경로(# 뒤는 메모). 캡션은 같은 폴더 render_log.json 의
-프롬프트에서 그림체·품질 태그를 뺀 내용 태그 + 맨 앞 트리거 "mudae style" 이다(그림체는 LoRA 가 흡수하고 내용은 프롬프트가 맡게).
+프롬프트에서 그림체·품질 태그를 뺀 내용 태그 + 맨 앞 트리거 "<이름> style"(LORA_TRIGGER) 이다(그림체는 LoRA 가 흡수하고 내용은 프롬프트가 맡게).
 """
 import json
+import os
 import re
 import shutil
 import sys
@@ -20,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comfy import ROOT, load_json, load_style  # noqa: E402
 import runpod_cloud  # noqa: E402
 
-TRIGGER = "mudae style"
+# 트리거 낱말 = LoRA 이름 + " style"(LORA_TRIGGER 로 바꿈). 예전엔 무대 뒤 전용 "mudae style" 이 박혀 다른 작품에도 그 낱말이 붙었다(2026-10-24)
+TRIGGER = os.environ.get("LORA_TRIGGER", "")
 TRAIN_IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 SD_SCRIPTS = ("https://github.com/kohya-ss/sd-scripts.git", "690ea7f96c23182352ec63def76d431c6120bd2f")
 
@@ -38,7 +40,7 @@ def style_tags():
     return {bare(t) for p in parts for t in p.split(",") if t.strip()}
 
 
-def caption_for(img, drop):
+def caption_for(img, drop, trigger):
     log_p = img.parent / "render_log.json"
     log = load_json(log_p) if log_p.exists() else {}
     entry = log.get(img.stem) or next((v for v in log.values() if v.get("file") == img.name), None)
@@ -51,11 +53,12 @@ def caption_for(img, drop):
         if b and b not in drop and b not in seen:
             seen.add(b)
             keep.append(b)
-    return ", ".join([TRIGGER] + keep)
+    return ", ".join([trigger] + keep)
 
 
 def cmd_build(name, list_file):
-    out = ROOT / "models" / "lora_data" / name / "10_mudae"
+    trigger = TRIGGER or f"{name} style"
+    out = ROOT / "models" / "lora_data" / name / f"10_{trigger.split()[0]}"
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -66,7 +69,7 @@ def cmd_build(name, list_file):
         if not line:
             continue
         img = ROOT / line
-        cap = caption_for(img, drop)
+        cap = caption_for(img, drop, trigger)
         if not img.exists() or cap is None:
             print(f"  건너뜀(그림 또는 기록 없음): {line}")
             continue
@@ -78,7 +81,7 @@ def cmd_build(name, list_file):
 
 
 def cmd_train(name, steps):
-    # 학습 세트 = models/lora_data/<이름>/<반복수>_<트리거>/ 폴더들(kohya 규칙). 그림체 LoRA 는 10_mudae 하나,
+    # 학습 세트 = models/lora_data/<이름>/<반복수>_<트리거>/ 폴더들(kohya 규칙). 그림체 LoRA 는 10_<트리거> 하나,
     # 인물 LoRA 는 인물마다 폴더 하나(worklogs/char_lora_build_1009.py)
     root = ROOT / "models" / "lora_data" / name
     files = sorted(f for d in root.iterdir() if d.is_dir() for f in d.glob("*")) if root.exists() else []

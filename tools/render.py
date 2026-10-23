@@ -216,7 +216,7 @@ def render_one(comfy, style, panel, characters, out_path, seed, log, log_key):
                         "negative": neg, "method": "two_pass"}
         print(f"  {out_path.name}  seed={seed}  two_pass", flush=True)
         return
-    wf, pos, neg, regions, size = panel_workflow(style, panel, characters, seed, prefix=f"mudae/{out_path.stem}",
+    wf, pos, neg, regions, size = panel_workflow(style, panel, characters, seed, prefix=f"webtoon/{out_path.parent.parent.name}/{out_path.stem}",
                                                  style_ref=comfy.style_ref(style))
     init = panel.get("init")
     if init:

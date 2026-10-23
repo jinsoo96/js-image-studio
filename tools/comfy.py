@@ -333,7 +333,7 @@ REGION_BG_STRENGTH = 0.7  # 영역 컷에서 장면(배경) 프롬프트 세기.
 REGION_CHAR_STRENGTH = 1.0  # 인물 영역 세기. CFG 5.5 에선 색이 탔다. 지금은 모든 컷이 style.json 의 CFG(4.5)를 같이 쓴다
 
 
-def build_workflow(style, pos, neg, size, seed, prefix="mudae", regions=None, style_ref=None, loras=()):
+def build_workflow(style, pos, neg, size, seed, prefix="webtoon", regions=None, style_ref=None, loras=()):
     wf = copy.deepcopy(load_json(WORKFLOW_PATH))
     s = style["sampler"]
     wf["1"]["inputs"]["ckpt_name"] = style["checkpoint"]
@@ -421,7 +421,7 @@ def build_workflow(style, pos, neg, size, seed, prefix="mudae", regions=None, st
     return wf
 
 
-def panel_workflow(style, panel, characters, seed, prefix="mudae", style_ref=None):
+def panel_workflow(style, panel, characters, seed, prefix="webtoon", style_ref=None):
     if "lora_strength" in panel and style.get("lora"):
         # 컷마다 LoRA 세기 조정(사람 없는 배경 컷은 학습 세트가 인물 위주라 약하게. 2026-10-07 p001 아침 거리가 밤으로)
         style = {**style, "lora": {**style["lora"], "strength": panel["lora_strength"], "strength_clip": panel["lora_strength"]}}
