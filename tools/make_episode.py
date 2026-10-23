@@ -90,9 +90,12 @@ def audit(series: Path, ep: Path, accept: bool) -> list:
             need.append(f"{'장소' if kind == 'location' else '인물'} {name}: 프롬프트가 없다({maker.name} 에 한 줄 넣는다)")
             continue
         cand = series / "assets" / "_candidates" / (f"locations/{name}.png" if kind == "location" else f"{name}_sheet.png")
-        if not cand.exists():
+        fresh = not cand.exists()
+        if fresh:
             run([PY, VAST / "new_assets.py", series, kind, name], f"새 {'장소' if kind == 'location' else '인물'} 시안: {name}", capture=True)
-        if accept:
+        # 승인은 사람이 본 시안에만: 이번에 처음 그린 시안은 accept 여도 에셋으로 넣지 않고 확인을 받는다. 에이전트가 첫 부름부터 accept_new=True 로
+        # 불러 아무도 보지 않은 장소 시안이 그대로 에셋이 됐다(2026-10-24 스튜디오 시험 '다음 화 그리기')
+        if accept and not fresh:
             run([PY, VAST / "new_assets.py", series, kind, name, "--accept"], f"시안을 에셋으로: {name}", capture=True)
         else:
             need.append(f"{'장소' if kind == 'location' else '인물'} {name} 시안 확인: {cand}")

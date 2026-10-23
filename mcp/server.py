@@ -2011,7 +2011,7 @@ def make_episode(series: str, episode: str, accept_new: bool = False, until: str
     """한 화를 끝까지 한 번에(어느 작품이든, 크레딧 0): 콘티 준비 → 에셋 점검 → GPU 서버 그리기(표정 칸·남는 사람 지우기·연출 확인) → 합성·점검 → 내보내기.
     콘티(make_storyboard.py·build_panels.py)는 먼저 써 둔다(new_episode 로 틀을 열고 이야기대로 고침).
     이 화에 처음 나오는 장소·인물이 있으면 vast 로 시안을 만들어 assets/_candidates/ 에 두고 멈춘다(job 이 '실패'로 끝나고 로그에 '확인 필요').
-    그때 사용자에게 시안 경로를 보여 주고, 고르면 accept_new=True 로 다시 부른다. 본편 그림(panels_hf)이 이미 있는 컷은 건드리지 않는다.
+    그때 사용자에게 시안 경로를 보여 주고, 고르면 accept_new=True 로 다시 부른다(accept_new 는 이미 그려 둔 시안만 넣는다: 처음 그리는 시안은 accept_new 여도 확인을 받으러 멈춘다). 본편 그림(panels_hf)이 이미 있는 컷은 건드리지 않는다.
     until: assets · draw · compose · export. 끝나면 job_status 의 review(사람 확인이 남은 컷)를 사용자에게 알린다."""
     ep = _episode(series, episode)
     if until not in ("assets", "draw", "compose", "export"):
