@@ -323,11 +323,17 @@ def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
                 out.append(c["problem"].format(q=f.get("q", ""), want=f["a"], got=got))
     elif kind == "count_each":
         wears = {ch: " ".join(re.split(r",| with | over | under ", (p.get("outfit") or {}).get(ch, ""))[0].split()[:4]) for ch in p.get("chars") or []}
+        # 윗옷만으로 세니 크림색 블라우스의 여자까지 '흰 셔츠 입은 사람'으로 세어 어깨 너머 남자를 '둘'로 걸었다(2026-10-24 야근의 온도 3화 p002)
+        # → 생김새 글의 첫 마디(예: Korean man)를 같이 준다. 생김새 글 전체로 세면 못 셌다(위 why)
+        sj = Path(series) / "series.json"
+        cast = json.loads(sj.read_text(encoding="utf-8")).get("cast", {}) if sj.exists() else {}
+        kinds = {ch: " ".join([w for w in re.split(r"[,.;]", str((cast.get(ch) or {}).get("who", "")))[0].split() if not re.match(r"\d", w)][:3]) or "person"
+                 for ch in wears}
         for ch, top in wears.items():
             if not top:
                 continue
-            same = sum(1 for t in wears.values() if t.lower() == top.lower())  # 같은 옷을 입은 인물이 여럿이면 그만큼은 정상
-            n = _vlm([img_path], c["observe"].format(top=top), 60).get("count")
+            same = sum(1 for k, t in wears.items() if t.lower() == top.lower() and kinds[k].lower() == kinds[ch].lower())  # 같은 차림·생김새가 여럿이면 그만큼은 정상
+            n = _vlm([img_path], c["observe"].format(top=top, kind=kinds[ch]), 60).get("count")
             if isinstance(n, int) and n > same:
                 out.append(c["problem"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch)), n=n))
     elif kind == "fixed":

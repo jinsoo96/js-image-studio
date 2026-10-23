@@ -171,7 +171,10 @@ def _graph_code(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit
 # 판단하는 모델(표정 칸 고르기·남는 사람 찾기)은 judge_ep.chat 하나로 부른다(주소·모델은 judge_ep.candidates)
 
 
-DARK_MEAN, DARK_TARGET = 14, 30  # 회색조 평균(0~255). 이보다 어두우면 밤 장면 정도(30)까지 어두운 곳만 들어 올린다
+# 회색조 평균(0~255). 이보다 어두우면 밤 장면 정도까지 어두운 곳만 들어 올린다. 14 로 두니 평균 18·22 인 밤 컷(개항 v3 p023p·p015a)이
+# 폰 화면에서 알아보기 어려운 채 지나갔다(2026-10-24 검수) → 26·36. 작품마다 다르면 WEBTOON_DARK_MEAN·WEBTOON_DARK_TARGET
+DARK_MEAN = float(os.environ.get("WEBTOON_DARK_MEAN", "26"))
+DARK_TARGET = float(os.environ.get("WEBTOON_DARK_TARGET", "36"))
 
 
 def lift_dark(path: Path, log=print) -> bool:

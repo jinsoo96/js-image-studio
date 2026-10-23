@@ -25,4 +25,9 @@ for p in json.loads((E / "panels.json").read_text(encoding="utf-8")):
         continue
     im = Image.open(src).convert("RGB")
     im.resize((1600, round(im.height * 1600 / im.width)), Image.LANCZOS).save(dst)
+    # 합성에 들어가는 길은 여기 하나: 그리기 때만 밝히니 편집·되돌리기·손으로 넣은 어두운 컷(평균 18~22)이 그대로 PDF 에 나갔다(2026-10-24 개항 v3)
+    if "lift_dark" not in globals():
+        sys.path.insert(0, str(ROOT / "vast"))
+        from comfy_panel import lift_dark
+    lift_dark(dst)
 print("빠진 컷", miss)

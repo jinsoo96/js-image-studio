@@ -258,10 +258,19 @@ class JobBusy(Exception):
     """그 회차(작품)에 아직 도는 작업이 있음. 메시지는 JSON(도는 작업 번호·상태): 에이전트가 그 번호로 job_status(wait=50) 한다."""
 
 
+QUICK_KINDS = {"vast_adopt"}  # 그림을 옮겨 놓기만 하는 작업(몇 초)
+QUICK_WAIT_S = 60
+
+
 def _ensure_idle(ep: Path):
     """도는 작업이 있으면 JobBusy. 작업을 띄우는 도구가 파일을 옮기기 전에 부르고, _start_job 도 마지막에 한 번 더 본다.
     도구마다 다른 문장('도는 작업이 있다. 끝난 뒤 부른다')만 돌려줬더니 에이전트가 기다릴 번호를 몰라 같은 호출을 몇 초 간격으로 되풀이했다(2026-10-19 agent app)."""
     busy = _running_job(ep)
+    # 몇 초면 끝나는 작업(컷 놓기)은 잠깐 기다린다: adopt_panel 바로 뒤 compose 가 busy 로 걸려 에이전트가 헛호출을 했다(2026-10-24 스튜디오 시험)
+    t0 = time.time()
+    while busy and (_json(JOBS / f"{busy}.json", {}) or {}).get("kind") in QUICK_KINDS and time.time() - t0 < QUICK_WAIT_S:
+        time.sleep(2)
+        busy = _running_job(ep)
     if busy:
         raise JobBusy(json.dumps({"error": "busy", "running_job": busy, "running": json.loads(job_status(busy, tail_lines=5))}, ensure_ascii=False))
 
@@ -271,6 +280,9 @@ class RepeatedJob(Exception):
 
 
 REPEAT_MIN = float(os.environ.get("WEBTOON_REPEAT_MIN", "30"))
+
+
+IMAGE_INPUT_KINDS = {"compose", "export", "publish_ailism", "review", "vast_adopt"}  # 그린 그림·합성본을 읽어 만드는 작업
 
 
 def _fingerprint(kind: str, ep: Path, steps: list) -> str:
@@ -285,6 +297,14 @@ def _fingerprint(kind: str, ep: Path, steps: list) -> str:
     if (ep / "prompts").is_dir():
         for f in sorted((ep / "prompts").glob("*.txt")):
             h.update(f.read_bytes())
+    # 합성·내보내기·게시는 그림·합성본도 입력이다(이름·크기·고친 시각만): 컷 하나를 편집·교체한 뒤 부른 compose 가 repeated_job 으로 막혀
+    # export 가 옛 PDF 를 그대로 복사했다(2026-10-24 개항 v3 p031a). 그리기 작업에는 넣지 않는다(그림이 결과라 매번 달라져 되풀이를 못 막는다)
+    for d in ("panels_hf", "panels_hf_vast", "out") if kind in IMAGE_INPUT_KINDS else ():
+        if (ep / d).is_dir():
+            for f in sorted((ep / d).iterdir()):
+                if f.is_file():
+                    st = f.stat()
+                    h.update(f"{d}/{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
     return h.hexdigest()[:16]
 
 
@@ -1879,15 +1899,30 @@ def comfy_server(action: str = "status", lines: int = 60, old: bool = False, for
 @mcp.tool()
 def adopt_panel(series: str, episode: str, ids: str, source: str = "vast", name: str = "", reason: str = "") -> str:
     """다른 판을 본편으로 쓴다(사용자가 고른 것만, 본편이 바뀐다). source: vast(vast_draw 로 다시 그린 판, ids 에 여러 컷) · preview(preview_panel 미리 보기,
-    한 컷, name 비우면 마지막 것) · version(panel_versions 의 예전 판 name 으로 되돌리기, 한 컷). 지금 본편은 panels_hf/_rejected/ 로 옮긴다. 끝나면 compose.
+    한 컷, name 비우면 마지막 것) · version(panel_versions 의 예전 판 name 으로 되돌리기, 한 컷) · current(지금 본편을 그대로 쓴다: 사람이 보고 괜찮다고 한
+    컷의 검수 기록을 닫는다, 여러 컷, reason 에 까닭). 지금 본편은 panels_hf/_rejected/ 로 옮긴다. 끝나면 compose.
 
     예전 vast_adopt · adopt_preview · revert_panel 을 합쳤다(셋 다 '다른 판을 본편 자리에 넣고 지금 본편은 _rejected 로', 2026-10-23 도구 정리)."""
     ep = _episode(series, episode)
     want = _pids(ep, ids, "any")
     if not want:
         return "본편으로 쓸 컷 번호를 준다"
-    if source not in ("vast", "preview", "version"):
-        return _fail("bad_source", given=source, candidates=["vast", "preview", "version"])
+    if source not in ("vast", "preview", "version", "current"):
+        return _fail("bad_source", given=source, candidates=["vast", "preview", "version", "current"])
+    if source == "current":
+        # 사람이 보고 넘긴 컷도 검수 기록이 그대로 남아 합성·내보내기 때마다 '사람 확인 27컷'으로 떴다(2026-10-24 개항 v3).
+        # 닫은 기록은 review/accepted.json 에 까닭과 함께 옮긴다(지우지 않는다)
+        f, acc_f = ep / "review" / "staging.json", ep / "review" / "accepted.json"
+        cur, acc = _json(f, {}) or {}, _json(acc_f, {}) or {}
+        closed = [i for i in want if i in cur]
+        for i in closed:
+            acc[i] = {**cur.pop(i), "accepted_at": time.strftime("%Y-%m-%d %H:%M:%S"), "reason": reason or "사람이 보고 그대로 씀"}
+        if closed:
+            f.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+            acc_f.write_text(json.dumps(acc, ensure_ascii=False, indent=1), encoding="utf-8")
+        rest = [i for i in want if i not in closed]
+        return (f"검수 기록을 닫음 {len(closed)}컷({', '.join(closed) or '없음'}), 그림은 그대로." + (f" 기록이 없던 컷: {', '.join(rest)}." if rest else "")
+                + f" 남은 사람 확인 {len(cur)}컷")
     if source != "vast":
         if len(want) != 1:
             return f"source={source} 는 한 컷씩 준다"
@@ -1934,6 +1969,7 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
     얼굴이 다른 사람 같으면 refs 에 그 인물 id 를 주고 얼굴만 <image2> 처럼 다시 그리게 한다. 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(vast_draw).
+    다른 사람이 가진 것(모자·안경 등)을 한 사람에게 더할 땐 '원래 가진 사람도 그대로 쓴다'를 같이 적는다: 안 적으면 그 사람에게서 빼앗아 옮겨 그렸다(2026-10-24 개항 p031a).
     결과는 바로 본편에 들어간다(adopt_panel 이 필요 없다, 옛 본편은 panels_hf/_rejected/, 되돌리려면 adopt_panel(source='version')).
     본편을 건드리지 않고 먼저 보고 싶으면 preview_panel. 끝나면 compare_panel 로 전/후를 보여 주고, 합성본에 넣으려면 compose."""
     ep = _episode(series, episode)
@@ -2093,7 +2129,8 @@ def _review_left(ep: Path) -> str:
         newer = f.exists() and time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime)) > v.get("at", "")
         items.append(f"{pid}({'·'.join(v.get('issues', []))}{', 기록 뒤 그림 바뀜' if newer else ''})")
     return (f"\n검수에서 사람 확인이 남은 컷 {len(items)}개: {', '.join(items)}. panel_info 로 review 를 보고 고칠 컷은 "
-            "set_panels(글이 틀렸으면)·edit_panel·vast_draw(ids) 뒤 다시 compose, 그대로 둘 거면 사용자에게 그 컷을 알린다.")
+            "set_panels(글이 틀렸으면)·edit_panel·vast_draw(ids) 뒤 다시 compose, 그대로 둘 컷은 사용자에게 알리고 괜찮다고 하면 "
+            "adopt_panel(source='current', reason=…)로 기록을 닫는다.")
 
 
 @mcp.tool()

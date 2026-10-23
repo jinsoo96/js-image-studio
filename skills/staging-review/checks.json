@@ -256,9 +256,21 @@
    "when": "people",
    "kind": "count_each",
    "verify": false,
-   "why": "같은 사람이 둘(p341 상수 둘)을 '둘로 그렸나'로 물으면 놓치고, 그 생김새의 사람 수를 세게 하니 잡았다(2026-10-20). 생김새 글 전체로 세면 못 셌고, 윗옷 하나(앞 네 낱말)로 세니 셌다",
-   "observe": "How many people wearing a {top} are in this picture? Count every one, background included. Answer JSON only: {{\"count\": N}}",
+   "why": "같은 사람이 둘(p341 상수 둘)을 '둘로 그렸나'로 물으면 놓치고, 그 생김새의 사람 수를 세게 하니 잡았다(2026-10-20). 생김새 글 전체로 세면 못 셌고, 윗옷 하나(앞 네 낱말)로 세니 셌다 / 윗옷만으로 세니 비슷한 색 블라우스의 여자까지 세어 어깨 너머 남자를 둘로 걸었다 → 생김새 글 첫 마디(Korean man 등)를 같이 준다(2026-10-24 야근의 온도 3화 p002)",
+   "observe": "How many people who look like a {kind} and wear a {top} are in this picture? Count every one, background included. Answer JSON only: {{\"count\": N}}",
    "problem": "{name} 처럼 생긴 사람이 {n}명"
+  },
+  {
+   "name": "headless_body",
+   "category": "인원",
+   "when": "people",
+   "kind": "fixed",
+   "verify": false,
+   "field": "headless",
+   "why": "어깨 너머 앞사람이 몸통 둘로 그려졌는데(머리 하나에 셔츠 몸통 둘) 사람 수 세기는 머리 없는 몸통을 사람으로 세지 않아 놓쳤다(2026-10-24 야근의 온도 3화 p002). 몸통마다 제 머리가 있나만 따로 묻는다",
+   "observe": "Look at every torso (chest, back or shoulders in clothes) in this picture. Does each torso connect to its own head, or is it cut off by the picture edge? Count the torsos that do neither: a second torso or pair of shoulders right next to a person, as if one person had two bodies. Answer JSON only: {{\"headless\": N}}",
+   "bad": "positive",
+   "problem": "머리 없는 몸통 {v}개(한 사람이 몸 둘로 그려짐): 그 몸통만 지운다"
   },
   {
    "name": "unheld",
