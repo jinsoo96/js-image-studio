@@ -520,8 +520,10 @@ def staging_edit_prompt(series, p, r, probs) -> str:
     if "소품" in probs:
         parts.append(f"Fix only the objects people hold or use so they match the panel text: {panel_text(p)[:400]}")
     if "복제" in probs:  # 복제(얼굴이 똑같은 사람들)는 지우지 않고 얼굴만 서로 다르게: 글에 있는 사람 수는 그대로
-        parts.append("Make the people who look like copies of each other into clearly different people: give each a different face, hairstyle "
-                     "and expression, and keep their clothes, poses and positions.")
+        # '서로 다르게'만으로는 머리 모양만 조금 바뀌었다(개항 v4 p013b): 자리마다 다른 생김새를 구체적으로 적게 한다
+        parts.append("Make the people who look like copies of each other into clearly different people. Going from left to right, give each one "
+                     "a different hairstyle (for example a long braid, a short bob, hair in a low bun), a different face shape and a slightly "
+                     "different age; keep their clothes, poses and positions.")
     if "옷" in probs:
         wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
         if wear:

@@ -28,6 +28,7 @@ import urllib.parse
 import contextlib
 import hashlib
 import json
+import re
 import os
 import subprocess
 import sys
@@ -486,13 +487,18 @@ def ensure_pod(mode="comfy", image=None):
             save_state(stopped_at=None)
             return pod["id"], wait_ready(pod["id"], c["resume_timeout_min"])
         except Exception as e:
-            # 지우지 않고 멈춘 채 남긴다: 볼륨에 받은 모델·학습한 LoRA 가 있을 수 있다(2026-10-23 그 기계에 빈 GPU 가 없어 못 켜자
-            # 볼륨째 지우고 새로 만들어, 안을 확인하지 못한 채 잃었다). 남긴 파드는 state 의 left_pods 에 적고, 필요 없으면 down 으로 지운다
-            print(f"다시 켜지 못했다({str(e)[:200]}). 이 파드는 멈춘 채 남기고(볼륨 보관) 새로 만든다: {pod['id']}", flush=True)
-            with contextlib.suppress(Exception):
-                if (get_pod(pod["id"]) or {}).get("desiredStatus") == "RUNNING":
-                    api("POST", f"/pods/{pod['id']}/stop")
-            save_state(left_pods=sorted(set(load_state().get("left_pods", [])) | {pod["id"]}))
+            # 학습한 적 있는 파드는 지우지 않고 멈춘 채 남긴다: 볼륨에 학습한 LoRA 가 있을 수 있다(2026-10-23 그 기계에 빈 GPU 가 없어 못 켜자
+            # 볼륨째 지우고 새로 만들어, 안을 확인하지 못한 채 잃었다). 남긴 파드는 state 의 left_pods 에 적고, 필요 없으면 down 으로 지운다.
+            # 학습한 적 없는 파드는 설치·모델뿐이라(새 파드가 다시 받는다) 지운다: 다 남기니 멈춘 파드가 넷까지 쌓여 보관비가 월 약 $80(2026-10-24)
+            if not trained_on(pod):
+                print(f"다시 켜지 못했다({str(e)[:200]}). 학습한 적 없는 파드라 지우고 새로 만든다: {pod['id']}", flush=True)
+                terminate(pod["id"])
+            else:
+                print(f"다시 켜지 못했다({str(e)[:200]}). 학습한 파드라 멈춘 채 남기고(볼륨 보관) 새로 만든다: {pod['id']}", flush=True)
+                with contextlib.suppress(Exception):
+                    if (get_pod(pod["id"]) or {}).get("desiredStatus") == "RUNNING":
+                        api("POST", f"/pods/{pod['id']}/stop")
+                save_state(left_pods=sorted(set(load_state().get("left_pods", [])) | {pod["id"]}))
     # 기계를 잘못 만나면(드라이버·디스크 문제) 그 파드를 지우고 한 번 더 새로 만든다
     for attempt in (1, 2):
         pod_id = create_pod(mode, image)
@@ -506,6 +512,31 @@ def ensure_pod(mode="comfy", image=None):
             if attempt == 2:
                 raise
             print(f"파드가 준비되지 않아 새로 만든다: {str(e)[:200]}", flush=True)
+
+
+TRAIN_KINDS = ("lora_train", "restyle", "lora_compare")
+
+
+def trained_on(pod: dict) -> bool:
+    """이 파드에서 학습 작업(MCP 작업 기록의 gpu_host 가 이 파드 주소)이 돈 적이 있나. 학습 작업인데 서버를 안 적은 옛 기록이 이 파드가
+    생긴 뒤에 있으면 모르니 학습한 것으로 본다(지우지 않는 쪽으로)."""
+    jobs = ROOT / "state" / "mcp_jobs"
+    born = None
+    m = re.search(r"-(\d{4}-\d{6})$", str(pod.get("name", "")))  # create_pod 가 붙이는 이름 끝 시각(%m%d-%H%M%S)
+    if m:
+        with contextlib.suppress(ValueError):
+            born = time.mktime(time.strptime(time.strftime("%Y") + m.group(1), "%Y%m%d-%H%M%S"))
+    for f in jobs.glob("*.json") if jobs.is_dir() else []:
+        if f.name.endswith(".status.json"):
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            spec = json.loads(f.read_text(encoding="utf-8"))
+            if not isinstance(spec, dict) or spec.get("kind") not in TRAIN_KINDS:
+                continue
+            host = str(spec.get("gpu_host") or "")
+            if pod["id"] in host or (not host and (born is None or f.stat().st_mtime >= born)):
+                return True
+    return False
 
 
 def release(pod_id):

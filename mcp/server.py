@@ -362,6 +362,10 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
     if kind in ("lora_train", "restyle", "lora_compare"):  # 학습은 로그가 드문드문 나온다: 멈춤 지킴이(job_runner) 한도를 넉넉히
         steps = [{**s, "stall_min": s.get("stall_min", 120)} for s in steps]
     spec = {"id": job_id, "kind": kind, "episode_dir": str(ep), "note": note, "steps": steps, "fingerprint": fp}
+    if kind in ("lora_train", "restyle", "lora_compare"):
+        # 학습한 서버를 적어 둔다: 학습 결과(LoRA)는 그 서버 볼륨에 있어, 서버를 갈아끼울 때 이 서버만 남기고 나머지 멈춘 파드는 지운다
+        # (tools/runpod_cloud.py trained_on, 2026-10-24 멈춘 파드가 넷까지 쌓여 보관비 월 약 $80)
+        spec["gpu_host"] = _gpu_url()
     f = JOBS / f"{job_id}.json"
     f.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -2075,6 +2079,7 @@ def edit_panel(series: str, episode: str, panel: str | int, instruction: str, re
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
     얼굴이 다른 사람 같으면 refs 에 그 인물 id 를 주고 얼굴만 <image2> 처럼 다시 그리게 한다. 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(vast_draw).
     다른 사람이 가진 것(모자·안경 등)을 한 사람에게 더할 땐 '원래 가진 사람도 그대로 쓴다'를 같이 적는다: 안 적으면 그 사람에게서 빼앗아 옮겨 그렸다(2026-10-24 개항 p031a).
+    얼굴이 똑같은 사람들(복제)을 다르게 할 땐 '서로 다르게'만 적지 말고 자리마다 머리 모양·얼굴형·장신구를 구체적으로 적는다(막연한 지시는 거의 안 바뀌었다, 개항 p013b).
     결과는 바로 본편에 들어간다(adopt_panel 이 필요 없다, 옛 본편은 panels_hf/_rejected/, 되돌리려면 adopt_panel(source='version')).
     본편을 건드리지 않고 먼저 보고 싶으면 preview_panel. 끝나면 compare_panel 로 전/후를 보여 주고, 합성본에 넣으려면 compose."""
     panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)

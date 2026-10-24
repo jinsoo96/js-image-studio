@@ -143,9 +143,18 @@ def edit(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: in
     place(ep, pid)
     out = {"panel": pid, "how": "edit", "compare": str(compare(ep, pid, before, v, prompt))}
     changed = drift(series, ep, pid, before, v)
+    warn = []
     if changed:
-        out["warning"] = ("편집 전엔 시트와 맞던 인물이 달라졌다: " + "; ".join(f"{x['who']}({x['differs']})" for x in changed)
-                          + ". 그 사람을 바꾸려던 게 아니면 adopt_panel(source='version') 으로 되돌리고, 지시에 바꿀 사람을 옷·자리로 더 분명히 적어 다시")
+        warn.append("편집 전엔 시트와 맞던 인물이 달라졌다: " + "; ".join(f"{x['who']}({x['differs']})" for x in changed)
+                    + ". 그 사람을 바꾸려던 게 아니면 adopt_panel(source='version') 으로 되돌리고, 지시에 바꿀 사람을 옷·자리로 더 분명히 적어 다시")
+    # 복제(얼굴이 똑같은 사람들)는 편집 뒤에도 남는지 다시 본다: '서로 다르게'만 적은 편집이 머리 모양만 조금 바꾸고 '통과'로 끝났다(2026-10-24 개항 v4 p013b·p016b)
+    import refine as R
+    if R.run_checks(series, v, _spec(ep, pid), only={"clones"}).get("복제"):
+        warn.append("아직 얼굴·머리가 똑같은 사람들이 있다. '서로 다르게'만으로는 거의 안 바뀐다: 사람마다 자리와 함께 머리 모양·얼굴형·나이 느낌·장신구를 "
+                    "구체적으로 다르게 적어 다시 고친다(예: 'the woman on the left: long hair in a low bun, round face; the woman on the right: short bob, "
+                    "narrow face, a hairpin')")
+    if warn:
+        out["warning"] = " / ".join(warn)
     return out
 
 
