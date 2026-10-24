@@ -276,6 +276,18 @@
    "problem": "머리 없는 몸통 {v}개(한 사람이 몸 둘로 그려짐): 그 몸통만 지운다"
   },
   {
+   "name": "clones",
+   "category": "복제",
+   "when": "people",
+   "kind": "fixed",
+   "verify": false,
+   "field": "clones",
+   "bad": "positive",
+   "why": "이름 없는 사람 둘(속삭이는 두 여자)이 얼굴·머리·옷·자세까지 한 사람을 두 번 붙인 것처럼 똑같이 그려졌는데 컷 검사에 그걸 묻는 항목이 없었다(2026-10-24 개항 v4 p013b, 이어짐 점검이 우연히 잡음). 같은 옷(제복·교복)은 괜찮고 얼굴까지 같은 복제만 묻는다 / 범주를 '인원'으로 두면 고치기가 남는 사람 지우기로 돌아 글에 있는 두 사람 중 하나를 지운다 → '복제'(편집으로 얼굴을 서로 다르게)",
+   "observe": "Look at the faces of all the people in this picture. Are there two or more people who look like copies of the same person: the same face, the same hairstyle and the same expression, as if one person had been pasted twice? People who only wear the same uniform or clothes but have different faces do not count, and a reflection in a mirror or window does not count. Answer JSON only: {{\"clones\": <number of people who are copies of someone else in the picture, 0 if none>}}",
+   "problem": "한 사람을 붙여 넣은 것처럼 얼굴·머리가 똑같은 사람 {v}명: 얼굴·머리 모양을 서로 다르게"
+  },
+  {
    "name": "identity_each",
    "category": "생김새",
    "when": "people",
@@ -330,7 +342,8 @@
   "기타": "그 밖의 문제(note 참고)",
   "검사불가": "그림은 그려졌고 문제가 아니다. 검사 모델이 답을 못 줘 확인하지 못했을 뿐이다: 다시 그리지 말고 그림을 보여 주고 사용자에게 확인받는다",
   "생김새": "인물이 참고 그림(시트)과 다른 종류의 모습으로 그려졌다(사람 얼굴↔짐승 얼굴, 귀·뿔·털빛)",
-  "이어짐": "같은 장면 앞 컷과 이어지지 않는다(인물 모습·옷·머리·자세·소품). 장면 이어짐 점검(tools/continuity_check.py)이 뒤 컷에 남긴다"
+  "이어짐": "같은 장면 앞 컷과 이어지지 않는다(인물 모습·옷·머리·자세·소품). 장면 이어짐 점검(tools/continuity_check.py)이 뒤 컷에 남긴다",
+  "복제": "한 사람을 두 번 붙인 것처럼 얼굴·머리가 똑같은 사람들(이름 없는 군중에 흔함). 지우지 말고 얼굴을 서로 다르게"
  },
  "structural": [
   "인원",
@@ -338,7 +351,8 @@
   "빈자리",
   "좌우",
   "생김새",
-  "검사불가"
+  "검사불가",
+  "복제"
  ],
  "_structural_why": "짜임 결함: 그림의 짜임이 깨졌거나(사람이 남거나 사라짐·몸·인물이 딴 모습·좌우) 검사를 못 함. 독자 눈 거르기에서 빼지 않고(refine.reader_filter), 검수 결과에서 먼저 보인다(mcp review level)"
 }

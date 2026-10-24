@@ -119,7 +119,7 @@ def fix_extras(c, cache, img_path: Path, series, p, seed=7, rounds=2, log=print)
     return changed
 
 
-EDITABLE = {"표정연기", "옷", "소품"}  # 편집으로 고칠 수 있는 것(소품 = 글과 다른 손의 물건). 좌우·시선·배경·인원은 구도라 다시 그린다
+EDITABLE = {"표정연기", "옷", "소품", "복제"}  # 편집으로 고칠 수 있는 것(소품 = 글과 다른 손의 물건). 좌우·시선·배경·인원은 구도라 다시 그린다
 
 
 LIMB_ASK = ("Look only at the bodies. For each fully visible person (ignore people seen only from behind at the frame edge), count their arms "
@@ -519,6 +519,9 @@ def staging_edit_prompt(series, p, r, probs) -> str:
         parts.append(f"Change only the facial expressions and body language to match this acting: {p.get('acting') or p['action']}")
     if "소품" in probs:
         parts.append(f"Fix only the objects people hold or use so they match the panel text: {panel_text(p)[:400]}")
+    if "복제" in probs:  # 복제(얼굴이 똑같은 사람들)는 지우지 않고 얼굴만 서로 다르게: 글에 있는 사람 수는 그대로
+        parts.append("Make the people who look like copies of each other into clearly different people: give each a different face, hairstyle "
+                     "and expression, and keep their clothes, poses and positions.")
     if "옷" in probs:
         wear = "; ".join(f"{re.sub(r'\s*\(.*?\)', '', NAMES[c])} wears {o}" for c, o in (p.get("outfit") or {}).items() if c in p.get("chars", []))
         if wear:
