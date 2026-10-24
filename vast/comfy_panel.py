@@ -72,6 +72,7 @@ def lora_for(series, chars, model=None, edit=False) -> list:
 
 
 NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
+NO_OFF_FRAME = False  # --no-off-frame-note(화면 밖 인물 안내 없이 견줘 볼 때)
 
 # 클로즈업의 장소 참고 그림 문장. 예전 문장("배경 색·조명만, 흐린 작은 부분만, 방 전체를 그리지 말 것")은 배경을 빈 베이지 벽으로 비웠다
 # (2026-10-21 D+18 정본과 견줌: 정본 클로즈업은 뒤에 흐린 밤 사무실·술집 불빛이 꽉 찬다)
@@ -483,7 +484,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
     if close or p.get("camera"):
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
-    action += off_frame_note(action, chars, NAMES)
+    action += "" if NO_OFF_FRAME else off_frame_note(action, chars, NAMES)
     # 학습한 LoRA 가 있는 인물은 이름 옆에 그 trigger 를 붙인다(학습 캡션 맨 앞 낱말, lora.build_data)
     trig = {} if NO_LORA else {x["who"]: x["trigger"] for x in lora_for(series, p.get("chars", [])) if x.get("trigger")}
     # 참고 그림만 묶으면 '그 사람'으로만 읽어 고양이 수인을 사람 노인으로 그렸다(2026-10-24 등불 상점 p002) → 작품 설정 생김새(who)의 첫 마디를 같이
@@ -597,9 +598,11 @@ def main():
     # 잇기는 2026-10-20 시험에서 성공(D+18 p015)과 실패(이어 쓰면 거친 결 p017, 얼굴 얼룩 외출 p356)가 섞였다
     ap.add_argument("--continue-closeups", action="store_true",
                     help="같은 사람 연속 클로즈업을 앞 컷에서 잇기(Next-Scene)도 쓴다. 기본은 배치 고정만: 잇기는 시험에서 성공과 실패(거친 결·얼굴 얼룩)가 섞였다")
+    ap.add_argument("--no-off-frame-note", action="store_true", help="장면 배치의 '화면 밖 인물' 안내를 이번엔 붙이지 않는다(견줘 보기)")
     args = ap.parse_args()
-    global NO_LORA
+    global NO_LORA, NO_OFF_FRAME
     NO_LORA = args.no_lora
+    NO_OFF_FRAME = args.no_off_frame_note
     forced = (args.model or "").strip().lower() or None  # 이번 작업에 지정한 판. 없으면 컷마다 router 가 고른다
     series = Path(args.series_dir)
     panels = json.loads(Path(args.panels_json).read_text(encoding="utf-8"))
