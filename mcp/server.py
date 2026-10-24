@@ -614,11 +614,12 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
     b = _json(ep / "storyboard.json", {}) or {}
     cat = _catalog(ep)  # 상태는 panel_info·find 와 같은 것으로(컷 설명이 아직 없는 컷을 '재사용'이라 적어 에이전트가 헷갈렸다, 2026-10-24)
     label = {"new": "새로", "composite": "합성", "reuse": "재사용", "no_description": "설명 없음"}
-    out = []
+    out, count = [], {}
     for p in b.get("panels", []):
         pid = p["id"]
         st = cat.get(pid, {}).get("status", "no_description")
         kind = label[st]
+        count[kind] = count.get(kind, 0) + 1
         has = (ep / "panels_hf" / f"{pid}.png").exists() if st == "new" else (ep / "panels" / f"{pid}.png").exists()
         if only_missing and has:
             continue
@@ -626,7 +627,10 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
         out.append(f"{pid} [{kind}{'' if has else ', 없음'}] {p.get('scene', '')} {','.join(p.get('characters', []))} | {line[:40]}")
     if not out:
         return "빠진 컷 없음(전부 그림이 있다)" if only_missing and b.get("panels") else "컷이 없다(storyboard.json 확인)"
-    return "\n".join(out)
+    # 맨 앞에 총계: 긴 목록은 대화 쪽에서 잘려 보이는데, 에이전트가 보이는 줄만 세어 113컷 회차를 '90컷'이라 답했다(2026-10-24 개항 v3)
+    total = sum(count.values())
+    head = f"{total}컷(" + " · ".join(f"{k} {v}" for k, v in count.items()) + ")" + (f", 그림이 빠진 컷 {len(out)}" if only_missing else "")
+    return head + "\n" + "\n".join(out)
 
 
 def _folder(folder: str) -> str:
