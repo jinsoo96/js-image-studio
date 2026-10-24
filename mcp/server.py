@@ -268,8 +268,18 @@ class JobBusy(Exception):
     """그 회차(작품)에 아직 도는 작업이 있음. 메시지는 JSON(도는 작업 번호·상태): 에이전트가 그 번호로 job_status(wait=50) 한다."""
 
 
-QUICK_KINDS = {"vast_adopt"}  # 그림을 옮겨 놓기만 하는 작업(몇 초)
+QUICK_KINDS = {"vast_adopt", "edit_panel"}  # 몇 초~1분이면 끝나는 작업(그림 옮겨 놓기·편집 한 장): 다음 호출이 잠깐 기다린다
+# (2026-10-24 개항 v4: 편집을 잇달아 부르다 앞 편집이 안 끝나 busy 로 두 번 걸렸다)
 QUICK_WAIT_S = 60
+
+
+def _already(ep: Path, kind: str) -> str:
+    """같은 회차에서 같은 종류 작업이 이미 돌면 그 작업을 기다리라는 답(오류가 아니다). 없으면 ''.
+    합성이 도는 중에 compose 를 다섯 번 다시 불러 busy 오류만 쌓였다(2026-10-24 개항 v4 미사일 스튜디오 시험)."""
+    busy = _running_job(ep)
+    if busy and (_json(JOBS / f"{busy}.json", {}) or {}).get("kind") == kind:
+        return f"이미 같은 작업이 돌고 있다(작업 {busy}). 다시 부르지 말고 job_status('{busy}', wait=50) 로 끝날 때까지 기다린다"
+    return ""
 
 
 def _ensure_idle(ep: Path):
@@ -1751,6 +1761,8 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
+    fix·check 는 끄지 않는다: 끄면 남는 사람·글에 없는 사람·인물이 딴 모습으로 나온 컷을 아무도 못 잡는다(2026-10-24 개항 v4 p023 을 둘 다 끄고 다시
+    그려 글에 없는 여자가 나왔다). 사용자가 "검수 없이 빨리 초안만"이라고 했을 때만 끈다.
     continuity=True(기본)면 같은 장면의 앞 컷을 쓴다: 같은 인물 묶음의 넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다
     (2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 장소가 바뀌거나 시간 자막('수요일')·옷이 바뀐 컷에서는 쓰지 않는다. 어느 앞 컷을 썼는지 작업 로그에 남는다.
     continue_closeups=True 면 같은 사람 연속 클로즈업을 앞 컷에서 잇기도 쓴다(얼굴·배경은 잘 이어지나 얼굴 얼룩·옷 바뀜이 섞여 기본은 끔).
@@ -2186,6 +2198,8 @@ def compose(series: str, episode: str) -> str:
     """합성: 컷 놓기 → 합성 재료 컷(카톡 등) → 말풍선 합성 → PDF → 기계 점검(qa_gate·check_bubbles). 크레딧 안 씀.
     job_status 결과에서 '막는 경고 0' 과 '얼굴을 가리거나 ... 0' 을 확인한다."""
     ep = _episode(series, episode)
+    if _already(ep, "compose"):
+        return _already(ep, "compose")
     _ensure_idle(ep)
     steps = [{"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]},
              {"label": "합성·PDF", "cmd": [PY, str(TOOLS / "run_episode.py"), str(ep)]},
@@ -2219,6 +2233,8 @@ def _review_left(ep: Path) -> str:
 def export(series: str, episode: str) -> str:
     """예고편(trailer.json)·epub 을 만들고 PDF·epub·예고편을 exports/<오늘>/ 로 복사한다. compose 가 끝난 뒤 부른다. 크레딧 안 씀."""
     ep = _episode(series, episode)
+    if _already(ep, "export"):
+        return _already(ep, "export")
     name = make_episode_mod.export_name(_series(series), ep)  # make_episode 의 내보내기와 같은 이름(판 번호 _v2 등)
     day = time.strftime("%Y-%m-%d")
     copy = ("import shutil,sys; from pathlib import Path; ep=Path(sys.argv[1]); d=Path(sys.argv[2]); n=sys.argv[3]; d.mkdir(parents=True,exist_ok=True)\n"
