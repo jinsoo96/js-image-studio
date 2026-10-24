@@ -106,11 +106,47 @@ def _run_edit(series: Path, src: Path, refs: list, prompt: str, seed: int, dst: 
     lift_dark(dst)
 
 
+SAME_ASK = """Image 2 is the reference portrait of {name}. Image 1 is a webtoon panel; the people in it: {names}. Panel text: {text}
+Find {name} in image 1. Do {name}'s face, hair color and hairstyle match image 2? Ignore clothes, pose, camera angle and lighting.
+Answer JSON only: {{"found": true|false, "match": true|false, "differs": "short, empty if it matches"}}"""
+
+
+def drift(series: Path, ep: Path, pid: str, before: bytes, after: Path) -> list:
+    """편집 전엔 시트(상반신 참고 그림)와 맞던 인물이 편집 뒤 달라졌나. [{"who", "differs"}].
+    미즈시마 머리만 회색으로 하라는 편집이 옆의 금수 머리를 은발로 바꿨고, 에이전트는 전후 비교를 보고도 넘겼다(2026-10-24 개항 v4 p047)."""
+    import refine as R
+    from hf_panel import names
+    p = _spec(ep, pid)
+    nm = names(series)
+    chars = [c for c in p.get("chars") or [] if (series / "assets" / "vast_refs" / f"{c}_bust.png").exists()]
+    if not chars:
+        return []
+    tmp = after.parent / "_qa_before" / f"{pid}_drift_before.png"
+    tmp.parent.mkdir(exist_ok=True)
+    tmp.write_bytes(before)
+    out = []
+    for c in chars:
+        name = re.sub(r"\s*\(.*?\)", "", nm.get(c, c))
+        ask = SAME_ASK.format(name=name, names=", ".join(re.sub(r"\s*\(.*?\)", "", nm.get(x, x)) for x in p.get("chars") or []),
+                              text=R.panel_text(p)[:400])
+        ref = series / "assets" / "vast_refs" / f"{c}_bust.png"
+        b, a = R._vlm([tmp, ref], ask, 120), R._vlm([after, ref], ask, 120)
+        if b.get("found") is True and b.get("match") is True and a.get("found") is True and a.get("match") is False:
+            out.append({"who": name, "differs": str(a.get("differs") or "")[:160]})
+    tmp.unlink(missing_ok=True)
+    return out
+
+
 def edit(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: int = 0) -> dict:
     v, before = _start(ep, pid)
     _run_edit(series, v, _refs(series, refs), prompt, seed or int(time.time()) % 100000, v)
     place(ep, pid)
-    return {"panel": pid, "how": "edit", "compare": str(compare(ep, pid, before, v, prompt))}
+    out = {"panel": pid, "how": "edit", "compare": str(compare(ep, pid, before, v, prompt))}
+    changed = drift(series, ep, pid, before, v)
+    if changed:
+        out["warning"] = ("편집 전엔 시트와 맞던 인물이 달라졌다: " + "; ".join(f"{x['who']}({x['differs']})" for x in changed)
+                          + ". 그 사람을 바꾸려던 게 아니면 adopt_panel(source='version') 으로 되돌리고, 지시에 바꿀 사람을 옷·자리로 더 분명히 적어 다시")
+    return out
 
 
 def preview(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: int = 0, how: str = "") -> dict:

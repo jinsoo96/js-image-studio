@@ -748,10 +748,11 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
 
 
 @mcp.tool()
-def panel_info(series: str, episode: str, panel: str) -> str:
+def panel_info(series: str, episode: str, panel: str | int) -> str:
     """컷 하나의 모든 것(JSON): status(new · reuse · composite · no_description), 콘티(장면·구도·인물·대사), 컷 설명(장소·옷·행동·연기·카메라), 그림이 있는 곳(images 링크),
     재사용이면 출처, 검수에서 사람 확인으로 남은 것(review). 컷 설명 파일(build_panels.py, 22KB)을 읽어 그 컷을 찾는 대신 이걸 쓴다. 번호는 p22·22 처럼 줘도 풀어 준다.
     여러 컷은 쉼표로('p001,p005', 관문에 걸린 컷을 한 번에 볼 때) → 목록."""
+    panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
     cat = _catalog(ep)
     review = _json(ep / "review" / "staging.json", {}) or {}
@@ -2068,7 +2069,7 @@ FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 panel_versio
 
 
 @mcp.tool()
-def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: str | list = "", seed: int = -1) -> str:
+def edit_panel(series: str, episode: str, panel: str | int, instruction: str, refs: str | list = "", seed: int = -1) -> str:
     """그린 컷의 일부만 고친다(다시 그리지 않음, 크레딧 0, 컷당 약 30초): 그 판의 편집 워크플로우에 지금 본편 그림(<image1>)과 지시를 준다.
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
@@ -2076,6 +2077,7 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
     다른 사람이 가진 것(모자·안경 등)을 한 사람에게 더할 땐 '원래 가진 사람도 그대로 쓴다'를 같이 적는다: 안 적으면 그 사람에게서 빼앗아 옮겨 그렸다(2026-10-24 개항 p031a).
     결과는 바로 본편에 들어간다(adopt_panel 이 필요 없다, 옛 본편은 panels_hf/_rejected/, 되돌리려면 adopt_panel(source='version')).
     본편을 건드리지 않고 먼저 보고 싶으면 preview_panel. 끝나면 compare_panel 로 전/후를 보여 주고, 합성본에 넣으려면 compose."""
+    panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     refs = ",".join(map(str, refs)) if isinstance(refs, list) else refs  # 목록으로 줘도 받는다(refs=[] 로 불러 한 번 헛돌았다, 2026-10-24)
@@ -2092,9 +2094,10 @@ def edit_panel(series: str, episode: str, panel: str, instruction: str, refs: st
 
 
 @mcp.tool()
-def panel_versions(series: str, episode: str, panel: str) -> str:
+def panel_versions(series: str, episode: str, panel: str | int) -> str:
     """이 컷의 예전 판들(새 것부터, name·time): 본편에서 밀려난 판(_rejected), 고치기 전(_qa_before), 장면 기준판 전(_preplate), 1단 판(_stage1).
     예전 판이 더 나으면 adopt_panel(source='version', name=…) 로 되돌린다. 그림은 contact_sheet(paths=series/<작품>/episodes/<회차>/<폴더>/<name>) 로."""
+    panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     # panel_edit.versions 와 같은 자리(툴 안에서 무거운 모듈을 import 하지 않는다: Windows 워커 스레드 데드락)
@@ -2107,11 +2110,12 @@ def panel_versions(series: str, episode: str, panel: str) -> str:
 
 
 @mcp.tool()
-def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> list:
+def compare_panel(series: str, episode: str, panel: str | int, what: str = "fix") -> list:
     """이 컷의 전/후 나란히 그림을 그림 자체로 돌려준다(사용자에게 보여 줄 때도 이것). what:
     fix(기본, 마지막 고치기 전/후: edit_panel·되돌리기가 남긴 것) · preview(마지막 미리 보기: preview_panel, 이름 목록도 준다)
     · redraw(본편 | GPU 로 새로 그린 판 panels_hf_vast: 한 컷을 vast_draw 로 다시 그려 본 뒤). 고친 뒤엔 반드시 본다: 지시한 곳이 고쳐졌는지,
     다른 곳(얼굴·옷·배경·사람 수)이 바뀌지 않았는지. 나빠졌으면 panel_versions → adopt_panel(source='version'), 미리 보기·다시 그린 판은 adopt_panel(source='preview'·'vast') 로 본편에."""
+    panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     if what not in ("fix", "preview", "redraw"):
@@ -2147,13 +2151,14 @@ def compare_panel(series: str, episode: str, panel: str, what: str = "fix") -> l
 
 
 @mcp.tool()
-def preview_panel(series: str, episode: str, panel: str, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1) -> str:
+def preview_panel(series: str, episode: str, panel: str | int, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1) -> str:
     """본편은 그대로 두고 한 컷을 바꾼 모습만 미리 본다(크레딧 0, 약 30초): '이 컷 이렇게 바꾸면 어때, 보여줘'. instruction(영어, edit_panel 과 같은 지시)
     또는 인물 디자인 바꾸기 character(인물 id) + design(영어, 예 "short silver-white hair instead of black hair"). 끝나면 compare_panel(what='preview').
 
     결과는 <회차>/review/previews/ 에만 쌓인다. 사용자가 고르면 adopt_panel(source='preview') 로 본편에 넣는다.
     디자인이 마음에 들어 작품 전체에 쓰려면 add_to_series 로 그 인물 설명을 바꾸고 시안·참고 그림을 다시 만드는 일이 따로 필요하다(사용자에게 묻는다).
     (예전 preview_design 을 합쳤다, 2026-10-23)"""
+    panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
     pid = _pids(ep, panel, "any")[0]
     refs = ",".join(map(str, refs)) if isinstance(refs, list) else refs
@@ -2400,6 +2405,14 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
                     drawn[pid] = _link(f) or str(f)
     if drawn:
         out["drawn"] = drawn
+    # 하위 도구가 RESULT 줄에 남긴 경고(편집 뒤 시트와 달라진 인물 등)는 로그 꼬리에 묻히지 않게 따로 올린다
+    for ln in reversed(lines):
+        if ln.startswith("RESULT "):
+            with contextlib.suppress(ValueError, AttributeError):
+                w = json.loads(ln[7:]).get("warning")
+                if w:
+                    out["warning"] = w
+            break
     if review:
         out["review"] = review
         levels = {}
