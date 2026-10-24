@@ -427,7 +427,27 @@ def continuity_pair(prev_img: Path, img: Path, p: dict, prev: dict | None = None
     desc = " ".join(str(p.get(k) or "") for k in ("action", "acting"))
     desc = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", desc, flags=re.S)
     ask = CONT_ASK.format(desc=desc, who1=who(prev or {}), who2=who(p))
-    return [str(x) for x in _vlm([prev_img, img], ask).get("problems", []) if x]
+    found = [str(x) for x in _vlm([prev_img, img], ask).get("problems", []) if x]
+    if not found:
+        return []
+    # 걸린 것만 두 그림을 다시 보고 가른다(카메라가 바뀐 것·이야기가 설명하는 것·다른 사람은 뺀다): 개항 1화 v3 28짝 중
+    # 독자 눈에 띄는 실수는 4짝(관리 옷·나비넥타이·머리색)이고 나머지는 앞사람이 뒤로 감·옷을 갈아입음 같은 것이었다(2026-10-24)
+    listing = "\n".join(f"{k}. {x}" for k, x in enumerate(found))
+    v = _vlm([prev_img, img], CONT_VERIFY.format(desc=desc[:600], problems=listing), 160).get("verdicts")
+    if not isinstance(v, list) or len(v) != len(found):  # 못 가르면 그대로 남긴다(통과로 넘기지 않는다)
+        return found
+    return [x for x, verdict in zip(found, v) if str(verdict).lower() == "mistake"]
+
+
+CONT_VERIFY = """Image 1 is the previous panel and image 2 the next panel of the same webtoon scene. What happens in panel 2: {desc}
+An automatic check listed these differences:
+{problems}
+For each one, look at both images and decide what it is:
+"mistake": the same person's clothes, hair, glasses, hat or accessories, or the same objects, changed with no reason a reader could see (a reader would think the artist made an error);
+"camera": only the framing, angle, distance or where people stand in the frame changed;
+"story": the panel text or the scene explains it (getting dressed, someone arrives or leaves, time passes, an object is picked up);
+"other": a different person, or the difference is not really there.
+Answer JSON only: {{"verdicts": ["mistake" | "camera" | "story" | "other", ...]}} (one per listed difference, same order)."""
 
 
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
