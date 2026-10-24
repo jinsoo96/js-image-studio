@@ -342,6 +342,11 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
                                      ensure_ascii=False))
     fp = _fingerprint(kind, ep, steps)
     since = time.time() - REPEAT_MIN * 60
+    # 회차 폴더가 그 작업 뒤에 새로 생겼으면(지우고 같은 이름으로 다시 뜸) 이전 작업의 결과는 없다: 같은 판을 지우고 v3 에서 다시 뜬
+    # ep001_v9 의 compose 가 지워진 폴더의 옛 작업 때문에 repeated_job 으로 막혀 PDF 를 못 만들었다(2026-10-24 개항 사본 시험)
+    born = getattr(ep.stat(), "st_birthtime", None) if ep.is_dir() else None
+    if born:
+        since = max(since, born)
     for f in sorted(JOBS.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         if f.name.endswith(".status.json") or f.stat().st_mtime < since:
             continue
