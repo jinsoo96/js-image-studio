@@ -51,8 +51,12 @@ def wait_jobs(max_min: float):
 
 def summarize(d: dict) -> dict:
     calls, errors, running = [], [], set()
+    tok = [0, 0]  # 대화 모델 입력·출력 토큰(보고서에 시나리오마다): Claude 로 돌린 시험에 돈이 얼마 들었는지 나중에 기록을 뒤져야 했다(2026-10-24)
     for e in d.get("events", []):
-        if e["type"] == "tool_call":
+        if e["type"] == "usage":
+            tok[0] += int(e.get("input_tokens") or 0)
+            tok[1] += int(e.get("output_tokens") or 0)
+        elif e["type"] == "tool_call":
             calls.append((e["name"], json.dumps(e.get("arguments"), ensure_ascii=False)[:160]))
         elif e["type"] == "tool_result":
             txt = e.get("text") or ""
@@ -66,7 +70,7 @@ def summarize(d: dict) -> dict:
                 running.clear()
         elif e["type"] == "error":
             errors.append(str(e.get("message"))[:200])
-    return {"calls": calls, "errors": errors, "still_running": bool(running)}
+    return {"calls": calls, "errors": errors, "still_running": bool(running), "tokens": tok}
 
 
 def judge(sc: dict, turns: list, seconds: float) -> list:
@@ -175,7 +179,9 @@ def main():
         wait_jobs(float((sc.get("setup") or {}).get("cleanup_wait_min", 20)) if (sc.get("setup") or {}).get("cleanup") else 0)
         cleanup(sc, before)
         passed += not fails
-        head = f"## {'통과' if not fails else '실패'} · {sc['name']} · {secs:.0f}초 · 도구 {sum(len(t['sum']['calls']) for t in turns)}번"
+        tin, tout = sum(t["sum"]["tokens"][0] for t in turns), sum(t["sum"]["tokens"][1] for t in turns)
+        head = (f"## {'통과' if not fails else '실패'} · {sc['name']} · {secs:.0f}초 · 도구 {sum(len(t['sum']['calls']) for t in turns)}번"
+                f" · 토큰 입력 {tin:,} 출력 {tout:,}")
         print(head + ("" if not fails else " · " + "; ".join(fails)), flush=True)
         report += [head] + [f"- 실패: {f}" for f in fails] + [""]
         for k, t in enumerate(turns, 1):
