@@ -367,5 +367,41 @@
    ]
   },
   "why": "2026-10-24 개항 v4(짜임 7·이어짐 4·복제 2 고친 판)를 오늘 넣은 검사 전부로 다시 봐서 남은 결함을 센다"
+ },
+ {
+  "name": "개항_그림판_바꾸기",
+  "gpu": true,
+  "manual": true,
+  "prompt": "개항 1화 v9 에서 p004 랑 p008 두 컷을 Noct-Q 판(noctq_real)으로 다시 그려서 원래 거랑 나란히 보여 줘. p008 은 그 판으로 본편에 넣고, 금수 표정을 조금 더 굳은 얼굴로 고친 다음 합성해 줘.",
+  "then": [
+   {
+    "say": "다 됐어? 바뀐 컷이랑 합성 결과 알려 줘.",
+    "wait_jobs_min": 20
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "vast_draw",
+    "adopt_panel",
+    "edit_panel",
+    "compose"
+   ],
+   "max_tool_errors": 3,
+   "max_seconds": 2700
+  },
+  "setup": {
+   "copy": [
+    [
+     "series/gaehang-hf/episodes/ep001_v3",
+     "series/gaehang-hf/episodes/ep001_v9"
+    ]
+   ],
+   "cleanup": [
+    "series/gaehang-hf/episodes/ep001_v9",
+    "exports/*/개항*_v9*",
+    "exports/_sheets/*ep001_v9*"
+   ]
+  },
+  "why": "2026-10-24 그림 모델 바꿔 끼우기: 서버에 Noct-Q V4 를 잠깐 받아 그리기·검수·편집(편집은 기본 판 UC 역할)·합성이 다 되는지"
  }
 ]
