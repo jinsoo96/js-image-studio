@@ -692,13 +692,16 @@ def _images_of(ep: Path, pid: str) -> dict:
 
 
 @mcp.tool()
-def find(query: str, series: str = "", limit: int = 12) -> str:
+def find(query: str, series: str = "", limit: int = 12, episode: str = "") -> str:
     """찾기: 작품 이름(제목·별명), 컷 번호('p22'·'22p'·'p022'), 인물·장소 이름, 대사·행동 글의 낱말로 작품·회차·컷을 찾아 정확한 식별자와 상태를 준다. 파일을 읽어 짐작하지 말고 이걸로 먼저 찾는다.
     컷 번호를 주면 그 번호가 있는 모든 회차(vast 판 복사본 포함)와 컷마다 status(new = 컷 설명이 있어 그린다 · reuse = 앞 화·다른 판 그림을 그대로 · composite = 합성 재료 ·
-    no_description)와 그림이 어디 있는지(images)를 준다. 글을 주면 낱말이 모두 든 컷(대사·행동·연기·장소·인물 이름)을 준다. series 로 좁힌다."""
+    no_description)와 그림이 어디 있는지(images)를 준다. 글을 주면 낱말이 모두 든 컷(대사·행동·연기·장소·인물 이름)을 준다. series·episode 로 좁힌다
+    (query 를 '<작품> <회차> <찾을 말>' 로 줘도 된다: '<작품> 1화 v2 <인물 이름>')."""
     q = (query or "").strip()
     if not q:
         return _fail("empty_query")
+    only_ep = None
+    ep_only = r"\s*(?:(?:ep)?\s*\d+\s*(?:화)?\s*[_\s-]*(?:v\d+)?|v\d+)\s*(?:판)?\s*"  # 회차·판만인 글
     # '작품 이름 + 나머지'(D+18 3화 · 개항 1화 v3 p023f · 무대 뒤 리허설): 앞 낱말들이 작품 이름이면 그 작품으로 좁히고 나머지로 찾는다.
     # 나머지가 회차면 그 회차 요약을 준다(2026-10-24 스튜디오 시험: 'D+18 3화' 가 nothing_found)
     if not series:
@@ -709,12 +712,27 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
             if hit:
                 series, q = hit, " ".join(toks[i:])
                 break
-    if series:
+    # '<회차> <찾을 말>'(1화 김금수 · 1화 v4 도경 · ep002 리허설): 앞의 회차를 떼어 그 회차로 좁힌다. 회차 낱말까지 컷 글에서 찾아
+    # '개항 1화 김금수' 가 다섯 작품 모두 nothing_found 였다(2026-10-24 작품별 시나리오 준비)
+    if series and episode.strip():
+        try:
+            only_ep = _episode(series, episode)
+        except ValueError as e:
+            return str(e)
+    elif series and not re.fullmatch(ep_only, q, re.I):  # 회차만이면 아래에서 그 회차 요약
+        m = re.match(r"^((?:ep\s*)?\d+\s*화?(?:\s*[_-]?\s*v\d+)?(?:\s*판)?)\s+(\S.*)$", q, re.I)
+        if m:
+            try:
+                only_ep, q = _episode(series, m.group(1)), m.group(2)
+            except ValueError as e:
+                if re.search(r"화|ep|v\d", m.group(1), re.I):  # 회차 꼴이 분명한데 없다: 있는 판을 알린다(숫자로 시작하는 보통 글은 그대로 찾는다)
+                    return str(e)
+    if series and only_ep is None:
         try:
             ep = _episode(series, q)
         except ValueError as e:
             ep = None
-            if re.fullmatch(r"\s*(?:(?:ep)?\s*\d+\s*(?:화)?\s*[_\s-]*(?:v\d+)?|v\d+)\s*(?:판)?\s*", q, re.I):  # 회차·판만 찾았는데 없다: 있는 판과 할 일
+            if re.fullmatch(ep_only, q, re.I):  # 회차·판만 찾았는데 없다: 있는 판과 할 일
                 return str(e)
         if ep is not None:
             board = _json(ep / "storyboard.json", {}) or {}
@@ -736,6 +754,8 @@ def find(query: str, series: str = "", limit: int = 12) -> str:
     toks = [x for x in re.split(r"\s+", q.lower()) if x]
     hits, cast_hits = [], []
     for s, e in _ep_dirs(series):
+        if only_ep is not None and e.resolve() != only_ep.resolve():
+            continue
         cat = _catalog(e)
         cast = _json(s / "cast.json", {}) or {}
         names = {c: f"{v.get('ko', '')} {v.get('en', '')}".lower() for c, v in cast.items() if isinstance(v, dict)}

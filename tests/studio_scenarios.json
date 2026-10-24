@@ -403,5 +403,60 @@
    ]
   },
   "why": "2026-10-24 그림 모델 바꿔 끼우기: 서버에 Noct-Q V4 를 잠깐 받아 그리기·검수·편집(편집은 기본 판 UC 역할)·합성이 다 되는지"
+ },
+ {
+  "name": "작품별_인물컷_모아보기",
+  "each_series": true,
+  "prompt": "{name} {ep_n} 에서 {char} 나오는 컷이 몇 개야? 그 컷들 모아보기로 보여 줘.",
+  "checks": {
+   "must_call": [
+    "contact_sheet"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 300
+  },
+  "setup": {
+   "cleanup": [
+    "exports/_sheets/*"
+   ]
+  },
+  "why": "2026-10-24 같은 시험을 어느 작품에서나: 사람이 부르는 작품 제목·회차·인물 이름으로 찾고 모아보기(그리기 없음)"
+ },
+ {
+  "name": "작품별_다시그리고_고치고_합성",
+  "each_series": true,
+  "gpu": true,
+  "manual": true,
+  "prompt": "{name} {ep_n} {copy_v} 에서 {p1} 이랑 {p2} 두 컷을 다시 그려서 원래 거랑 나란히 보여 줘. {p2} 는 새 그림으로 본편에 넣고, {char} 표정을 조금 더 굳은 얼굴로 고친 다음 합성해 줘.",
+  "then": [
+   {
+    "say": "다 됐어? 바뀐 컷이랑 합성 결과 알려 줘.",
+    "wait_jobs_min": 20
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "vast_draw",
+    "adopt_panel",
+    "edit_panel",
+    "compose"
+   ],
+   "max_tool_errors": 3,
+   "max_seconds": 2700
+  },
+  "setup": {
+   "copy": [
+    [
+     "series/{series}/episodes/{ep}",
+     "series/{series}/episodes/{copy}"
+    ]
+   ],
+   "cleanup": [
+    "series/{series}/episodes/{copy}",
+    "exports/*/*_{copy_v}*",
+    "exports/_sheets/*{copy}*"
+   ]
+  },
+  "why": "2026-10-24 개항_그림판_바꾸기 를 작품마다(기본 판): 다시 그리기·검수·본편 넣기·편집·합성이 어느 작품에서나 되는지. 원본 회차는 안 건드리고 사본에서"
  }
 ]

@@ -101,6 +101,16 @@ def main():
             v = next((e.name for e in eps if re.fullmatch(r"ep001_v\d+", e.name)), "")
             if v:
                 t("list_panels", series=title, episode="1화 " + v.split("_")[1])
+            # '<짧은 작품 이름> 1화 <인물 한글 이름>' 찾기: 회차 낱말까지 컷 글에서 찾아 다섯 작품 모두 0건이던 꼴(2026-10-24)
+            board = json.loads((sd / "episodes" / "ep001" / "storyboard.json").read_text(encoding="utf-8"))
+            cast = json.loads((sd / "cast.json").read_text(encoding="utf-8")) if (sd / "cast.json").exists() else {}
+            cid = next((c for p in board.get("panels", []) for c in p.get("characters", []) if isinstance(cast.get(c), dict) and cast[c].get("ko")), "")
+            if cid:
+                short = re.sub(r"\s*[\(（].*?[\)）]", "", title).strip()
+                ko = re.sub(r"\s*\(.*?\)", "", cast[cid]["ko"])
+                ok, r = t("find", query=f"{short} 1화 {ko}")
+                if ok and '"total": 0' in r:
+                    fails.append(f"find '{short} 1화 {ko}' 이 0건")
         print(f"{sd.name}: 회차 {len(eps)}", flush=True)
     # 도구 코드·모델이 읽는 설명에 특정 작품 이름이 박혔는지(tools/hardcode_scan.py, 같은 공짜 점검)
     sys.path.insert(0, str(ROOT / "tools"))

@@ -5,6 +5,8 @@
 
 시나리오 파일(tests/studio_scenarios.json): [{"name": "...", "prompt": "사용자 말", "provider": "선택", "gpu": false, "then": ["같은 대화에서 이어 할 말", ...],
   "checks": {"must_call": ["contact_sheet"], "max_tool_errors": 1, "max_seconds": 180, "no_false_done": true, "answer_has": ["낱말"]}}]
+"each_series": true 면 작품마다 하나씩 펼친다: 말·사본·치우기의 {name}·{ep_n}·{p1}·{char} 같은 칸을 그 작품 폴더에서 채운다(series_vars).
+돌리기 전에 --list 로 펼친 말과 사본을 본다(돈 0). --series 로 작품을 고른다.
 채점: 도구 오류 수 · 꼭 부를 도구 · 시간 · 시작만 한 작업을 '다 됐다'고 말하지 않았나(no_false_done) · 답에 들어갈 낱말.
 결과: 화면 + state/logs/studio_test_<날짜>.md(시나리오마다 통과·실패와 까닭, 도구 호출 줄).
 """
@@ -150,17 +152,79 @@ def cleanup(sc: dict, before: set):
             print(f"  치움 {rp.relative_to(ROOT.resolve())}", flush=True)
 
 
+def series_vars(sd: Path) -> dict | None:
+    """작품 하나의 시나리오 칸 값(박지 않고 그 작품 폴더에서 읽는다). 그린 인물 컷이 둘 안 되면 None.
+    series·title·name(괄호 뗀 부르는 이름)·ep(가장 앞 회차)·ep_n(1화)·copy(그 회차의 안 쓰는 판 이름, 시험용 사본)·copy_v·p1·p2(그린 인물 컷)·
+    char(p2 인물의 한글 이름)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from mcp_smoke import title_of
+    eps = sorted(p for p in (sd / "episodes").iterdir() if p.is_dir() and re.fullmatch(r"ep\d{3}", p.name) and (p / "panels.json").exists()) \
+        if (sd / "episodes").is_dir() else []
+    for ep in eps:
+        panels = [p for p in json.loads((ep / "panels.json").read_text(encoding="utf-8"))
+                  if p.get("chars") and (ep / "panels_hf" / f"{p['id']}.png").exists()]
+        if len(panels) < 2:
+            continue
+        used = [int(m.group(1)) for d in (sd / "episodes").iterdir() if (m := re.fullmatch(rf"{ep.name}_v(\d+)", d.name))]
+        v = max(used + [8]) + 1  # 시험 사본은 실제 판 번호 뒤로(지운 뒤에도 같은 이름이 되풀이된다)
+        p1, p2 = panels[len(panels) // 3], panels[2 * len(panels) // 3]
+        cast = json.loads((sd / "cast.json").read_text(encoding="utf-8")) if (sd / "cast.json").exists() else {}
+        c = p2["chars"][0]
+        char = re.sub(r"\s*\(.*?\)", "", str((cast.get(c) or {}).get("ko") or c))
+        title = title_of(sd) or sd.name
+        # name: 사람이 부르는 짧은 이름(괄호 뗌: '개항(開肛)' → 개항, 'D+18 (힉스필드 판)' → D+18). MCP 가 이 이름으로 작품을 찾는지도 시험이 된다
+        return {"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
+                "copy": f"{ep.name}_v{v}", "copy_v": f"v{v}", "p1": p1["id"], "p2": p2["id"], "char": char}
+    return None
+
+
+def _fill(x, vals: dict):
+    if isinstance(x, str):
+        return re.sub(r"\{(\w+)\}", lambda m: str(vals.get(m.group(1), m.group(0))), x)
+    if isinstance(x, list):
+        return [_fill(v, vals) for v in x]
+    if isinstance(x, dict):
+        return {k: _fill(v, vals) for k, v in x.items()}
+    return x
+
+
+def expand(scenarios: list, only: set) -> list:
+    """each_series: true 인 시나리오는 작품마다 하나씩(이름 '<이름>@<작품 폴더>'), 칸({title}·{p1} …)은 series_vars 로 채운다.
+    시나리오가 개항 문장으로 박혀 있어 다른 작품에선 같은 시험을 못 돌렸다(2026-10-24)."""
+    out = []
+    for sc in scenarios:
+        if not sc.get("each_series"):
+            out.append(sc)
+            continue
+        for sd in sorted(p for p in (ROOT / "series").iterdir() if p.is_dir() and not p.name.startswith("_")):
+            if only and sd.name not in only:
+                continue
+            vals = series_vars(sd)
+            if vals:
+                out.append({**_fill({k: v for k, v in sc.items() if k != "each_series"}, vals), "name": f"{sc['name']}@{sd.name}"})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("names", nargs="*")
+    ap.add_argument("names", nargs="*", help="시나리오 이름. 작품마다 펼치는 시나리오는 '<이름>' 이면 모든 작품, '<이름>@<작품 폴더>' 면 그 작품만")
     ap.add_argument("--provider", default="")
     ap.add_argument("--file", default=str(ROOT / "tests" / "studio_scenarios.json"))
     ap.add_argument("--gpu", action="store_true", help="GPU 를 쓰는 시나리오(gpu: true)도 돌린다(파드 시간 = 돈)")
+    ap.add_argument("--series", default="", help="작품마다 펼치는 시나리오를 이 작품 폴더들로만(쉼표)")
+    ap.add_argument("--list", action="store_true", help="돌리지 않고 고른 시나리오의 펼친 말·사본만 보인다(돈 0)")
     a = ap.parse_args()
-    scenarios = json.loads(Path(a.file).read_text(encoding="utf-8"))
+    scenarios = expand(json.loads(Path(a.file).read_text(encoding="utf-8")), {s.strip() for s in a.series.split(",") if s.strip()})
+    a.names = [n for n in a.names for n in ([s["name"] for s in scenarios if s["name"] == n or s["name"].startswith(n + "@")] or [n])]
     # manual: 한 번 생긴 상태(걸린 컷 등)에 기대는 시나리오는 이름으로 부를 때만
     pick = [s for s in scenarios if (s["name"] in a.names) if a.names] or [s for s in scenarios if not a.names and not s.get("manual") and (a.gpu or not s.get("gpu"))]
-    report = [f"# 스튜디오 시험 {time.strftime('%Y-%m-%d %H:%M')} (공급자 {a.provider or '기본'})", ""]
+    if a.list:
+        for s in pick:
+            print(f"- {s['name']}{' (GPU)' if s.get('gpu') else ''}: {s['prompt']}")
+            for src, dst in (s.get("setup") or {}).get("copy", []):
+                print(f"    사본 {src} → {dst}")
+        return
+    report =[f"# 스튜디오 시험 {time.strftime('%Y-%m-%d %H:%M')} (공급자 {a.provider or '기본'})", ""]
     passed = 0
     for sc in pick:
         before = snapshot(sc)
