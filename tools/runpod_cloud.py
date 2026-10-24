@@ -645,8 +645,16 @@ def main():
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M')} {e}\n")
             print(e)
             return
-        running = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
+        pods = our_pods()
+        running = [p for p in pods if p.get("desiredStatus") == "RUNNING"]
         line = f"{time.strftime('%Y-%m-%d %H:%M')} 잔액 ${b['balance']:.2f} 바닥 ${c['min_balance_usd']} 켜진 파드 {len(running)} 시간당 ${b['per_hr']:.2f}"
+        # 멈춘 파드의 보관비도 적는다: 다시 켜지 못해 새로 만들 때 옛 파드를 볼륨째 남기니(left_pods) 멈춘 파드가 셋까지 쌓여 월 약 $60 이
+        # 아무 데도 안 보인 채 나갔다(2026-10-24). 지우는 건 사람이 정한다(안에 학습한 LoRA 가 있을 수 있다)
+        stopped = [p for p in pods if p.get("desiredStatus") != "RUNNING"]
+        if stopped:
+            left = set(load_state().get("left_pods", []))
+            line += (f" · 멈춘 파드 {len(stopped)}개 보관비 월 약 ${len(stopped) * c['volume_gb'] * c['stopped_storage_usd_per_gb_month']:.0f}"
+                     + (f"(못 켜서 남긴 옛 파드 {len(left & {p['id'] for p in stopped})}개: 필요 없으면 지운다)" if left else ""))
         if b["balance"] <= float(c["min_balance_usd"]) and running:
             for p in running:
                 stop(p["id"])
