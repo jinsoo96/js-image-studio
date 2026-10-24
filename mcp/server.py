@@ -587,10 +587,35 @@ def _skill_text(name: str = "") -> str:
     return f.read_text(encoding="utf-8")
 
 
+def _stack_lines() -> list:
+    """어디서 무슨 모델로 도는지(키는 안 적음). 사용자가 '어디서 무슨 모델로 하고 있는지 알아야 판단한다'고 했는데 설정 파일을 뒤져야
+    답할 수 있었다(2026-10-24). 서버에 묻는 건 켜짐 여부 하나뿐(짧게)."""
+    out = []
+    down = None
+    with contextlib.suppress(Exception):
+        down = _gpu_down()
+    out.append(f"- 그리는 서버: {_gpu_host()} — {'꺼짐·응답 없음(' + str(down)[:60] + ')' if down else '켜짐'}")
+    models = sorted({m.group(1) for f in VAST.glob("mcp_use_webtoon_vertical_*.json") for m in [re.match(r"mcp_use_webtoon_vertical_(.+)\.json$", f.name)] if m})
+    out.append(f"- 그리는 판(작업실에 저장된 그리기 워크플로우): {', '.join(models) or '없음'} — 서버에 그 모델 파일이 다 있는지는 draw_models()의 ready")
+    vf = ROOT / "state" / "vlm_url.txt"
+    if vf.exists():
+        url, _, rest = vf.read_text(encoding="utf-8").strip().partition("|")
+        out.append(f"- 판정 모델(관문·그림 검수): {rest.split('|')[0] or '?'} @ {re.sub(r'^https?://', '', url).split('/')[0]}")
+    else:
+        out.append(f"- 판정 모델(관문·그림 검수): {os.environ.get('VLM_MODEL') or '기본값'} @ {os.environ.get('VLM_URL') or '사내 게이트웨이(기본)'}")
+    out.append("- 대화 모델: 이 MCP 를 부르는 쪽(미사일 스튜디오 등)의 설정")
+    bl = ROOT / "state" / "logs" / "budget_guard.log"
+    if bl.exists():
+        last = bl.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1:]
+        if last:
+            out.append(f"- 예산(10분마다): {last[0]}")
+    return out
+
+
 @mcp.tool()
 def status() -> str:
-    """작품별 회차 목록(제목·컷 수·그린 컷·합성 여부), 진행 중인 작업."""
-    lines = []
+    """지금 구성(그리는 서버·그리는 판·판정 모델·예산)과 작품별 회차 목록(제목·컷 수·그린 컷·합성 여부), 진행 중인 작업."""
+    lines = ["# 지금 구성"] + _stack_lines() + [""]
     for s in sorted(d for d in (ROOT / "series").iterdir() if d.is_dir() and not d.name.startswith("_")):
         lines.append(f"# {s.name}")
         for ep in sorted(d for d in (s / "episodes").iterdir() if d.is_dir()):
