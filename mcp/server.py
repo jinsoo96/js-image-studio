@@ -757,6 +757,14 @@ def panel_info(series: str, episode: str, panel: str) -> str:
             # 같은 번호에 글자 붙은 컷이 있으면 알린다: 'p023i' 를 '23' 으로 줄여 불러 p023 을 답했다(2026-10-24 스튜디오 시험)
             **({"same_number": sib} if (sib := sorted(x for x in cat if re.fullmatch(re.escape(pid) + r"[a-z]", x))) else {})}
            for pid in _pids(ep, panel, "any")]
+    # 고치는 길을 결정하는 자리에 적는다: 파이썬 콘티(make_storyboard.py)인 회차에서 대사 한 줄을 바꾸려고 에이전트가 그 파일을 읽고
+    # edit_file 로 고쳤다(2026-10-24 개항 사본 시험, Claude). set_storyboard 는 코드 콘티도 표로 옮겨 그 컷만 덮는다
+    how = {"대사·구도·인물 목록": "set_storyboard(cuts=[{그 컷 id·바꿀 칸}]) — 같은 id 만 덮는다. make_storyboard.py·build_panels.py 를 edit_file 로 고치지 않는다",
+           "장소·옷·행동·연기·카메라": "set_panels(panels={id: {...}}) → prepare_episode",
+           "그림": "일부만 틀리면 edit_panel(먼저 보려면 preview_panel), 구도가 틀리면 vast_draw(ids) → compare_panel → adopt_panel",
+           "그 뒤": "compose(대사만 바꿨으면 다시 그리지 않고 합성만)"}
+    for o in out:
+        o["how_to_change"] = how
     return json.dumps(out[0] if len(out) == 1 else out, ensure_ascii=False)
 
 

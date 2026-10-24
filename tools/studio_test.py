@@ -60,7 +60,8 @@ def summarize(d: dict) -> dict:
                 errors.append(txt[:200].replace("\n", " "))
             if '"state": "running"' in txt or '"result_ready": false' in txt:
                 running.add(e["name"])
-            if '"result_ready": true' in txt:
+            # 끝난 작업: result_ready 는 긴 결과(review·log_tail) 뒤에 있어 잘린 결과 글에선 안 보였다 → state 로도 본다
+            if '"result_ready": true' in txt or (txt.lstrip().startswith('{"job"') and re.search(r'"state": "(done|needs_review)"', txt[:300])):
                 running.discard("webtoon-studio__job_status")
                 running.clear()
         elif e["type"] == "error":
