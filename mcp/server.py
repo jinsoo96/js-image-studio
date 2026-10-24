@@ -2201,13 +2201,16 @@ def _review_left(ep: Path) -> str:
     cur = _json(ep / "review" / "staging.json", {}) or {}
     if not cur:
         return ""
-    items = []
-    for pid, v in sorted(cur.items()):
+    structural = set((_json(ROOT / "skills" / "staging-review" / "checks.json", {}) or {}).get("structural", []))
+    groups = {}
+    for pid, v in sorted(cur.items(), key=lambda x: _pid_key(x[0])):
         # 그린·고친 판(panels_hf_vast)만 본다: panels_hf 는 합성 때 컷 놓기(hf_place)가 늘 다시 써서 매번 '바뀜'이 된다
         f = ep / "panels_hf_vast" / f"{pid}.png"
         newer = f.exists() and time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime)) > v.get("at", "")
-        items.append(f"{pid}({'·'.join(v.get('issues', []))}{', 기록 뒤 그림 바뀜' if newer else ''})")
-    return (f"\n검수에서 사람 확인이 남은 컷 {len(items)}개: {', '.join(items)}. panel_info 로 review 를 보고 고칠 컷은 "
+        groups.setdefault(_review_level(v.get("issues", []), structural), []).append(
+            f"{pid}({'·'.join(v.get('issues', []))}{', 기록 뒤 그림 바뀜' if newer else ''})")
+    text = " · ".join(f"{lv} {len(groups[lv])}개: {', '.join(groups[lv])}" for lv in ("짜임", "이어짐", "글과 다름") if lv in groups)
+    return (f"\n검수에서 사람 확인이 남은 컷 {len(cur)}개(짜임부터 본다) — {text}. panel_info 로 review 를 보고 고칠 컷은 "
             "set_panels(글이 틀렸으면)·edit_panel·vast_draw(ids) 뒤 다시 compose, 그대로 둘 컷은 사용자에게 알리고 괜찮다고 하면 "
             "adopt_panel(source='current', reason=…)로 기록을 닫는다.")
 
@@ -2306,9 +2309,18 @@ def _job_review(spec: dict, started: str) -> list:
         cmd = [str(x) for x in st.get("cmd", [])]
         if "--only" in cmd:
             ids |= set(cmd[cmd.index("--only") + 1].split(","))
-    cats = (_json(ROOT / "skills" / "staging-review" / "checks.json", {}) or {}).get("categories", {})  # 항목 이름의 뜻(기준표 데이터)
-    return [{"panel": k, **v, "meaning": {i: cats[i] for i in v.get("issues", []) if i in cats}}
-            for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
+    ck = _json(ROOT / "skills" / "staging-review" / "checks.json", {}) or {}
+    cats, structural = ck.get("categories", {}), set(ck.get("structural", []))  # 항목 이름의 뜻·짜임 결함(기준표 데이터)
+    items = [{"panel": k, **v, "level": _review_level(v.get("issues", []), structural), "meaning": {i: cats[i] for i in v.get("issues", []) if i in cats}}
+             for k, v in sorted(cur.items()) if (k in ids if ids else v.get("at", "") >= started)]
+    # 짜임 결함(사람이 남거나 사라짐·몸·생김새·좌우) → 이어짐 → 글과 다름 순: 회차 전체 검수에서 74컷이 한 덩어리로 나와 무엇부터
+    # 볼지 몰랐다(2026-10-24 개항 1화 v3 깊은 검수)
+    order = {"짜임": 0, "이어짐": 1, "글과 다름": 2}
+    return sorted(items, key=lambda x: (order[x["level"]], _pid_key(x["panel"])))
+
+
+def _review_level(issues: list, structural: set) -> str:
+    return "짜임" if set(issues) & structural else "이어짐" if "이어짐" in issues else "글과 다름"
 
 
 STALLED_S = float(os.environ.get("WEBTOON_STALLED_S", "900"))
@@ -2361,6 +2373,12 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
         out["drawn"] = drawn
     if review:
         out["review"] = review
+        levels = {}
+        for r in review:
+            levels.setdefault(r["level"], []).append(r["panel"])
+        out["review_summary"] = {k: {"count": len(v), "panels": v} for k, v in levels.items()}
+        out["review_rule"] = ("짜임(사람이 남거나 사라짐·몸·생김새·좌우)부터 사용자에게 보여 주고 고친다. 이어짐은 같은 장면 앞뒤 컷과 나란히 보고, "
+                              "글과 다름(시선·논리·구도 등)은 독자가 알아챌 것만 고른다. 걸린 수만 말하지 말고 등급별로 나눠 말한다")
         if state == "done":
             out["state"] = "needs_review"
     if spec.get("kind") == "prepare" and state in ("done", "failed"):

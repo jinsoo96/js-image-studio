@@ -336,6 +336,14 @@ def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
             same = sum(1 for k, t in wears.items() if t.lower() == top.lower() and kinds[k].lower() == kinds[ch].lower())  # 같은 차림·생김새가 여럿이면 그만큼은 정상
             n = _vlm([img_path], c["observe"].format(top=top, kind=kinds[ch]), 60).get("count")
             if isinstance(n, int) and n > same:
+                # 걸리면 그 인물 참고 그림과 나란히 '같은 사람'만 다시 센다: 생김새 글 첫 마디(Korean man)와 윗옷으로만 세면 비슷한 양복의
+                # 일본 관리·검도복의 다른 학생까지 같은 사람으로 셌다(2026-10-24 개항 1화 v3 깊은 검수: 14건 중 10건이 오판)
+                ref = Path(series) / "assets" / "vast_refs" / f"{ch}_bust.png"
+                if ref.exists() and c.get("confirm"):
+                    k = _vlm([img_path, ref], c["confirm"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch))), 40).get("count")
+                    if isinstance(k, int) and k <= 1:
+                        continue
+                    n = k if isinstance(k, int) else n
                 out.append(c["problem"].format(name=re.sub(r"\s*\(.*?\)", "", nm.get(ch, ch)), n=n))
     elif kind == "ref_each":  # 인물마다 참고 그림(vast_refs/<id>_<ref>.png)을 같이 보여 주고 묻는다. 참고 그림이 없는 인물은 건너뛴다
         # 생김새 글은 넘기지 않는다: 글과 시트가 다르면(여우 귀 하나 ↔ 시트는 둘) 글을 따라 걸었다. 참고 그림이 정본
@@ -525,7 +533,8 @@ def staging_pass(c, cache, dst: Path, series, ep_dir: Path, p, seed, render, ret
     record_review(ep_dir, p["id"], left, note)
 
 
-STRUCTURAL = {"인원", "몸", "빈자리", "좌우", "생김새", "검사불가"}  # 독자 눈 거르기에서 빼지 않는 것: 그림의 짜임이 깨졌거나(인물이 딴 모습) 검사를 못 했다
+# 독자 눈 거르기에서 빼지 않는 것: 그림의 짜임이 깨졌거나(인물이 딴 모습) 검사를 못 했다. 기준표(checks.json structural)가 정본, MCP 검수 등급도 같은 목록
+STRUCTURAL = set(json.loads(CHECKS.read_text(encoding="utf-8")).get("structural") or ["인원", "몸", "빈자리", "좌우", "생김새", "검사불가"])
 READER_ASK = """This is one panel of a vertical-scroll webtoon. The reader sees only this picture{talk}.
 An automatic check compared the picture with the artist's written plan and found these differences (category: description):
 {notes}

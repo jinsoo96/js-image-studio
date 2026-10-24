@@ -258,9 +258,10 @@
    "when": "people",
    "kind": "count_each",
    "verify": false,
-   "why": "같은 사람이 둘(p341 상수 둘)을 '둘로 그렸나'로 물으면 놓치고, 그 생김새의 사람 수를 세게 하니 잡았다(2026-10-20). 생김새 글 전체로 세면 못 셌고, 윗옷 하나(앞 네 낱말)로 세니 셌다 / 윗옷만으로 세니 비슷한 색 블라우스의 여자까지 세어 어깨 너머 남자를 둘로 걸었다 → 생김새 글 첫 마디(Korean man 등)를 같이 준다(2026-10-24 야근의 온도 3화 p002)",
+   "why": "같은 사람이 둘(p341 상수 둘)을 '둘로 그렸나'로 물으면 놓치고, 그 생김새의 사람 수를 세게 하니 잡았다(2026-10-20). 생김새 글 전체로 세면 못 셌고, 윗옷 하나(앞 네 낱말)로 세니 셌다 / 윗옷만으로 세니 비슷한 색 블라우스의 여자까지 세어 어깨 너머 남자를 둘로 걸었다 → 생김새 글 첫 마디(Korean man 등)를 같이 준다(2026-10-24 야근의 온도 3화 p002) / 걸린 컷은 참고 그림과 나란히 같은 사람만 다시 센다(confirm): 비슷한 양복·검도복의 다른 사람을 같은 사람으로 센 오판 14건 중 10건이 빠짐, 거울에 비친 모습도 둘로 셌다(2026-10-24 개항 1화 v3)",
    "observe": "How many people who look like a {kind} and wear a {top} are in this picture? Count every one, background included. Answer JSON only: {{\"count\": N}}",
-   "problem": "{name} 처럼 생긴 사람이 {n}명"
+   "problem": "{name} 처럼 생긴 사람이 {n}명",
+   "confirm": "Image 2 shows one person, {name}. How many people in image 1 are this same person: the same face, hairstyle, glasses and build (clothes may differ)? Different people who only wear similar clothes do not count, and a reflection in a mirror, window or water is not a second person. Count every one, background included. Answer JSON only: {{\"count\": N}}"
   },
   {
    "name": "headless_body",
@@ -330,5 +331,14 @@
   "검사불가": "그림은 그려졌고 문제가 아니다. 검사 모델이 답을 못 줘 확인하지 못했을 뿐이다: 다시 그리지 말고 그림을 보여 주고 사용자에게 확인받는다",
   "생김새": "인물이 참고 그림(시트)과 다른 종류의 모습으로 그려졌다(사람 얼굴↔짐승 얼굴, 귀·뿔·털빛)",
   "이어짐": "같은 장면 앞 컷과 이어지지 않는다(인물 모습·옷·머리·자세·소품). 장면 이어짐 점검(tools/continuity_check.py)이 뒤 컷에 남긴다"
- }
+ },
+ "structural": [
+  "인원",
+  "몸",
+  "빈자리",
+  "좌우",
+  "생김새",
+  "검사불가"
+ ],
+ "_structural_why": "짜임 결함: 그림의 짜임이 깨졌거나(사람이 남거나 사라짐·몸·인물이 딴 모습·좌우) 검사를 못 함. 독자 눈 거르기에서 빼지 않고(refine.reader_filter), 검수 결과에서 먼저 보인다(mcp review level)"
 }
