@@ -59,7 +59,12 @@ def title_of(sd: Path) -> str:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default="http://127.0.0.1:7440/mcp")
+    ap.add_argument("--log", action="store_true", help="결과 한 줄을 state/logs/mcp_smoke.log 에 덧붙인다(예약작업 WEBTOON-mcp-smoke, status 가 마지막 줄을 보인다)")
     a = ap.parse_args()
+    try:  # 예약작업(콘솔 없음)에서 한글을 찍다 죽지 않게
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
     m = Mcp(a.url)
     fails, calls = [], 0
 
@@ -98,6 +103,12 @@ def main():
     print(f"\n도구 호출 {calls}번, 오류 {len(fails)}")
     for f in fails:
         print("  실패:", f)
+    if a.log:
+        import time
+        log = ROOT / "state" / "logs" / "mcp_smoke.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M')} 도구 {calls}번 오류 {len(fails)}" + ("" if not fails else " · " + " | ".join(fails)[:600]) + "\n")
     sys.exit(1 if fails else 0)
 
 

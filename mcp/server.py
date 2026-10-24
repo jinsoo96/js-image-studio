@@ -604,6 +604,11 @@ def _stack_lines() -> list:
     else:
         out.append(f"- 판정 모델(관문·그림 검수): {os.environ.get('VLM_MODEL') or '기본값'} @ {os.environ.get('VLM_URL') or '사내 게이트웨이(기본)'}")
     out.append("- 대화 모델: 이 MCP 를 부르는 쪽(미사일 스튜디오 등)의 설정")
+    sl = ROOT / "state" / "logs" / "mcp_smoke.log"  # 공짜 시험(tools/mcp_smoke.py, 예약작업 WEBTOON-mcp-smoke)의 마지막 결과
+    if sl.exists():
+        last = sl.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1:]
+        if last:
+            out.append(f"- 공짜 시험(모든 작품 읽기 도구, 6시간마다): {last[0][:200]}")
     bl = ROOT / "state" / "logs" / "budget_guard.log"
     if bl.exists():
         last = bl.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1:]
