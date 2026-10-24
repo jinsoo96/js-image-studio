@@ -450,6 +450,14 @@ For each one, look at both images and decide what it is:
 Answer JSON only: {{"verdicts": ["mistake" | "camera" | "story" | "other", ...]}} (one per listed difference, same order)."""
 
 
+PEOPLE_KIND = """Panel text: {text}
+People who should be in this webtoon panel: {looks}{extras}.
+An earlier check said the people do not match the text: {note}
+Look at the picture. Is there anyone in it who should not be there (an extra person, a duplicate of someone, a stranger, a second body)?
+Separately, is anyone the text needs missing from the picture?
+Answer JSON only: {{"extra": true|false, "missing": true|false}}"""
+
+
 def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     """그린 컷을 그 컷의 글과 맞대어 본다. (결과, 걸린 항목)
     ① 여러 항목 검수(mcp/vision_review: 인원·좌우시선·옷·표정연기·배경, 두 번 보고 둘 다 걸린 것만) ② 팔·손 개수(글과 무관한 몸 구조)
@@ -461,6 +469,18 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     V.DIRS[:] = [img_path.parent.name]
     r = V.review(series, ep_dir, [pid], workers=2)[0]
     probs = set(V._probs(r)) if r.get("판정") == "다시" else set()
+    if "인원" in probs:
+        # 여러 항목 검수의 '인원'은 남는 사람과 빠진 사람을 한데 묶어 짜임 결함(늘 사람 확인)으로 올렸다: 클로즈업에 글 속 배경 학생·하인이
+        # 안 보인다는 것까지 개항 v4 깊은 검수 짜임 22컷을 채웠다(2026-10-24). 남는 사람이 있는지 따로 묻고, 빠지기만 했으면 '인원부족'
+        # (독자 눈 거르기를 거치는 부드러운 항목)으로 가른다. 남는 사람은 '인원' 그대로
+        p_ = next((x for x in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8")) if x["id"] == pid), {})
+        k = _vlm([img_path], PEOPLE_KIND.format(text=panel_text(p_)[:600], looks=_looks(series, p_) or "(no named characters)",
+                                                extras=(f"; unnamed: {p_['extras']}" if p_.get("extras") else ""),
+                                                note=str(r.get("인원") or r.get("고칠점") or "")[:300]), 80)
+        # 남는 사람이 없다고 하면(빠지기만 했거나 둘 다 아니라면) 부드러운 항목으로. 개항 v4 인원 17컷 중 남는 사람이 있다고 한 4컷(p023·p023f·
+        # p047·p049)이 그림에서도 남는 사람이 보이는 컷이었다. 답을 못 받으면 '인원' 그대로(놓치지 않는 쪽)
+        if k.get("extra") is False:
+            probs = (probs - {"인원"}) | {"인원부족"}
     if r.get("error") or r.get("raw"):  # 검수 모델이 답을 못 줬다: 통과로 넘기지 않는다
         JUDGE_FAILS["n"] += 1
         JUDGE_FAILS["last"] = str(r.get("error") or "형식 밖 답")[:160]

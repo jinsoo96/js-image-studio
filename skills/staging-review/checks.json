@@ -270,8 +270,8 @@
    "kind": "fixed",
    "verify": false,
    "field": "headless",
-   "why": "어깨 너머 앞사람이 몸통 둘로 그려졌는데(머리 하나에 셔츠 몸통 둘) 사람 수 세기는 머리 없는 몸통을 사람으로 세지 않아 놓쳤다(2026-10-24 야근의 온도 3화 p002). 몸통마다 제 머리가 있나만 따로 묻는다 / 클로즈업 뒤 흐릿하게 날린 배경 손님을 머리 없는 몸통으로 셌다(2026-10-24 외출 p500, 다른 작품 시험 36건 중 유일한 오판) → 흐린 배경 사람은 빼라고(다음 GPU 시험에서 확인)",
-   "observe": "Look at every torso (chest, back or shoulders in clothes) in this picture. Does each torso connect to its own head, or is it cut off by the picture edge? Count the torsos that do neither: a second torso or pair of shoulders right next to a person, as if one person had two bodies. A blurred, out-of-focus person in the background has a head even if the face is unclear: do not count them. Answer JSON only: {{\"headless\": N}}",
+   "why": "어깨 너머 앞사람이 몸통 둘로 그려졌는데(머리 하나에 셔츠 몸통 둘) 사람 수 세기는 머리 없는 몸통을 사람으로 세지 않아 놓쳤다(2026-10-24 야근의 온도 3화 p002). 몸통마다 제 머리가 있나만 따로 묻는다 / 흐린 배경 사람을 빼라고 적어 봤더니 외출 p500 오판은 사라졌지만 개항 v3 p042 의 진짜 머리 없는 사람도 두 번 다 놓쳐 되돌림(2026-10-24). 놓치는 것보다 오판이 낫다",
+   "observe": "Look at every torso (chest, back or shoulders in clothes) in this picture. Does each torso connect to its own head, or is it cut off by the picture edge? Count the torsos that do neither: a second torso or pair of shoulders right next to a person, as if one person had two bodies. Answer JSON only: {{\"headless\": N}}",
    "bad": "positive",
    "problem": "머리 없는 몸통 {v}개(한 사람이 몸 둘로 그려짐): 그 몸통만 지운다"
   },
@@ -343,7 +343,8 @@
   "검사불가": "그림은 그려졌고 문제가 아니다. 검사 모델이 답을 못 줘 확인하지 못했을 뿐이다: 다시 그리지 말고 그림을 보여 주고 사용자에게 확인받는다",
   "생김새": "인물이 참고 그림(시트)과 다른 종류의 모습으로 그려졌다(사람 얼굴↔짐승 얼굴, 귀·뿔·털빛)",
   "이어짐": "같은 장면 앞 컷과 이어지지 않는다(인물 모습·옷·머리·자세·소품). 장면 이어짐 점검(tools/continuity_check.py)이 뒤 컷에 남긴다",
-  "복제": "한 사람을 두 번 붙인 것처럼 얼굴·머리가 똑같은 사람들(이름 없는 군중에 흔함). 지우지 말고 얼굴을 서로 다르게"
+  "복제": "한 사람을 두 번 붙인 것처럼 얼굴·머리가 똑같은 사람들(이름 없는 군중에 흔함). 지우지 말고 얼굴을 서로 다르게",
+  "인원부족": "글에 있는 사람(군중·배경 인물 포함)이 그림에 없다. 남는 사람은 없다. 독자가 알아챌 때만 고친다"
  },
  "structural": [
   "인원",
