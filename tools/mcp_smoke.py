@@ -6,7 +6,8 @@
 
 작품마다: read_doc · find(폴더 이름·작품 제목) · 회차마다 list_panels(맨 앞 총계 줄) · 앞 컷 셋 panel_info · panel_versions,
 사람이 부르는 이름(작품 제목 + "1화", 판이 있으면 "1화 v2")으로 list_panels. 작품 이름은 박지 않고 series.json·README 제목에서 읽는다.
-끝에 tools/hardcode_scan.py 로 도구 코드·도구 설명에 특정 작품 이름이 박혔는지도 본다(박혔으면 실패).
+끝에 tools/hardcode_scan.py 로 도구 코드·도구 설명에 특정 작품 이름이 박혔는지도 본다(박혔으면 실패),
+tools/prompt_dryrun.py 로 작품마다 그리기 지시를 GPU 없이 만들어 본다(약 1~2분).
 """
 import argparse
 import json
@@ -107,6 +108,11 @@ def main():
     for path, n, sname, what, t, kind in hardcode_scan.scan():
         if kind in ("코드", "모델 글"):
             fails.append(f"작품 이름이 박힘 {path}:{n} [{kind}] {sname} {what} {t!r}")
+    # 다섯 작품의 그리기 지시를 GPU 없이 만들어 본다(tools/prompt_dryrun.py: 참고 그림·인물 빠짐·작품 사이 새어 듦·화면 밖 안내)
+    import subprocess
+    dr = subprocess.run([sys.executable, str(ROOT / "tools" / "prompt_dryrun.py")], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1200)
+    fails += [ln.strip() for ln in dr.stdout.splitlines() if ln.strip().startswith("문제:")] or ([] if dr.returncode == 0 else [f"prompt_dryrun 실패: {(dr.stderr or dr.stdout)[-300:]}"])
+    print(next((ln for ln in dr.stdout.splitlines() if ln.startswith("그리기 지시")), "그리기 지시: 결과 줄 없음"))
     print(f"\n도구 호출 {calls}번, 오류 {len(fails)}")
     for f in fails:
         print("  실패:", f)

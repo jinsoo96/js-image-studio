@@ -345,6 +345,27 @@ Panel: {text}
 Answer JSON only: {{"<name>": "front" | "side" | "back" | "unclear"}}"""
 
 
+def off_frame_note(action: str, chars: list, NAMES: dict) -> str:
+    """장면 배치(SPACE)가 이 컷에 없는 인물을 이름으로 부르면 '이 컷엔 누구만, 그 사람은 화면 밖'을 덧붙일 문장(없으면 '').
+    배치는 장면 전체 사람을 부르는데 컷 글은 'Exactly 2 people' 이라, 셋째 사람을 그려 넣거나(남는 사람) 그 자리가 비어 보였다:
+    개항 v3·v4 에서 배치에 컷 밖 인물이 나오는 컷의 '인원' 걸림 41~47%, 아닌 컷 11%(외출은 같은 컷들이 '빈자리').
+    다섯 작품의 넓은·중간 컷 263 중 134 가 이 꼴이었다(2026-10-24). 이름은 그 작품 인물 목록(NAMES)에서 찾는다.
+    같은 이름의 다른 나이 판(17세·46세)은 컷 안 인물로 본다."""
+    m = re.search(r"SPACE \(identical in every panel of this scene\):(.*)$", action, re.S)
+    if not m or not chars:
+        return ""
+    short = {c: re.sub(r"\s*\(.*?\)", "", NAMES[c]).split()[-1] for c in NAMES}
+    inside = [short[c] for c in chars if c in short]
+    off = sorted({s for c, s in short.items() if c not in chars and s not in inside and re.search(rf"\b{re.escape(s)}\b", m.group(1))})
+    if not off or not inside:
+        return ""
+    who_in = " and ".join(inside)
+    who_off = " and ".join(off)
+    return (f" In this panel only {who_in} {'is' if len(inside) == 1 else 'are'} in frame; {who_off} "
+            f"{'stays' if len(off) == 1 else 'stay'} outside the frame: do not draw {'them' if len(off) > 1 else 'that person'}, "
+            "and frame the shot so their places are not visible.")
+
+
 def person_views(p: dict, NAMES: dict) -> dict:
     """컷 글(카메라·샷·동작)을 판정 모델이 읽고 인물마다 카메라가 보는 쪽 {인물 id: front|side|back}. 못 물으면 {}(정면 참고 그림만 쓴다)."""
     chars = [c for c in p.get("chars") or [] if c in NAMES]
@@ -462,6 +483,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
     if close or p.get("camera"):
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
+    action += off_frame_note(action, chars, NAMES)
     # 학습한 LoRA 가 있는 인물은 이름 옆에 그 trigger 를 붙인다(학습 캡션 맨 앞 낱말, lora.build_data)
     trig = {} if NO_LORA else {x["who"]: x["trigger"] for x in lora_for(series, p.get("chars", [])) if x.get("trigger")}
     # 참고 그림만 묶으면 '그 사람'으로만 읽어 고양이 수인을 사람 노인으로 그렸다(2026-10-24 등불 상점 p002) → 작품 설정 생김새(who)의 첫 마디를 같이

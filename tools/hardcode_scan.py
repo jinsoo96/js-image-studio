@@ -61,13 +61,13 @@ def names_of(sd: Path) -> dict[str, str]:
         base = re.sub(r"\s*[\(（].*?[\)）]", "", title).strip()
         if base and base != title:
             found[base] = "작품 제목"
-    people = {}
+    people = []  # (키, 항목). 출처마다 따로: series.json 과 cast.json 의 영어 이름이 달라 덮어쓰면 한쪽 이름을 놓쳤다
     for src in (sj.get("cast"), _load(sd / "cast.json"), _load(sd / "characters.json")):
         if isinstance(src, dict):
-            people.update({k: v for k, v in src.items() if not k.startswith("_")})
+            people += [(k, v) for k, v in src.items() if not k.startswith("_")]
         elif isinstance(src, list):
-            people.update({str(v.get("id") or i): v for i, v in enumerate(src) if isinstance(v, dict)})
-    for key, v in people.items():
+            people += [(str(v.get("id") or i), v) for i, v in enumerate(src) if isinstance(v, dict)]
+    for key, v in people:
         found[f'"{key}"'] = "인물 키"
         found[f"'{key}'"] = "인물 키"
         for n in _person_names(v):
