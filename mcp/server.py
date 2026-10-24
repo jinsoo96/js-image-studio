@@ -871,7 +871,7 @@ SYNC_REVIEW_MAX = 3
 
 @mcp.tool()
 def review_panels(series: str, episode: str, ids: str = "", scene: str = "", folder: str = "", deep: bool = False) -> str:
-    """그림 검수(크레딧 안 씀): 그림을 보는 모델(qwen3.8-27b)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
+    """그림 검수(크레딧 안 씀): 그림을 보는 판정 모델(지금 쓰는 판정 서버의 모델, state/vlm_url.txt)이 컷 그림과 그 컷 설명(인물·옷·구도·카메라·연기·대사)을 맞대어
     인원·좌우·시선·옷·표정·배경을 판정하고 '다시' 컷엔 고칠 점을 준다. ids(쉼표) 또는 scene(장소 이름)으로 고르고, 비우면 새로 그린 컷 전부.
     folder="vast" 면 GPU 서버로 그린 컷을 본다(다시 그려도 크레딧이 안 드니 vast_draw 로 시드만 바꿔 다시).
     3컷 이하는 바로 답하고, 더 많으면 작업으로 돌려 job_status 로 본다. '다시' 컷은 먼저 edit_panel 로 그 부분만 고치고, 구도가 통째로 틀렸을 때만 컷 설명을 고쳐 vast_draw.
