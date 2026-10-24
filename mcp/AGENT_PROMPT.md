@@ -5,10 +5,10 @@
 - 먼저 guide() 로 규칙을 읽고 status() 로 상태를 본다. 작품 일을 하기 전에 read_doc(doc="SERIES", series=작품) 로 설정을 보고, 콘티를 짜기 전에는 read_doc("skill:storyboard") 를 읽는다.
 
 새 회차 만드는 순서(사용자가 "<작품> N화 만들자"며 이야기를 주면). 작품을 가리지 않는 한 흐름이다. 콘티를 다 쓰면 make_episode(작품, 회차) 한 번으로 그리기·합성·내보내기까지 간다(크레딧 0, GPU 서버). 처음 나오는 장소·인물이 있으면 시안을 만들고 '확인 필요'로 멈추니, 사용자에게 시안 경로를 보여 주고 고르면 accept_new=True 로 다시 부른다
-1. new_episode(작품, 회차) 로 앞 회차 틀을 복사한다(가장 최신 본보기는 d-plus-18 의 ep002_v2). 첫 회차면 빈 콘티 틀이 나온다.
+1. new_episode(작품, 회차) 로 그 작품의 가장 최신 회차 틀을 복사한다. 첫 회차면 빈 콘티 틀이 나온다.
 2. set_storyboard 로 사용자 이야기대로 컷 목록(id·샷·장소·인물·대사)을 넣는다(파이썬을 쓰지 않는다. 앞 회차 흐름은 read_file 로 본다). 이미 나온 설정(연대·호칭·직급·장소·옷)과 맞추고, 바꾼 곳은 사용자에게 알린다.
    파일이 길어(한 화 콘티 약 16KB, 컷 설명 약 22KB) write_file 한 번에 다 못 쓴다: write_file 을 part="first"(첫 조각) → part="more"(4천 자 안팎씩, 장면 단위로) → part="last"(마지막 조각, 문법 검사) 로 나눠 쓰고, 일부만 고칠 땐 edit_file 을 쓴다. 있는 파일을 그대로 옮길 땐 copy_file 한 번으로(읽어서 다시 치지 않는다). last 가 오류를 보여 주면 edit_file 로 그 줄을 고친다.
-3. prepare_episode 로 storyboard.json 을 만든 뒤, 컷 설명은 build_panels.py 코드를 쓰지 말고 set_panels 로 표를 채운다(5~8컷씩 나눠 여러 번). 컷마다 chars(cast.json id)·outfit·location(장소 그림 이름)·shot·action(영어)·acting(영어, 인물 컷은 필수)·camera(대화 컷의 어깨 너머 숏). 장소마다 scenes 에 장면 배치 한 문장, 앞 화 그림을 그대로 쓸 컷은 reuse. 넓은 컷은 양옆, 대화 컷은 어깨 너머, 화면 좌우는 장면 내내 같게, 감정은 장면 끝까지 이어 적는다. 예시가 필요하면 read_file 로 d-plus-18-hf 의 ep002_v2/build_panels.py 를 본다.
+3. prepare_episode 로 storyboard.json 을 만든 뒤, 컷 설명은 build_panels.py 코드를 쓰지 말고 set_panels 로 표를 채운다(5~8컷씩 나눠 여러 번). 컷마다 chars(cast.json id)·outfit·location(장소 그림 이름)·shot·action(영어)·acting(영어, 인물 컷은 필수)·camera(대화 컷의 어깨 너머 숏). 장소마다 scenes 에 장면 배치 한 문장, 앞 화 그림을 그대로 쓸 컷은 reuse. 넓은 컷은 양옆, 대화 컷은 어깨 너머, 화면 좌우는 장면 내내 같게, 감정은 장면 끝까지 이어 적는다. 예시가 필요하면 같은 작품 앞 회차의 panels_spec.json 을 read_file 로 보고, 첫 회차면 read_doc('skill:panel-spec').
 4. prepare_episode 를 다시 돌려 '빠진 컷'과 '연기 없는 인물 컷'이 비어 있는지 본다. 남았으면 set_panels 로 채운다.
 5. "콘티까지"만 하라고 했으면 여기서 컷 목록(list_panels)을 보여 주고 멈춘다.
 6. 그다음 make_episode(작품, 회차) 를 부르면 그리기·합성·PDF 까지 간다. 긴 작업이라 기다리지 말고, 부른 바로 그 답에서 작업 번호와 예상 시간(새 컷당 약 2분 + 합성 3분)을 알리고 답을 끝낸다.

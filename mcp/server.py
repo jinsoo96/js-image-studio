@@ -1646,16 +1646,17 @@ def set_storyboard(series: str, episode: str, cuts: list | dict | str, title_car
     except ValueError as e:
         return str(e)
     sd = _series(series)
+    cast = [k for k in (_json(sd / "cast.json", {}) or {}) if not k.startswith("_")]
+    locs = {p.stem for p in (sd / "assets" / "locations").glob("*.png")} | set((_json(sd / "series.json", {}) or {}).get("locations") or {})
     try:
         add = json.loads(cuts) if isinstance(cuts, str) else cuts
-    except ValueError as e:
-        return _fail("bad_json", detail=str(e), hint='cuts = [{"id": "p001", "shot": "wide", "scene": "office_night", "chars": [], "dialogue": []}]')
+    except ValueError as e:  # 예시는 그 작품의 실제 장소·인물 키로(작품을 박지 않는다)
+        ex = {"id": "p001", "shot": "wide", "scene": min(locs) if locs else "none", "chars": cast[:1], "dialogue": []}
+        return _fail("bad_json", detail=str(e), hint="cuts = " + json.dumps([ex], ensure_ascii=False))
     if isinstance(add, dict):  # {"p001": {...}} 꼴
         add = [{"id": k, **v} for k, v in add.items() if isinstance(v, dict)]
     if not isinstance(add, list) or not all(isinstance(c, dict) for c in add):
         return _fail("bad_cuts", hint="cuts 는 컷 객체의 목록")
-    cast = {k for k in (_json(sd / "cast.json", {}) or {}) if not k.startswith("_")}
-    locs = {p.stem for p in (sd / "assets" / "locations").glob("*.png")} | set((_json(sd / "series.json", {}) or {}).get("locations") or {})
     notes, clean = [], []
     for k, c in enumerate(add, 1):
         cid = str(c.get("id") or "").strip()
@@ -1718,8 +1719,8 @@ def set_panels(series: str, episode: str, panels: dict | list | str = "", scenes
       "shot": "wide shot", "action": "영어로 이 컷에서 일어나는 일", "acting": "영어로 표정·눈썹·입·몸짓", "camera": "대화 컷이면 어깨 너머 숏 설명"}}
       chars 는 cast.json 의 인물 id, location 은 assets/locations 의 장소 이름. 인물이 있는 컷은 acting 을 꼭 쓴다.
       넓은 컷은 양옆 배치, 대화 컷은 듣는 사람 어깨 너머 숏(camera), 혼자 클로즈업은 한 사람만, 화면 좌우는 장면 내내 같게.
-    scenes: JSON {"office": "그 장소의 장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}. 같은 장소가 한 화 안에서 배치가 바뀐 뒤 또 나오면
-      scenes 에 {"office_night": "..."} 를 더하고 그 컷에 "scene": "office_night" 를 적는다. reuse: JSON {"p010": "episodes/ep001/panels_hf/p012.png"}.
+    scenes: JSON {"<장소 이름>": "그 장소의 장면 배치 한 문장(누가 화면 왼쪽·오른쪽에서 어디를 보나)"}. 같은 장소가 한 화 안에서 배치가 바뀐 뒤 또 나오면
+      scenes 에 {"<장소 이름>_2": "..."} 를 더하고 그 컷에 "scene": "<장소 이름>_2" 를 적는다. reuse: JSON {"p010": "episodes/ep001/panels_hf/p012.png"}.
     끝나면 prepare_episode 로 panels.json 을 만들고 '빠진 컷'·'연기 없는 인물 컷'이 비었는지 본다."""
     ep = _episode(series, episode)
     sd = _series(series)
@@ -1813,8 +1814,8 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     expr=True 면 연기에 맞는 표정 칸을 얼굴 참고로 넣는다(연기가 세짐). aspect 를 "2:3"·"9:16" 으로 주면 세로 컷.
     fix=True(기본)면 그린 뒤 그림 보는 Qwen 이 남는 사람(중복·낯선 사람)을 찾아 편집으로 지운다(원본은 panels_hf_vast/_stage1/).
     check=True(기본)면 그림 검수로 시점·좌우·시선·표정·배경을 보고 표정·옷은 편집, 구도가 틀리면 시드를 바꿔 한 번 더 그린다(컷당 +20~60초).
-    fix·check 는 끄지 않는다: 끄면 남는 사람·글에 없는 사람·인물이 딴 모습으로 나온 컷을 아무도 못 잡는다(2026-10-24 개항 v4 p023 을 둘 다 끄고 다시
-    그려 글에 없는 여자가 나왔다). 사용자가 "검수 없이 빨리 초안만"이라고 했을 때만 끈다.
+    fix·check 는 끄지 않는다: 끄면 남는 사람·글에 없는 사람·인물이 딴 모습으로 나온 컷을 아무도 못 잡는다(둘 다 끄고 다시 그렸더니
+    글에 없는 사람이 나왔다). 사용자가 "검수 없이 빨리 초안만"이라고 했을 때만 끈다.
     continuity=True(기본)면 같은 장면의 앞 컷을 쓴다: 같은 인물 묶음의 넓은·미디엄 컷은 앞 컷의 선으로 사람 자리·테이블 배치를 고정한다
     (2026-10-20 시험: 고정 없이 두 사람 좌우가 바뀌었다). 장소가 바뀌거나 시간 자막('수요일')·옷이 바뀐 컷에서는 쓰지 않는다. 어느 앞 컷을 썼는지 작업 로그에 남는다.
     continue_closeups=True 면 같은 사람 연속 클로즈업을 앞 컷에서 잇기도 쓴다(얼굴·배경은 잘 이어지나 얼굴 얼룩·옷 바뀜이 섞여 기본은 끔).
@@ -2112,8 +2113,8 @@ def edit_panel(series: str, episode: str, panel: str | int, instruction: str, re
     instruction 은 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로': 예 "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby.
     Keep everyone else, the place, the light and the framing exactly the same." refs: 쉼표로 인물 id(그 인물 상반신 참고 그림이 <image2>부터)나 작품 안 파일.
     얼굴이 다른 사람 같으면 refs 에 그 인물 id 를 주고 얼굴만 <image2> 처럼 다시 그리게 한다. 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(vast_draw).
-    다른 사람이 가진 것(모자·안경 등)을 한 사람에게 더할 땐 '원래 가진 사람도 그대로 쓴다'를 같이 적는다: 안 적으면 그 사람에게서 빼앗아 옮겨 그렸다(2026-10-24 개항 p031a).
-    얼굴이 똑같은 사람들(복제)을 다르게 할 땐 '서로 다르게'만 적지 말고 자리마다 머리 모양·얼굴형·장신구를 구체적으로 적는다(막연한 지시는 거의 안 바뀌었다, 개항 p013b).
+    다른 사람이 가진 것(모자·안경 등)을 한 사람에게 더할 땐 '원래 가진 사람도 그대로 쓴다'를 같이 적는다: 안 적으면 그 사람에게서 빼앗아 옮겨 그렸다.
+    얼굴이 똑같은 사람들(복제)을 다르게 할 땐 '서로 다르게'만 적지 말고 자리마다 머리 모양·얼굴형·장신구를 구체적으로 적는다(막연한 지시는 거의 안 바뀌었다).
     결과는 바로 본편에 들어간다(adopt_panel 이 필요 없다, 옛 본편은 panels_hf/_rejected/, 되돌리려면 adopt_panel(source='version')).
     본편을 건드리지 않고 먼저 보고 싶으면 preview_panel. 끝나면 compare_panel 로 전/후를 보여 주고, 합성본에 넣으려면 compose."""
     panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
@@ -2318,7 +2319,7 @@ def ailism_work(slug: str, title: str = "", summary: str = "", genre: str = "", 
                 days: str = "-", cover: str = "", author: str = "", visible: str = "") -> str:
     """Ailism Original 작품을 만들거나(없는 slug + title) 고친다. 주지 않은 칸은 지금 값 그대로, 작가 이름은 늘 넣는다(기본 '미사일 발사대').
     사용자가 Ailism 에 새 작품을 올리라거나 작품 정보를 바꾸라고 할 때만 부른다(바로 사이트에 반영된다).
-    slug: 영문 소문자·숫자·- (예: d-plus-18). genre: 로맨스·드라마·판타지·일상·개그·스릴러 등. tags: 쉼표로 8개까지. age: all · 15.
+    slug: 영문 소문자·숫자·- (예: night-shift-2). genre: 로맨스·드라마·판타지·일상·개그·스릴러 등. tags: 쉼표로 8개까지. age: all · 15.
     status: ongoing · completed · hiatus. days: mon,thu 처럼(빈 문자열이면 비정기, '-' 면 그대로). cover: 세로 3:4 그림 경로(작업실 기준).
     visible: '' 그대로 · 'true' 공개 · 'false' 비공개. 스튜디오 화면에서 작품 정보를 저장하면 작가 이름이 계정 이름으로 돌아가니 그때 이 도구를 한 번 부른다."""
     cmd = [PY, str(TOOLS / "ailism_publish.py"), "work", slug]

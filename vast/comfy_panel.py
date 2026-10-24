@@ -572,9 +572,9 @@ def main():
     ap.add_argument("--model", help="이번만 이 판으로 그린다(서버 저장 워크플로우 webtoon_vertical_<판>, MCP draw_models 가 목록을 준다). 없으면 작품 설정 series.json model")
     ap.add_argument("--no-lora", action="store_true", help="학습한 인물 LoRA(series.json loras)를 이번엔 붙이지 않는다(견줘 보기)")
     ap.add_argument("--no-continuity", action="store_true", help="같은 장면 앞 컷 이용(배치 고정·클로즈업 잇기)을 모두 끈다")
+    # 잇기는 2026-10-20 시험에서 성공(D+18 p015)과 실패(이어 쓰면 거친 결 p017, 얼굴 얼룩 외출 p356)가 섞였다
     ap.add_argument("--continue-closeups", action="store_true",
-                    help="같은 사람 연속 클로즈업을 앞 컷에서 잇기(Next-Scene)도 쓴다. 기본은 배치 고정만: 잇기는 2026-10-20 시험에서 성공(D+18 p015)과 "
-                         "실패(이어 쓰면 거친 결 p017, 얼굴 얼룩 외출 p356)가 섞였다")
+                    help="같은 사람 연속 클로즈업을 앞 컷에서 잇기(Next-Scene)도 쓴다. 기본은 배치 고정만: 잇기는 시험에서 성공과 실패(거친 결·얼굴 얼룩)가 섞였다")
     args = ap.parse_args()
     global NO_LORA
     NO_LORA = args.no_lora

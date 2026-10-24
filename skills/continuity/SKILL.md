@@ -22,7 +22,7 @@ description: 같은 인물·같은 장소로 컷을 이어 그린다(컨티뉴�
 
 ## agent platform 에서
 도구: `webtoon_panel_one_character`(장소 + 인물 1명), `webtoon_panel_two_characters`(장소 + 인물 2명), `image_free`(참고 그림 없이). 모두 agent platform 이미지 생성 카탈로그의 ComfyUI 워크플로우다.
-참고 그림 이름은 `studio_<작품>_<인물 id>.png`, 장소는 `studio_<작품>_loc_<장소>.png`(작품: dplus18 = D+18, mudae = 무대 뒤). 도구의 허용값 목록에서 정확히 고른다(예: 밤거리 = studio_dplus18_loc_night_street.png). 맞는 장소가 없으면 사용자에게 알린다.
+참고 그림 이름은 `studio_<작품>_<인물 id>.png`, 장소는 `studio_<작품>_loc_<장소>.png`(작품 부분은 도구의 허용값 목록에 나온 그대로). 도구의 허용값 목록에서 정확히 고른다(예: 밤거리 = studio_<작품>_loc_night_street.png). 맞는 장소가 없으면 사용자에게 알린다.
 프롬프트는 영어로: 샷, 무엇이 일어나는지, 연기(눈썹·눈·입·몸짓), 옷, 카메라. 장소는 `<image1>`, 인물은 "the person in <image2>"(두 명이면 `<image3>` 도). 인원은 "exactly 1 person" 또는 "exactly 2 people"로 못 박는다.
 크기: 세로 컷은 기본(1184x1760), 가로 컷은 width 1664 · height 1248.
 그린 뒤 결과 그림을 보고 인원·좌우·시선·표정이 설명과 다르면 seed 를 바꿔 그 컷만 다시 그린다(한 컷에 두 번까지). 한 번의 답에서 컷 6장 안팎까지 그리고, 남으면 "이어서 그릴까요?"로 끝낸다.

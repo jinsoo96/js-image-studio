@@ -6,6 +6,7 @@
 
 작품마다: read_doc · find(폴더 이름·작품 제목) · 회차마다 list_panels(맨 앞 총계 줄) · 앞 컷 셋 panel_info · panel_versions,
 사람이 부르는 이름(작품 제목 + "1화", 판이 있으면 "1화 v2")으로 list_panels. 작품 이름은 박지 않고 series.json·README 제목에서 읽는다.
+끝에 tools/hardcode_scan.py 로 도구 코드·도구 설명에 특정 작품 이름이 박혔는지도 본다(박혔으면 실패).
 """
 import argparse
 import json
@@ -100,6 +101,12 @@ def main():
             if v:
                 t("list_panels", series=title, episode="1화 " + v.split("_")[1])
         print(f"{sd.name}: 회차 {len(eps)}", flush=True)
+    # 도구 코드·모델이 읽는 설명에 특정 작품 이름이 박혔는지(tools/hardcode_scan.py, 같은 공짜 점검)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import hardcode_scan
+    for path, n, sname, what, t, kind in hardcode_scan.scan():
+        if kind in ("코드", "모델 글"):
+            fails.append(f"작품 이름이 박힘 {path}:{n} [{kind}] {sname} {what} {t!r}")
     print(f"\n도구 호출 {calls}번, 오류 {len(fails)}")
     for f in fails:
         print("  실패:", f)
