@@ -73,6 +73,7 @@ def lora_for(series, chars, model=None, edit=False) -> list:
 
 NO_LORA = False  # --no-lora(같은 컷을 LoRA 없이 견줘 볼 때)
 NO_OFF_FRAME = False  # --no-off-frame-note(화면 밖 인물 안내 없이 견줘 볼 때)
+DROP_OFF_FRAME_SPACE = False  # --drop-off-frame-space(배치가 컷 밖 인물을 부르면 배치 문장을 뺀다: 견줘 보기, 효과를 보고 기본으로 올린다)
 
 # 클로즈업의 장소 참고 그림 문장. 예전 문장("배경 색·조명만, 흐린 작은 부분만, 방 전체를 그리지 말 것")은 배경을 빈 베이지 벽으로 비웠다
 # (2026-10-21 D+18 정본과 견줌: 정본 클로즈업은 뒤에 흐린 밤 사무실·술집 불빛이 꽉 찬다)
@@ -486,7 +487,9 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     action = p["action"]
     # 장면 전체 배치(SPACE)는 넓은 컷용. 클로즈업에 두면 그 방 배치를 배경에 통째로 그려 인물이 또 나왔고(p079),
     # 어깨 너머 숏(camera)에 두면 앞사람 뒷모습과 배치 속 그 사람이 따로 그려져 두 번 나왔다(p075 재민). 카메라 칸에 위치·시선이 다 있다
-    if close or p.get("camera"):
+    # 배치가 이 컷에 없는 사람을 부르면 그 사람을 그려 넣는 것은 클로즈업과 같은 까닭이다(안내 한 줄로는 약했다, 2026-10-25 A/B).
+    # 좌우는 컷 글 본문에도 있다(컷 설명 규칙). 시험 스위치로 먼저 견준다
+    if close or p.get("camera") or (DROP_OFF_FRAME_SPACE and off_frame_note(action, chars, NAMES)):
         action = re.sub(r"\s*SPACE \(identical in every panel of this scene\):.*$", "", action, flags=re.S)
     action += "" if NO_OFF_FRAME else off_frame_note(action, chars, NAMES)
     # 학습한 LoRA 가 있는 인물은 이름 옆에 그 trigger 를 붙인다(학습 캡션 맨 앞 낱말, lora.build_data)
@@ -603,10 +606,12 @@ def main():
     ap.add_argument("--continue-closeups", action="store_true",
                     help="같은 사람 연속 클로즈업을 앞 컷에서 잇기(Next-Scene)도 쓴다. 기본은 배치 고정만: 잇기는 시험에서 성공과 실패(거친 결·얼굴 얼룩)가 섞였다")
     ap.add_argument("--no-off-frame-note", action="store_true", help="장면 배치의 '화면 밖 인물' 안내를 이번엔 붙이지 않는다(견줘 보기)")
+    ap.add_argument("--drop-off-frame-space", action="store_true", help="장면 배치가 이 컷에 없는 인물을 부르면 배치 문장을 뺀다(견줘 보기)")
     args = ap.parse_args()
-    global NO_LORA, NO_OFF_FRAME
+    global NO_LORA, NO_OFF_FRAME, DROP_OFF_FRAME_SPACE
     NO_LORA = args.no_lora
     NO_OFF_FRAME = args.no_off_frame_note
+    DROP_OFF_FRAME_SPACE = args.drop_off_frame_space
     forced = (args.model or "").strip().lower() or None  # 이번 작업에 지정한 판. 없으면 컷마다 router 가 고른다
     series = Path(args.series_dir)
     panels = json.loads(Path(args.panels_json).read_text(encoding="utf-8"))
