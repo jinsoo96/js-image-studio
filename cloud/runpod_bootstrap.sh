@@ -7,8 +7,10 @@
 #   PyPI·GitHub 가 느린 날 pip 설치가 23~30분 걸리거나 멈춰서(2026-10-07) 설치 단계를 없앴다.
 # - 그냥 pytorch 이미지: /workspace 에 ComfyUI(COMFY_REF)를 받고 venv 에 의존성을 깐다(예전 방식).
 # 체크포인트는 HuggingFace 에서 여러 연결로 나눠 받는다(파이썬 표준 라이브러리만).
-# 넘겨받는 env: CKPT_URL, CKPT_NAME, IDLE_MIN(분), MAX_HOURS(시간), ON_IDLE(stop|terminate), COMFY_REF, CUSTOM_NODES, EXTRA_MODELS.
-# RunPod 가 RUNPOD_POD_ID·RUNPOD_API_KEY 를 넣어 준다.
+# 넘겨받는 env: CKPT_URL, CKPT_NAME, IDLE_MIN(분), MAX_HOURS(시간), ON_IDLE(stop|terminate), COMFY_REF, CUSTOM_NODES, EXTRA_MODELS,
+# COMFY_ARGS(서버마다 ComfyUI 에 더 붙일 인자).
+# RunPod 가 RUNPOD_POD_ID·RUNPOD_API_KEY 를 넣어 준다. vast.ai 는 tools/vast_cloud.py 가 이 파일을 SSH 로 올려 돌리고,
+# vast 가 넣는 CONTAINER_ID·CONTAINER_API_KEY(인스턴스 전용 키)로 스스로 멈춘다.
 set -u
 mkdir -p /workspace/logs && cd /workspace
 exec > >(tee -a /workspace/logs/bootstrap.log) 2>&1
@@ -116,6 +118,20 @@ def llm_busy():
     return run > 0 or moved
 
 
+def self_stop():
+    """GPU 과금을 끝낸다(action: stop 은 멈춤, terminate 는 지움). vast.ai 면 인스턴스 전용 키로, 아니면 RunPod REST 로."""
+    vid, vkey = os.environ.get("CONTAINER_ID", ""), os.environ.get("CONTAINER_API_KEY", "")
+    if vid and vkey:
+        req = urllib.request.Request(f"https://console.vast.ai/api/v0/instances/{vid}/", method="PUT" if action == "stop" else "DELETE",
+                                     data=json.dumps({"state": "stopped"}).encode() if action == "stop" else None,
+                                     headers={"Authorization": f"Bearer {vkey}", "Content-Type": "application/json", "User-Agent": "webtoon-studio/1.0"})
+    else:
+        req = urllib.request.Request(f"https://rest.runpod.io/v1/pods/{pod}" + ("/stop" if action == "stop" else ""),
+                                     method="POST" if action == "stop" else "DELETE",
+                                     headers={"Authorization": f"Bearer {key}", "User-Agent": "webtoon-studio/1.0"})
+    urllib.request.urlopen(req, timeout=30)
+
+
 while True:
     time.sleep(60)
     try:
@@ -144,14 +160,12 @@ while True:
     age = (time.time() - start) / 60
     if idle >= idle_min or age >= max_min:
         print(f"[watchdog] idle={idle}m age={age:.0f}m -> {action} self", flush=True)
-        url = f"https://rest.runpod.io/v1/pods/{pod}" + ("/stop" if action == "stop" else "")
-        req = urllib.request.Request(url, method="POST" if action == "stop" else "DELETE",
-                                     headers={"Authorization": f"Bearer {key}", "User-Agent": "webtoon-studio/1.0"})
         try:
-            urllib.request.urlopen(req, timeout=30)
+            self_stop()
         except Exception as e:
             print(f"[watchdog] REST failed: {e}", flush=True)
-            subprocess.run(["runpodctl", "stop" if action == "stop" else "remove", "pod", pod])
+            if pod:
+                subprocess.run(["runpodctl", "stop" if action == "stop" else "remove", "pod", pod])
         time.sleep(120)
 PY
 $SYSPY /workspace/watchdog.py &
@@ -303,4 +317,5 @@ if [ "${MODE:-comfy}" = "agent" ]; then
   exec sleep infinity
 fi
 # 같은 GPU 를 vLLM(48GB 의 절반)과 나눠 쓴다: 1GB 를 남겨 두고 모자라면 내려 놓게(2026-10-23 L40S 에서 손님 많은 컷 편집 중 멈춤)
-exec $PY main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --reserve-vram 1
+# COMFY_ARGS: vast 는 터널로만 붙어 '--listen 127.0.0.1'(뒤에 온 값이 이긴다), GPU 가 둘이면 '--cuda-device 1' 로 그림은 둘째 장(첫째 장은 LLM)
+exec $PY main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --reserve-vram 1 ${COMFY_ARGS:-}

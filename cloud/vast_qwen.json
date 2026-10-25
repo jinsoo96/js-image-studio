@@ -1,0 +1,38 @@
+{
+  "_why": "2026-10-25 사용자 'vast 개인 계정, GPU 두 장(하나는 Qwen UC, 하나는 그림+검수)'. 공개 목록(2026-10-25)에서 5090 두 장이 시간당 $1.19~1.45: 지금까지 쓴 RunPod 보안 클라우드 RTX PRO 6000($2.49)의 약 절반. 설치 내용은 stack_from(runpod_qwen)의 이미지·ComfyUI·UC 모델·우리 노드·패치·LLM 을 그대로 쓰고, 여기엔 어디서 빌릴지만 적는다. 검수는 그림을 보는 LLM(27B)이 하므로 LLM 장(0)에 두고 그림은 1번 장(gpu_split).",
+  "stack_from": "runpod_qwen",
+  "search": {
+    "gpu_name": "RTX 5090",
+    "num_gpus": 2,
+    "verified": true,
+    "min_cuda": 12.8,
+    "min_reliability": 0.98,
+    "min_inet_down_mbps": 500,
+    "max_usd_per_hr": 1.8,
+    "max_inet_down_usd_per_gb": 0.01,
+    "avoid_countries": ["CN"],
+    "_why": "CUDA 12.8 이상: 이미지가 cu128(Blackwell). 중국 호스트는 HuggingFace 내려받기가 막히는 일이 많아 뺀다. 내려받기 요금(GB당)이 붙는 호스트가 있어 첫 설치(setup_download_gb)에 $0.6 넘게 드는 곳은 뺀다."
+  },
+  "disk_gb": 150,
+  "setup_download_gb": 60,
+  "_disk_why": "이미지 약 8GB + ComfyUI 의존성 + 그림 모델·인코더·LoRA 약 23GB + LLM 19.5GB + vLLM 약 5GB = 약 60GB 를 처음 한 번 받는다(추정).",
+  "gpu_split": {"llm": "0", "comfy": "1"},
+  "llm": {
+    "gpu_util": 0.9,
+    "_why": "5090 한 장(32GB)을 LLM 혼자 쓴다: 4비트 27B(19.5GB) + KV 캐시. 같은 장을 ComfyUI 와 나누던 RunPod 의 0.53 을 덮는다(모델·인자는 stack_from 그대로)."
+  },
+  "keep_instance": false,
+  "max_stopped_usd_per_month": 10,
+  "_keep_why": "다 쓰면 지운다(보관비 0, 다음엔 새로 빌려 설치 약 20분·$0.6~0.9). 멈춰 두면 디스크 보관비가 호스트마다 GB당 월 $0.13~0.49 라 150GB 에 월 $20~73(2026-10-25 공개 목록, 5090 두 장 7대): RunPod 와 다를 게 없다. keep_instance 를 켜면 멈춘 동안 보관비가 max_stopped_usd_per_month 를 넘는 기계는 고르지 않는다.",
+  "idle_min": 30,
+  "max_hours": 8,
+  "loading_timeout_min": 20,
+  "resume_timeout_min": 6,
+  "ready_timeout_min": 60,
+  "label_prefix": "webtoon-qwen",
+  "local_ports": {"comfy": 28188, "agent": 28189, "llm": 28000},
+  "_ports_why": "이 PC 에서 터널이 받는 포트. 18000 은 다른 작업의 SSH 터널이 쓰고 있어(2026-10-25) 28xxx 로 둔다. 겹치면 up 이 어느 포트인지 알리고 멈춘다.",
+  "ssh_key": "~/.ssh/vast_webtoon_ed25519",
+  "min_balance_usd": null,
+  "_why_budget": "예산 바닥(잔액이 이 값 이하이면 켜지 않고, 켜진 것도 지킴이가 멈춘다). 비어 있으면 up 이 거절한다. 사용자 '60달러까지만, 더 쓰면 파산': 충전한 뒤 '충전액 − 이번에 허락한 지출'로 채운다."
+}

@@ -636,7 +636,7 @@ def main():
         st = ROOT / "state"
         st.mkdir(exist_ok=True)
         if cmd == "unuse":
-            for f in ("comfy_url.txt", "vlm_url.txt"):
+            for f in ("comfy_url.txt", "vlm_url.txt", "gpu_cloud.json"):
                 (st / f).unlink(missing_ok=True)
             print("스위치를 지웠다(도구가 다시 COMFY_URL·vast·사내 게이트웨이를 쓴다)")
         else:
@@ -648,6 +648,8 @@ def main():
                 key = (get_pod(pod_id) or {}).get("env", {}).get("AGENT_TOKEN", "")
                 (st / "vlm_url.txt").write_text(f"https://{pod_id}-8000.proxy.runpod.net/v1|{llm['name']}|{key}\n", encoding="utf-8")
                 print(f"LLM: https://{pod_id}-8000.proxy.runpod.net/v1 ({llm['name']}, 키 {len(key)}자)")
+            # 켜기 버튼(tools/gpu_wake.py)이 마지막으로 쓴 서버를 깨우게 한다(vast_cloud.py use 도 같은 파일을 적는다)
+            (st / "gpu_cloud.json").write_text(json.dumps({"tool": "tools/runpod_cloud.py", "profile": PROFILE}) + "\n", encoding="utf-8")
     elif cmd == "stop":
         pods = [p for p in our_pods() if p.get("desiredStatus") == "RUNNING"]
         for p in pods:

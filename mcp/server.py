@@ -337,8 +337,9 @@ def _start_job(kind: str, ep: Path, steps: list, note: str = "") -> str:
         why = _gpu_down()
         if why:
             raise GpuDown(json.dumps({"error": "gpu_server_down", "server": _gpu_host(), "detail": why,
-                                      "how": "그리기 서버(ComfyUI)가 꺼졌거나 주소가 바뀌었다. 사용자에게 알린다: 파드를 깨우거나(스튜디오 설정 → MCP 의 "
-                                             "webtoon-studio 'Restart (wake)', 또는 tools/runpod_wake.py) 다른 서버 주소를 state/comfy_url.txt 에 적은 뒤 다시"},
+                                      "how": "그리기 서버(ComfyUI)가 꺼졌거나 주소가 바뀌었다. 사용자에게 알린다: GPU 서버를 깨우거나(스튜디오 설정 → MCP 의 "
+                                             "webtoon-studio 'Restart (wake)', 또는 tools/gpu_wake.py: 마지막으로 쓴 서버를 깨움) "
+                                             "다른 서버 주소를 state/comfy_url.txt 에 적은 뒤 다시"},
                                      ensure_ascii=False))
     fp = _fingerprint(kind, ep, steps)
     since = time.time() - REPEAT_MIN * 60

@@ -7,6 +7,8 @@
 # --max-num-seqs: 기본 1024 면 Qwen3.8(선형 어텐션 섞임)의 Mamba 캐시 칸(gpu_util 0.4 에서 130)을 넘어 기동 실패
 set -e
 pkill -f 'vllm serve' 2>/dev/null || true  # 다시 부르면 띄워 둔 것을 내리고 새로
+# GPU 가 둘 이상인 서버(vast 5090 두 장 등)는 LLM 을 LLM_CUDA_DEVICES 장에만 둔다. 그땐 ComfyUI 와 GPU 를 나누지 않으니 아래 큐 기다리기·모델 내리기도 건너뛴다
+if [ -n "${LLM_CUDA_DEVICES:-}" ]; then export CUDA_VISIBLE_DEVICES="$LLM_CUDA_DEVICES"; fi
 V=/workspace/vllm-venv
 export HF_HOME=/workspace/hf HF_HUB_ENABLE_HF_TRANSFER=1
 # L40S(Ada) 에선 FlashInfer 샘플링 커널을 그 자리에서 빌드하려다 ninja 가 PATH 에 없어 기동 실패(2026-10-23, Blackwell 파드에선 안 거침).
@@ -22,14 +24,16 @@ echo "[llm] download $LLM_REPO $(date -u)"
 "$V/bin/python" -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['LLM_REPO'])"
 # ComfyUI 가 GPU 에 모델을 올려 두면 vLLM 이 KV 캐시 자리를 못 얻는다(2026-10-22 파드 재시작 직후 "No available memory for the cache blocks").
 # ComfyUI 큐가 빌 때까지 기다렸다가 모델을 내리게 하고 띄운다(최대 1시간)
-for i in $(seq 1 120); do
-  q=$(curl -s localhost:8188/queue | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d['queue_running'])+len(d['queue_pending']))" 2>/dev/null || echo 0)
-  [ "$q" = "0" ] && break
-  echo "[llm] ComfyUI 큐 $q 개, 기다림 $(date -u)"
-  sleep 30
-done
-curl -s -X POST localhost:8188/free -H 'Content-Type: application/json' -d '{"unload_models": true, "free_memory": true}' >/dev/null || true
-sleep 10
+if [ -z "${LLM_CUDA_DEVICES:-}" ]; then
+  for i in $(seq 1 120); do
+    q=$(curl -s localhost:8188/queue | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d['queue_running'])+len(d['queue_pending']))" 2>/dev/null || echo 0)
+    [ "$q" = "0" ] && break
+    echo "[llm] ComfyUI 큐 $q 개, 기다림 $(date -u)"
+    sleep 30
+  done
+  curl -s -X POST localhost:8188/free -H 'Content-Type: application/json' -d '{"unload_models": true, "free_memory": true}' >/dev/null || true
+  sleep 10
+fi
 echo "[llm] serve $LLM_NAME $(date -u)"
 # 생각(thinking)은 기본으로 끈다: 검수·대화는 짧은 답이 필요하고, 켜려면 요청에 chat_template_kwargs.enable_thinking=true
 exec "$V/bin/vllm" serve "$LLM_REPO" --served-model-name "$LLM_NAME" --host 0.0.0.0 --port 8000 --api-key "$AGENT_TOKEN" \
