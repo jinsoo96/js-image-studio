@@ -351,12 +351,16 @@ def off_frame_note(action: str, chars: list, NAMES: dict) -> str:
     배치는 장면 전체 사람을 부르는데 컷 글은 'Exactly 2 people' 이라, 셋째 사람을 그려 넣거나(남는 사람) 그 자리가 비어 보였다:
     개항 v3·v4 에서 배치에 컷 밖 인물이 나오는 컷의 '인원' 걸림 41~47%, 아닌 컷 11%(외출은 같은 컷들이 '빈자리').
     다섯 작품의 넓은·중간 컷 263 중 134 가 이 꼴이었다(2026-10-24). 이름은 그 작품 인물 목록(NAMES)에서 찾는다.
-    같은 이름의 다른 나이 판(17세·46세)은 컷 안 인물로 본다."""
+    같은 이름의 다른 나이 판(17세·46세)은 컷 안 인물로 본다.
+    효과는 작았다(2026-10-25 개항 v4 7컷 x 시드 2, 같은 시드로 안내 없음/있음): 1명 컷 하나에서만 남는 사람이 사라졌고, 2명 컷은 배치대로
+    셋째 사람을 그대로 그렸다. 판정 모델의 남는 사람 14/14 → 12/14. 배치 문장 자체가 그 사람 자리를 말하는 한 끝에 붙인 한 줄은 약하다."""
     m = re.search(r"SPACE \(identical in every panel of this scene\):(.*)$", action, re.S)
     if not m or not chars:
         return ""
     short = {c: re.sub(r"\s*\(.*?\)", "", NAMES[c]).split()[-1] for c in NAMES}
     inside = [short[c] for c in chars if c in short]
+    # chars 를 기준으로 본다. 본문이 chars 밖 인물을 부르는 컷은 '뒤에 앉아 있다'(보임, 개항 p027 재헌)도 '화면 밖에 누워 있다'(안 보임, p023 금수)도
+    # 있어 글자로는 못 가른다: 보이는 사람이면 컷 설명의 chars 에 넣는 게 맞다
     off = sorted({s for c, s in short.items() if c not in chars and s not in inside and re.search(rf"\b{re.escape(s)}\b", m.group(1))})
     if not off or not inside:
         return ""
