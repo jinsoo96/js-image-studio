@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MS = os.environ.get("MS_EXE", r"D:\missile-studio\.venv\Scripts\ms.exe")
 # 끝났다고 단정하는 말끝만('"다 됐어?" 하시면' 처럼 사용자 말을 옮긴 것은 세지 않는다)
-DONE_WORDS = re.compile(r"(다 됐(습니다|어요|다)|완료(했|됐|되었)(습니다|어요)|끝났(습니다|어요)|다 나왔(습니다|어요)|다 그렸(습니다|어요))")
+DONE_WORDS = re.compile(r"(다 됐(습니다|어요|다\b)|완료(했|됐|되었)(습니다|어요)|끝났(습니다|어요)|다 나왔(습니다|어요)|다 그렸(습니다|어요))")
 
 
 def ask(text: str, provider: str = "", conversation: str = "", timeout: int = 1500) -> dict:
@@ -125,8 +125,15 @@ def set_aside(sc: dict):
     import shutil
     for src_rel, dst_rel in (sc.get("setup") or {}).get("copy", []):
         src, dst = (ROOT / src_rel).resolve(), (ROOT / dst_rel).resolve()
-        if (ROOT / "series").resolve() not in dst.parents or dst.exists():
-            raise SystemExit(f"copy 는 series/ 안의 없는 곳으로만(먼저 set_aside): {dst_rel}")
+        if (ROOT / "series").resolve() not in dst.parents:
+            raise SystemExit(f"copy 는 series/ 안으로만: {dst_rel}")
+        # 시험용 자리에 이미 무언가 있으면(지난 시험·다른 A/B 가 남긴 판) 지우지 않고 _tmp 로 옮긴 뒤 새로 뜬다.
+        # 예전엔 여기서 멈춰, 같은 v9 에 A/B 결과가 있던 날 GPU 시나리오가 시작도 못 했다(2026-10-26)
+        if dst.exists():
+            moved = ROOT / "series" / "_tmp" / f"studio_test_{stamp}" / dst.relative_to((ROOT / "series").resolve())
+            moved.parent.mkdir(parents=True, exist_ok=True)
+            dst.rename(moved)
+            print(f"  옮겨 둠 {dst_rel} → {moved.relative_to(ROOT)}", flush=True)
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_old", "_rejected", "_stage1", "*.log"))
         print(f"  떠 둠 {src_rel} → {dst_rel}", flush=True)
 
