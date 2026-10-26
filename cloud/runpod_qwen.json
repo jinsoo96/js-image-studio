@@ -100,7 +100,17 @@
     "vllm_version": "0.31.0",
     "gpu_util": 0.53,
     "max_len": 32768,
-    "args": "--trust-remote-code"
+    "args": "--trust-remote-code --reasoning-parser qwen3 --default-chat-template-kwargs {\"enable_thinking\":false}",
+    "_args_why": "모델마다 다른 vllm 인자는 여기에만(runpod_llm.sh 에 박혀 있던 Qwen 전용 생각 끄기·reasoning-parser 를 2026-10-26 옮김: 다른 모델로 바꾸면 그 파서가 답을 삼키거나 기동이 깨진다). JSON 인자는 띄어쓰기 없이(셸이 단어로 나눈다)."
+  },
+  "llm_options": {
+    "_why": "같은 서버에서 LLM 만 바꿔 띄우는 후보(vast_cloud.py llm --model <이름>, 되돌리기 --model default). 항목은 llm 위에 덮인다. 도구·검수·미사일 스튜디오는 스위치 파일(state/vlm_url.txt)의 모델 이름을 따라가므로 코드는 그대로다. 그림을 보는(검수) 모델·무검열만 넣는다.",
+    "gemma4-12b-uc": {
+      "_why": "2026-10-26 LLM 교체 시험: 다른 계열(Gemma 4)·무검열(huihui abliterated)·그림 봄·4비트(compressed-tensors) 8.3GB. 젬마 스튜디오가 Gemma 계열이라 같은 계열 비교도 된다. 생각 끄기 인자는 Qwen 전용이라 뺀다.",
+      "repo": "nicklas373/Huihui-gemma-4-12B-it-abliterated-AWQ",
+      "name": "gemma4-12b-uc",
+      "args": ""
+    }
   },
   "_models_why": "2026-10-22 사용자 '올 UC 로, 성능 별로인 건 빼자': tools/model_bench.py 로 같은 컷 4장·같은 시드 따라 그리기 시험(얼굴 CCIP 거리 + 옷·장소·인원 채점, exports/2026-10-22/비교/모델시험/점수.md) 뒤 남긴 것만. Qwen: UC fp8(기본) + 무검열 인코더(abliterated) + Noct-Q 실사 V4(대안). 지운 것: 공식 인코더(검열), UC int8(fp8 과 같은 수준), NVFP4·Noct-Q 애니(따라 그리기 떨어짐), Noct-Q V3(V4 가 있음). MOSS(사용자: UC LoRA 판만): SFT bf16 + 무검열 LoRA + DMD 8스텝 + 인코더·VAE small. Anima: 글만으로는 전부 못 따라옴 → 기본판 + 원본 터보 LoRA 만 남기고 참고 그림 방식(IP-Adapter·FastTrain·Cosmos-Reference) 시험용.",
   "nvidia_disable_require": true,

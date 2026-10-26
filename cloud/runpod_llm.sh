@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 파드 안에서 Qwen 3.8 무검열(그림도 보는 LLM)을 vLLM 으로 띄운다(OpenAI 호환, 포트 8000). ComfyUI 와 같은 GPU 를 나눠 쓴다.
+# 파드 안에서 그림도 보는 무검열 LLM(설정 llm, 기본 Qwen 3.8 · llm_options 로 바꿈)을 vLLM 으로 띄운다(OpenAI 호환, 포트 8000). ComfyUI 와 같은 GPU 를 나눠 쓴다.
 # tools/runpod_cloud.py llm 이 파드 에이전트로 이 스크립트를 돌린다. 넘겨받는 env: LLM_REPO, LLM_NAME, VLLM_VERSION, GPU_UTIL, MAX_LEN,
 # LLM_ARGS(모델마다 더 붙일 vllm 인자, 설정 llm.args. 예: 4비트 GPTQ 판은 --trust-remote-code).
 # 프록시 주소는 누구나 닿으니 키를 건다: 파드 에이전트 토큰(AGENT_TOKEN, 파드 env). 로컬은 runpod_cloud.py use 가 같은 값을 state/vlm_url.txt 에 적는다.
@@ -35,8 +35,7 @@ if [ -z "${LLM_CUDA_DEVICES:-}" ]; then
   sleep 10
 fi
 echo "[llm] serve $LLM_NAME $(date -u)"
-# 생각(thinking)은 기본으로 끈다: 검수·대화는 짧은 답이 필요하고, 켜려면 요청에 chat_template_kwargs.enable_thinking=true
+# 모델마다 다른 인자(Qwen 의 생각 끄기·reasoning-parser 등)는 설정 llm.args 로만 받는다: 여기 박아 두면 다른 모델로 바꿀 때 기동이 깨지거나 답이 삼켜진다
 exec "$V/bin/vllm" serve "$LLM_REPO" --served-model-name "$LLM_NAME" --host 0.0.0.0 --port 8000 --api-key "$AGENT_TOKEN" \
   --gpu-memory-utilization "$GPU_UTIL" --max-model-len "$MAX_LEN" --limit-mm-per-prompt '{"image": 4}' \
-  --max-num-seqs 16 \
-  --reasoning-parser qwen3 --default-chat-template-kwargs '{"enable_thinking": false}' $LLM_ARGS
+  --max-num-seqs 16 $LLM_ARGS

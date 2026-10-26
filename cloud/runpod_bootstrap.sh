@@ -135,26 +135,22 @@ def self_stop():
 while True:
     time.sleep(60)
     try:
-        if agent_mode:  # 학습 등 에이전트 작업: 돌고 있는 작업이 없으면 idle
-            jobs = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/jobs", timeout=5).read())
-            act = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/activity", timeout=5).read())
-            busy = any(j["running"] for j in jobs.values()) or act.get("ago", 1e9) < 120  # 올리기·받기 중도 일하는 중
-            idle = idle + 1 if not busy else 0
-        else:
+        # 에이전트 작업(받기·학습 등)과, 아직 응답하기 전인 LLM 작업(vLLM 설치·모델 내려받기·올리기)도 일하는 중으로 센다.
+        # 놀면 멈춤을 15분으로 줄이자 4비트 LLM(17.6GB)을 받는 도중에 파드가 멈췄다(2026-10-23 L40S). 다 뜬 LLM 은 llm_busy 가 본다.
+        # 'llm' 작업은 vLLM 이 떠 있는 동안 늘 '돌고 있음'이라 그것만으로는 바쁨이 아니다(세면 LLM 전용 상자가 영영 안 꺼진다, 2026-10-26)
+        jobs = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/jobs", timeout=5).read())
+        act = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/activity", timeout=5).read())
+        llm_up = True
+        try:
+            urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=5)
+        except Exception:
+            llm_up = False
+        busy = (any(j["running"] for k, j in jobs.items() if k != "llm") or act.get("ago", 1e9) < 120
+                or ((jobs.get("llm") or {}).get("running") and not llm_up) or llm_busy())
+        if not agent_mode:  # 그림 상자: ComfyUI 큐도 본다(agent 모드엔 ComfyUI 가 없다)
             q = json.loads(urllib.request.urlopen("http://127.0.0.1:8188/queue", timeout=5).read())
-            # 에이전트 작업(받기·학습 등)과, 아직 응답하기 전인 LLM 작업(vLLM 설치·모델 내려받기·올리기)도 일하는 중으로 센다.
-            # 놀면 멈춤을 15분으로 줄이자 4비트 LLM(17.6GB)을 받는 도중에 파드가 멈췄다(2026-10-23 L40S). 다 뜬 LLM 은 llm_busy 가 본다
-            jobs = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/jobs", timeout=5).read())
-            act = json.loads(urllib.request.urlopen("http://127.0.0.1:8189/activity", timeout=5).read())
-            llm_up = True
-            try:
-                urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=5)
-            except Exception:
-                llm_up = False
-            agent_busy = (any(j["running"] for k, j in jobs.items() if k != "llm") or act.get("ago", 1e9) < 120
-                          or ((jobs.get("llm") or {}).get("running") and not llm_up))
-            busy = q.get("queue_running") or q.get("queue_pending") or llm_busy() or agent_busy
-            idle = idle + 1 if not busy else 0
+            busy = busy or q.get("queue_running") or q.get("queue_pending")
+        idle = idle + 1 if not busy else 0
     except Exception:
         idle = 0
     age = (time.time() - start) / 60

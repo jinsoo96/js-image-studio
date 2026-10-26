@@ -1,0 +1,46 @@
+{
+  "_why": "2026-10-25 사용자 '인스턴스 아껴서'. 4비트 27B LLM(19.5GB, gpu_util 0.53 = 약 23.5GB)과 그림(약 22GB)은 48GB 한 장에 같이 올라간다(RunPod L40S 에서 돌린 구성 그대로, llm 은 stack_from 값을 덮지 않는다). 공개 목록(2026-10-25 22시) 시간당 RTX 6000 Ada $0.64 · L40S $0.57 vs 5090 두 장 $1.01: 약 37% 싸다. 그림은 5090 보다 느리다. 두 장 구성은 vast_qwen.",
+  "stack_from": "runpod_qwen",
+  "search": {
+    "gpu_name": [
+      "RTX 6000Ada",
+      "L40S"
+    ],
+    "num_gpus": 1,
+    "verified": true,
+    "min_cuda": 12.8,
+    "min_reliability": 0.98,
+    "min_inet_down_mbps": 500,
+    "max_usd_per_hr": 0.9,
+    "max_inet_down_usd_per_gb": 0.01,
+    "avoid_countries": [
+      "CN"
+    ],
+    "_why": "Ada(48GB)만: FP8 그림 모델을 그대로 돌리고 RunPod L40S 와 같은 세대라 설정이 검증돼 있다. A6000·A40(Ampere)은 더 싸지만 FP8 을 못 써 느리고 목록 성능 점수가 낮아 뺐다. 나머지 조건은 vast_qwen 과 같다.",
+    "interruptible": false,
+    "bid_margin": 1.15,
+    "_why_interruptible": "끊길 수 있는 판(interruptible, 입찰). 2026-10-25 22:55 공개 목록: 최저 입찰가만 보면 L40S $0.27·6000 Ada $0.33 이지만 조건(신뢰도·내려받기 속도·150GB)에 맞는 기계는 디스크 포함 $0.49~0.58 로 보통 값($0.56)과 거의 같아 끔. 더 높게 부른 사람이 오면 멈춰 설치·작업 시간을 잃는다. 켜면 최저 입찰가에 bid_margin(15%)을 얹어 산다."
+  },
+  "disk_gb": 150,
+  "setup_download_gb": 60,
+  "_disk_why": "vast_qwen 과 같다(처음 한 번 약 60GB 받기).",
+  "keep_instance": false,
+  "max_stopped_usd_per_month": 10,
+  "_keep_why": "다 쓰면 지운다(보관비 0). 이유는 vast_qwen 과 같다.",
+  "idle_min": 20,
+  "max_hours": 2,
+  "loading_timeout_min": 20,
+  "resume_timeout_min": 6,
+  "ready_timeout_min": 60,
+  "label_prefix": "webtoon-48g",
+  "local_ports": {
+    "comfy": 28188,
+    "agent": 28189,
+    "llm": 28000
+  },
+  "_ports_why": "vast_qwen 과 같은 포트(한 번에 한 서버만 켠다. 겹치면 up 이 알리고 멈춘다).",
+  "ssh_key": "~/.ssh/vast_webtoon_ed25519",
+  "min_balance_usd": 18.6,
+  "_why_budget": "2026-10-25 개인 계정 충전 $25(자동 충전 없음). 사용자 '$8.5 도 많다' → 이번 시험 전체 상한 $3(25 − 3.1 = 21.9, 처음 두 번 실패에 쓴 약 $0.1 포함). 계획은 약 1.5시간·$1~1.5(서버 교체 비교·배치 A/B·젬마 UC 비교·미사일 스튜디오 시험), 끝나면 바로 지운다. 2026-10-26: 모든 vast 설정이 같은 계정이라 바닥을 18.6 으로 맞춤(vast_img·vast_llm·vast_qwen 과 같이).",
+  "_idle_why": "사용자 '많이 쓴다' → 20분 놀면 스스로 지우고(keep_instance false), 켜진 지 2시간이면 무조건 지운다(부트스트랩 watchdog). 10분으로 했더니 터널이 옛 인스턴스를 가리켜 아무 일도 못 시키는 사이 새 인스턴스가 지워졌다(2026-10-25): 단계 사이 여유로 20분."
+}

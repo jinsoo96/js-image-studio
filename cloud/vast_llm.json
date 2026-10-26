@@ -1,0 +1,43 @@
+{
+  "_why": "2026-10-26 사용자 '인스턴스 두 개: 하나는 Qwen 3.8 UC(LLM), 하나는 이미지와 나머지 UC'. 이 설정은 LLM 상자(roles llm): ComfyUI·그림 모델 없이(부트스트랩 MODE=agent) vLLM 만 올린다. 글(콘티·대사)·그림 검수(그림을 보는 판정)가 이 모델을 쓴다. 그림 상자는 vast_img. 모델·vLLM 판은 stack_from(runpod_qwen)의 llm, 바꿔 끼우기는 llm_options(`llm --model <이름>`).",
+  "stack_from": "runpod_qwen",
+  "roles": ["llm"],
+  "search": {
+    "gpu_name": ["RTX A6000", "A40", "L40S", "RTX 6000Ada", "RTX 5090"],
+    "num_gpus": 1,
+    "verified": true,
+    "min_cuda": 12.8,
+    "min_reliability": 0.98,
+    "min_inet_down_mbps": 500,
+    "max_usd_per_hr": 0.9,
+    "max_inet_down_usd_per_gb": 0.01,
+    "avoid_countries": ["CN"],
+    "interruptible": false,
+    "bid_margin": 1.15,
+    "_why": "4비트 GPTQ 27B(19.5GB)는 FP8 이 필요 없어 48GB 암페어(A6000·A40)도 된다: 2026-10-26 11시 시세 A6000 $0.42(미국, CUDA 12.8, 내려받기 요금 0) · A40 $0.57 · L40S $0.57~0.63 · 5090 $0.65. 24GB(3090 $0.2)는 32k 문맥 캐시가 모자라 빼 둔다(48GB 의 절반 0.5 로도 0.1GB 모자랐다, runpod_qwen llm._why). CUDA 12.8 은 이미지(cu128) 때문."
+  },
+  "disk_gb": 60,
+  "setup_download_gb": 30,
+  "_disk_why": "이미지 8GB + vLLM venv 약 5GB + 27B 4비트 19.5GB(+ 교체 후보 Gemma 4 12B 8.3GB).",
+  "llm": {
+    "gpu_util": 0.9,
+    "_why": "한 장을 LLM 혼자 쓴다: 4비트 27B(19.5GB) + KV 캐시. 모델·인자는 stack_from 그대로."
+  },
+  "keep_instance": false,
+  "max_stopped_usd_per_month": 10,
+  "_keep_why": "다 쓰면 지운다(보관비 0). 매번 새로 설치: 상자 뜨기 약 6분 + vLLM 설치·모델 받기 약 12분.",
+  "idle_min": 15,
+  "max_hours": 3,
+  "loading_timeout_min": 20,
+  "loading_stall_min": 10,
+  "resume_timeout_min": 6,
+  "ready_timeout_min": 15,
+  "_ready_why": "agent 모드는 ComfyUI 가 없어 부트스트랩이 '[boot] agent ready' 를 찍으면 끝(1~2분). 그 뒤 vLLM 은 wake 가 따로 40분까지 기다린다.",
+  "label_prefix": "webtoon-llm",
+  "local_ports": {"llm": 28000, "agent": 28289},
+  "_ports_why": "이 PC 에서 터널로 받는 포트. LLM 상자는 vLLM(28000, 스위치 state/vlm_url.txt 가 가리키는 값 그대로)과 설치 로그만. 에이전트 포트는 그림 상자(28189)와 달라야 한다.",
+  "ssh_key": "~/.ssh/vast_webtoon_ed25519",
+  "min_balance_usd": 18.6,
+  "plan_hours": 1.5,
+  "_why_budget": "vast_img 와 같은 계정·같은 바닥(18.6). 두 상자 합쳐 이번 시험 상한 약 $2.5."
+}
