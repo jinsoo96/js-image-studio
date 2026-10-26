@@ -2585,6 +2585,12 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     if cands:  # 승인할 시안: 이 PC 경로와 원격에서 여는 링크(링크는 사용자가 브라우저로 본다)
         out["candidates"] = [{"path": c, "link": _link(c if Path(c).is_absolute() else ROOT / c)} for c in cands]
     links = [x for x in (_link(m.group(1).strip()) for ln in lines for m in [re.match(r"^\s*(?:복사|내보냄)\s+(.+)$", ln)] if m) if x]
+    # 끝난 합성·내보내기·한 화 작업엔 그 회차의 PDF 링크를 바로 준다: 모델이 find("ep001_v9 PDF")·list_files 로 PDF 를 찾아 헤맸다(2026-10-26 합성 시나리오)
+    if out["state"] in ("done", "needs_review") and any(k in str(spec.get("kind") or "") for k in ("compose", "export", "episode")):
+        pdf = ep / "out" / f"{ep.name}.pdf"
+        lk = _link(pdf) if pdf.exists() else None
+        if lk and lk not in links:
+            links.append(lk)
     if links:
         out["links"] = links
     # 끝난 작업만 결과가 있다(시작만 한 작업을 '다 됐다'고 답한 일이 있어 칸으로 알린다, 2026-10-24)

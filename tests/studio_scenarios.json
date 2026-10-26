@@ -414,7 +414,11 @@
    ],
    "max_tool_errors": 2,
    "max_seconds": 300,
-   "answer_near": {"value": "{char_count}", "tol": 4, "_why": "그 회차 컷 설명(chars)에 그 인물이 든 컷 수와 답의 숫자를 대조. ±4 는 대사·행동 글에만 이름이 나오는 컷(find 가 같이 찾음) 몫. 2026-10-26 외출 244(네 판 합) 같은 틀린 답을 잡는다"}
+   "answer_near": {
+    "value": "{char_count}",
+    "tol": 4,
+    "_why": "그 회차 컷 설명(chars)에 그 인물이 든 컷 수와 답의 숫자를 대조. ±4 는 대사·행동 글에만 이름이 나오는 컷(find 가 같이 찾음) 몫. 2026-10-26 외출 244(네 판 합) 같은 틀린 답을 잡는다"
+   }
   },
   "setup": {
    "cleanup": [
@@ -464,5 +468,45 @@
    ]
   },
   "why": "2026-10-24 개항_그림판_바꾸기 를 작품마다(기본 판): 다시 그리기·검수·본편 넣기·편집·합성이 어느 작품에서나 되는지. 원본 회차는 안 건드리고 사본에서"
+ },
+ {
+  "name": "작품별_합성_링크",
+  "each_series": true,
+  "prompt": "{name} {ep_n} {copy_v} 판을 합성해서 PDF 링크 줘. 몇 컷인지도 알려 줘.",
+  "then": [
+   {
+    "say": "다 됐어? 링크랑 컷 수 알려 줘.",
+    "wait_jobs_min": 20
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "compose"
+   ],
+   "max_tool_errors": 2,
+   "max_seconds": 1800,
+   "answer_has": [
+    "http"
+   ],
+   "answer_near": {
+    "value": "{panel_count}",
+    "tol": 2,
+    "_why": "합성이 알리는 'N컷' 과 panels.json 의 컷 수를 대조(±2 는 나눠 그린 부분 컷 몫)"
+   }
+  },
+  "setup": {
+   "copy": [
+    [
+     "series/{series}/episodes/{ep}",
+     "series/{series}/episodes/{copy}"
+    ]
+   ],
+   "cleanup": [
+    "series/{series}/episodes/{copy}",
+    "exports/*/*_{copy_v}*",
+    "exports/_sheets/*{copy}*"
+   ]
+  },
+  "why": "2026-10-26 GPU 없이도 작품마다 도는 경로(합성·PDF·링크·컷 수·끝났다는 말의 정직)를 상한 뒤에 공짜로 되풀이해 시험하려고. 그리기·편집은 작품별_다시그리고_고치고_합성(GPU)."
  }
 ]

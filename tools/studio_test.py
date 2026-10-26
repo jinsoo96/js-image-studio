@@ -166,7 +166,8 @@ def set_aside(sc: dict):
             moved.parent.mkdir(parents=True, exist_ok=True)
             dst.rename(moved)
             print(f"  옮겨 둠 {dst_rel} → {moved.relative_to(ROOT)}", flush=True)
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_old", "_rejected", "_stage1", "*.log"))
+        # 제외 목록은 MCP 의 판 복사와 같게(out·review 도): 옛 out/ep001.pdf 가 사본에 남아 모델이 합성 중에 그 옛 링크를 줬다(2026-10-26 외출 v9)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_old", "_rejected", "out", "review", "_stage1", "*.log"))
         print(f"  떠 둠 {src_rel} → {dst_rel}", flush=True)
 
 
@@ -219,7 +220,10 @@ def series_vars(sd: Path) -> dict | None:
         # name: 사람이 부르는 짧은 이름(괄호 뗌: '개항(開肛)' → 개항, 'D+18 (힉스필드 판)' → D+18). MCP 가 이 이름으로 작품을 찾는지도 시험이 된다
         # char_count: 그 회차에서 그 인물이 든 컷 수(컷 설명 chars 기준, 그린 것·안 그린 것 다). 수치 답을 데이터와 대조할 때 쓴다(checks.answer_near)
         char_count = sum(1 for p in allp if c in (p.get("chars") or []))
-        return {"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
+        # panel_count: 합성(compose)이 "N컷" 으로 알리는 수 = 콘티(storyboard.json)의 컷 수(재사용·합성 컷 포함; panels.json 은 새로 그릴 컷만이라
+        # 무대 뒤 131 vs 133, 외출 278 vs 286 으로 어긋난다). 콘티가 없으면 panels.json 수. 작품별_합성_링크의 답과 대조
+        board = json.loads((ep / "storyboard.json").read_text(encoding="utf-8")) if (ep / "storyboard.json").exists() else {}
+        return {"panel_count": len(board.get("panels") or allp),"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
                 "copy": f"{ep.name}_v{v}", "copy_v": f"v{v}", "p1": p1["id"], "p2": p2["id"], "char": char, "char_id": c, "char_count": char_count}
     return None
 
