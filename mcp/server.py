@@ -2021,6 +2021,8 @@ def lora_train(series: str, character: str, steps: int = 0, rank: int = 0, learn
             if v:
                 cmd += [flag, str(v)]
         steps_list.append({"label": f"{'그림체' if style else '인물'} LoRA 학습({c})", "cmd": cmd})
+    # 학습 결과를 이 PC 보관함(models/loras)으로: 서버 디스크에만 두면 서버를 옮기며 사라진다(2026-10-26 무대 뒤·D+18). 실패해도 학습은 성공
+    steps_list.append({"label": "학습한 LoRA 를 PC 보관함으로", "cmd": [PY, str(ROOT / "tools" / "gpu_loras.py"), "pull"], "allow_fail": True})
     job = _start_job("lora_train", sd, steps_list)
     nxt = f"job_status('{job}', wait=50) 를 되풀이(학습은 오래 걸린다), 끝나면 " + (f"lora_compare('{sd.name}', …) 로 중간 파일을 견줘 고르고 loras(series, character, …)" if chunk else f"loras('{sd.name}')")
     return json.dumps({"job": job, "next": nxt}, ensure_ascii=False)
@@ -2052,7 +2054,10 @@ def restyle(series: str, action: str = "status", episode: str = "", panels: str 
     if action == "train":
         cmd += ["--steps", str(steps)]
     _ensure_idle(sd)
-    job = _start_job("restyle", sd, [{"label": f"Restyle {action}", "cmd": cmd}])
+    steps_list = [{"label": f"Restyle {action}", "cmd": cmd}]
+    if action == "train":  # 학습 결과를 PC 보관함으로(lora_train 과 같은 이유)
+        steps_list.append({"label": "학습한 LoRA 를 PC 보관함으로", "cmd": [PY, str(ROOT / "tools" / "gpu_loras.py"), "pull"], "allow_fail": True})
+    job = _start_job("restyle", sd, steps_list)
     return json.dumps({"job": job, "next": f"job_status('{job}', wait=50)"}, ensure_ascii=False)
 
 

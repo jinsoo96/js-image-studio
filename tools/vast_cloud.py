@@ -6,6 +6,7 @@
     python tools/vast_cloud.py llm       켜 둔 인스턴스에 LLM(설정 llm, vLLM)을 띄운다. GPU 가 둘이면 gpu_split.llm 장에만
     python tools/vast_cloud.py use       모든 도구가 이 서버를 쓰게 스위치 파일을 적는다(unuse 는 지운다)
     python tools/vast_cloud.py hold [분]  켜진 상자를 N분(기본 20) 동안 '바쁨'으로 붙든다(다른 상자가 뜨길 기다리는 동안 놀았다고 지워지지 않게)
+    python tools/vast_cloud.py loras [push|pull|status]  학습한 LoRA 를 PC 보관함(models/loras)과 서버 사이에서 맞춘다(켤 때 push 자동, 학습 뒤 pull)
     python tools/vast_cloud.py wake      켜기 버튼(미사일 스튜디오, tools/gpu_wake.py 가 부름): up → use → llm → LLM 이 답할 때까지, '##progress' 줄로 진행
     python tools/vast_cloud.py stop      GPU 과금을 끝낸다(keep_instance 면 멈추고 디스크만 남김, 아니면 지움)
     python tools/vast_cloud.py down      우리 인스턴스(label 이 label_prefix 로 시작)를 전부 지운다(멈춘 것까지, 보관비 0)
@@ -834,6 +835,8 @@ def ensure() -> tuple:
             ensure_tunnel()
             url = wait_ready(c["ready_timeout_min"])
             save_state(stopped_at=None)
+            if "comfy" in roles_of(c):
+                loras_after_ready()
             return inst, url
         except ImageProblem:
             destroy(inst["id"])
@@ -848,6 +851,87 @@ def ensure() -> tuple:
             destroy(inst["id"])
             inst = None
     raise RuntimeError("세 번 빌려도 준비되지 않았다")
+
+
+# ---------- 학습한 LoRA 동기화(서버를 바꿔도 그림체가 따라가게) ----------
+
+LORA_STORE = ROOT / "models" / "loras"  # 이 PC 의 LoRA 보관함(ComfyUI models/loras 와 같은 상대 경로, 깃 밖)
+
+
+def lora_files() -> set:
+    """어느 작품이든 series/*/lora/loras.json 에 적힌 LoRA 파일(models/loras 기준 상대 경로). 켜짐·꺼짐 무관(꺼진 것도 보관·복원한다).
+    학습한 LoRA 가 서버 디스크에만 남아 서버를 옮기며 사라졌다(2026-10-26: 무대 뒤·D+18 가중치가 PC 에 없고 옛 서버 디스크에만)."""
+    out = set()
+    for f in (ROOT / "series").glob("*/lora/loras.json"):
+        with contextlib.suppress(OSError, ValueError):
+            for v in json.loads(f.read_text(encoding="utf-8")).values():
+                if isinstance(v, dict) and v.get("file"):
+                    out.add(str(v["file"]).replace("\\", "/"))
+    return out
+
+
+def server_loras() -> set:
+    with urllib.request.urlopen(urllib.request.Request(local("comfy") + "/models/loras", headers=UA), timeout=20) as r:
+        return {str(x).replace("\\", "/") for x in json.loads(r.read())}
+
+
+def comfy_dir() -> str:
+    """서버의 ComfyUI 폴더(에이전트 /info, 설치가 적어 둔 것). 못 들으면 runpod/pytorch 이미지의 기본 자리."""
+    with contextlib.suppress(Exception):
+        d = json.loads(agent("GET", "/info") or b"{}").get("comfy_dir")
+        if d:
+            return d
+    return "/workspace/ComfyUI"
+
+
+def loras_sync(direction: str = "status") -> dict:
+    """push: PC 보관함에 있고 서버에 없는 LoRA 를 올린다(켤 때마다). pull: 서버에 있고 PC 에 없는 것을 내려받는다(학습 뒤).
+    status: 어디에 있는지만 센다. 대상은 lora_files()(작품 무관). 올린 크기가 다르면 다시 올린다(깨진 LoRA 로 104컷이 회색으로 나온 일, runpod_cloud)."""
+    want, have = lora_files(), server_loras()
+    base = comfy_dir().rstrip("/") + "/models/loras/"
+    res = {"pushed": [], "pulled": [], "both": [], "server_only": [], "local_only": [], "missing_everywhere": []}
+    for f in sorted(want):
+        local_f = LORA_STORE / f
+        on_server, on_pc = f in have, local_f.exists()
+        if direction == "push" and on_pc and not on_server:
+            data = local_f.read_bytes()
+            for _ in range(3):
+                got = json.loads(agent("POST", f"/upload?path={urllib.parse.quote(base + f)}", data, timeout=900)).get("bytes")
+                if got == len(data):
+                    break
+                print(f"  LoRA 올린 크기 불일치({got} != {len(data)}), 다시 올림", flush=True)
+            else:
+                raise RuntimeError(f"LoRA 올리기 실패: {f}")
+            res["pushed"].append(f)
+            print(f"  LoRA 올림: {f} ({len(data) / 2**20:.0f}MB)", flush=True)
+        elif direction == "pull" and on_server and not on_pc:
+            data = agent("GET", f"/download?path={urllib.parse.quote(base + f)}", timeout=900)
+            local_f.parent.mkdir(parents=True, exist_ok=True)
+            local_f.write_bytes(data)
+            res["pulled"].append(f)
+            print(f"  LoRA 내려받음: {f} ({len(data) / 2**20:.0f}MB) → {local_f.relative_to(ROOT)}", flush=True)
+        elif on_server and on_pc:
+            res["both"].append(f)
+        elif on_server:
+            res["server_only"].append(f)
+        elif on_pc:
+            res["local_only"].append(f)
+        else:
+            res["missing_everywhere"].append(f)
+    return res
+
+
+def loras_after_ready() -> None:
+    """ComfyUI 가 뜬 뒤(up·wake): PC 보관함의 LoRA 를 올리고, 어디에도 없는(다시 학습해야 하는) 것은 알린다. 실패해도 켜기는 막지 않는다."""
+    try:
+        r = loras_sync("push")
+    except Exception as e:  # noqa: BLE001
+        print(f"  LoRA 맞추기 실패(그림은 그릴 수 있다, 그림체 LoRA 없이): {str(e)[:160]}", flush=True)
+        return
+    if r["pushed"]:
+        print(f"  LoRA {len(r['pushed'])}개 올림", flush=True)
+    if r["missing_everywhere"]:
+        print(f"  주의: 어디에도 없는 LoRA {len(r['missing_everywhere'])}개(다시 학습해야 쓴다): {', '.join(r['missing_everywhere'][:6])}", flush=True)
 
 
 def llm_spec(c: dict | None = None) -> dict:
@@ -1036,6 +1120,18 @@ def main() -> None:
             save_state(llm_choice=None if pick == "default" else pick)
         start_llm()
         write_switch()  # 스위치 파일의 모델 이름을 바꾼다(미사일 스튜디오·검수가 이 이름으로 부른다)
+    elif cmd == "loras":
+        # 학습한 LoRA 맞추기: push(PC → 서버, 켤 때 자동) · pull(서버 → PC, 학습 뒤) · status. 대상은 series/*/lora/loras.json 에 적힌 파일 전부
+        direction = args[1] if len(args) > 1 else "status"
+        if direction not in ("push", "pull", "status"):
+            sys.exit("loras push|pull|status")
+        try:
+            r = loras_sync(direction)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            sys.exit(f"[{PROFILE}] 서버에 닿지 않는다(켜져 있고 터널이 살아 있나? status 로 확인): {str(e)[:120]}")
+        print(json.dumps({k: v for k, v in r.items() if v}, ensure_ascii=False, indent=1) or "{}")
+        if r["missing_everywhere"]:
+            print(f"어디에도 없는 LoRA {len(r['missing_everywhere'])}개: 다시 학습해야 쓴다(loras.json 에서 on=false 로 두거나)")
     elif cmd == "hold":
         # 다른 상자(LLM)가 뜨길 기다리는 동안 이 상자가 '놀았다'고 스스로 지우지 않게 에이전트에 N분짜리 작업을 건다(watchdog 은 돌고 있는 작업을 바쁨으로 센다)
         minutes = int(args[1]) if len(args) > 1 else 20

@@ -44,6 +44,14 @@ class H(http.server.BaseHTTPRequestHandler):
             return self._send(200, {k: {"running": p.poll() is None, "rc": p.poll()} for k, p in JOBS.items()})
         if u.path == "/activity":
             return self._send(200, {"last": LAST[0], "ago": time.time() - LAST[0]})
+        if u.path == "/info":  # 설치가 정한 ComfyUI 폴더·모드: LoRA 를 올릴 경로를 PC 쪽이 짐작하지 않게(이미지에 따라 /comfyui 또는 /workspace/ComfyUI)
+            cd = ""
+            try:
+                with open("/workspace/.comfy_dir") as f:
+                    cd = f.read().strip()
+            except OSError:
+                pass
+            return self._send(200, {"comfy_dir": cd, "mode": os.environ.get("MODE", "comfy")})
         if u.path == "/download":
             if self._auth():
                 with open(q["path"][0], "rb") as f:
@@ -199,6 +207,7 @@ else
   fi
 fi
 cd "$COMFY_DIR"
+echo "$COMFY_DIR" > /workspace/.comfy_dir  # 에이전트 /info 가 알려 준다(PC 의 LoRA 올리기가 이 폴더의 models/loras 에 쓴다)
 
 # 파드에 넣을 파일(우리 노드·상류 패치, env EXTRA_FILES = {ComfyUI 안 경로: base64})과 패치 적용(env PATCHES = [경로]). 이미 붙은 패치는 건너뛴다
 if [ "${MODE:-comfy}" != "agent" ] && [ -n "${EXTRA_FILES:-}" ] && [ "${EXTRA_FILES}" != "{}" ]; then
