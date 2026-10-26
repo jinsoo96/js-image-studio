@@ -676,7 +676,9 @@ def _folder(folder: str) -> str:
         return "panels_hf_vast"
     if f in ("vast_restyle", "restyle", "panels_hf_vast_restyle"):
         return "panels_hf_vast_restyle"
-    raise ValueError('folder 는 비우거나(본편; "out"·"main" 도 같음) "vast" · "vast_restyle"')
+    # 모델이 review/… 같은 다른 폴더를 folder 에 넣었다(2026-10-26 무대 뒤 GPU 시나리오): 그런 그림은 paths 로 본다고 바로 알린다
+    raise ValueError('folder 는 비우거나(본편; "out"·"main" 도 같음) "vast" · "vast_restyle" 만. 다른 폴더의 그림(review/…, assets/…)은 '
+                     "contact_sheet(paths='series/<작품>/<폴더>/*.jpg') 로 본다")
 
 
 def _ep_dirs(series: str = ""):
