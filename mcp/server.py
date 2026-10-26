@@ -1897,7 +1897,8 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     cmd += ["--check"] if check else []
     cmd += ["--refine"] if refine else []
     cmd += ([] if continuity else ["--no-continuity"]) + (["--continue-closeups"] if continue_closeups else [])
-    steps = [{"label": f"GPU 서버 {len(want)}컷 그리기(크레딧 0)", "cmd": cmd}]
+    # review_codes 2: 일부 컷만 실패(끝난 컷은 쓸 수 있다) → failed 가 아니라 needs_review(comfy_panel 끝 참고)
+    steps = [{"label": f"GPU 서버 {len(want)}컷 그리기(크레딧 0)", "cmd": cmd, "review_codes": [2]}]
     if restyle:
         sys.path.insert(0, str(VAST))
         import lora as L
@@ -1908,7 +1909,25 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
     job = _start_job("vast_draw", ep, steps)
     per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0) + (40 if restyle else 0)
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
-            f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast')")
+            f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast'). 그림체 LoRA: {_style_lora_state(sd)}")
+
+
+def _style_lora_state(sd: Path) -> str:
+    """이 작품의 그림체 LoRA(loras.json '_style')가 이번 그림에 붙는지 한 줄로. 꺼져 있거나 서버에 없으면 참고 그림만으로 그려 그림체가 밋밋해지는데
+    아무도 몰랐다(2026-10-26 무대 뒤: 10-21 학습 노드 버그로 꺼 둔 뒤 닷새 동안 LoRA 없이 그림)."""
+    try:
+        import lora as L
+        e = L.registry(sd).get(L.STYLE) or {}
+        if not e.get("file"):
+            return "없음(학습한 적 없음: train_lora)"
+        if not e.get("on", True):
+            return f"꺼짐({e['file']}: loras.json on=false, 다시 학습했으면 켠다)"
+        have = L.on_server()
+        if have is not None and e["file"] not in have:
+            return f"서버에 없음({e['file']}: 이 서버에 올리거나 다시 학습)"
+        return f"켜짐({e['file']}, 강도 {e.get('strength', 0.8)})"
+    except Exception as ex:  # noqa: BLE001
+        return f"확인 못 함({str(ex)[:60]})"
 
 
 @mcp.tool()
@@ -2535,6 +2554,12 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     out["result_ready"] = out["state"] in ("done", "needs_review")
     if out["state"] == "failed":
         out["next"] = out.get("next") or "실패: log_tail 의 마지막 오류를 사용자에게 알리고, 고칠 수 있는 입력(컷 설명·콘티)이면 고친 뒤 같은 도구를 다시 부른다"
+    partial = next((ln for ln in reversed(lines) if ln.startswith("끝난 컷:")), None)
+    if partial and out["state"] == "needs_review":  # 일부 컷만 실패(comfy_panel 종료 2): 끝난 컷으로 이어가고 실패한 컷만 다시
+        failed_line = next((ln for ln in reversed(lines) if ln.startswith("실패한 컷:")), "")
+        out["partial"] = {"done": partial.split(":", 1)[1].split("(")[0].strip(), "failed": failed_line.split(":", 1)[1].strip() if failed_line else ""}
+        out["next"] = (f"일부만 실패. 끝난 컷({out['partial']['done']})은 지금 compare_panel·adopt_panel 로 이어가고, "
+                       f"실패한 컷({out['partial']['failed']})만 같은 도구로 다시 그린다. 사용자가 시킨 다음 단계(채택·고치기·합성)를 끝난 컷으로 먼저 진행한다")
     out["log_tail"] = "\n".join(lines[-tail_lines:]) if tail_lines else ""
     return out
 

@@ -726,7 +726,13 @@ def main():
             print("".join(traceback.format_list(ours[-4:])) + f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
             failed.append(p["id"])
     if failed:
+        done_ids = [p["id"] for p in panels if (only is None or p["id"] in only) and p["id"] not in failed]
         print("실패한 컷:", ",".join(failed))
+        # 일부만 실패: 끝난 컷은 쓸 수 있으니 '실패'(1)가 아니라 '사람 확인'(2, 작업 runner 의 review_codes)으로 끝낸다. 통째로 failed 로 보이자
+        # 모델이 성공한 컷(p082)을 두고 실패한 컷만 다시 그리다 채택·합성에 못 갔다(2026-10-26 무대 뒤 v9)
+        if done_ids:
+            print(f"끝난 컷: {','.join(done_ids)} (쓸 수 있다) · 실패한 컷만 같은 도구로 다시 그린다")
+            sys.exit(2)
         sys.exit(1)
 
 
