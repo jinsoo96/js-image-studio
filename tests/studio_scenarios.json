@@ -413,7 +413,8 @@
     "contact_sheet"
    ],
    "max_tool_errors": 2,
-   "max_seconds": 300
+   "max_seconds": 300,
+   "answer_near": {"value": "{char_count}", "tol": 4, "_why": "그 회차 컷 설명(chars)에 그 인물이 든 컷 수와 답의 숫자를 대조. ±4 는 대사·행동 글에만 이름이 나오는 컷(find 가 같이 찾음) 몫. 2026-10-26 외출 244(네 판 합) 같은 틀린 답을 잡는다"}
   },
   "setup": {
    "cleanup": [

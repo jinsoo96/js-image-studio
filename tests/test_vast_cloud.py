@@ -252,6 +252,8 @@ def test_two_boxes_split_roles_ports_switch_and_wake_button():
     assert img["label_prefix"] != llm["label_prefix"] and img["min_balance_usd"] == llm["min_balance_usd"]  # 같은 계정, 같은 바닥
     assert llm["llm"]["repo"] == both["llm"]["repo"] and "llm_options" in llm  # 모델·교체 후보는 stack 것
     assert "localhost:8189/jobs" in V.launch_cmd(V.PROBES["agent"]) and "8188/system_stats" in V.LAUNCH_CMD
+    # LLM 상자는 vLLM 휠이 요구하는 드라이버(stack llm.min_cuda)까지 맞는 기계만, 그림 상자는 이미지 기준(2026-10-26 CUDA 12.8 A6000 에서 'driver too old')
+    assert V.min_cuda(llm) >= 13.0 > V.min_cuda(img) == float(img["search"]["min_cuda"]) and V.min_cuda(both) == V.min_cuda(llm)
     real = (V.ROOT, V.cfg, V.PROFILE, V.load_state, V.boot_log, V.ensure_tunnel, V.time.time, V.time.sleep)
     with tempfile.TemporaryDirectory() as d:
         st = Path(d) / "state"

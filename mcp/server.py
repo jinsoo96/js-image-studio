@@ -697,7 +697,8 @@ def find(query: str, series: str = "", limit: int = 12, episode: str = "") -> st
     """찾기: 작품 이름(제목·별명), 컷 번호('p22'·'22p'·'p022'), 인물·장소 이름, 대사·행동 글의 낱말로 작품·회차·컷을 찾아 정확한 식별자와 상태를 준다. 파일을 읽어 짐작하지 말고 이걸로 먼저 찾는다.
     컷 번호를 주면 그 번호가 있는 모든 회차(vast 판 복사본 포함)와 컷마다 status(new = 컷 설명이 있어 그린다 · reuse = 앞 화·다른 판 그림을 그대로 · composite = 합성 재료 ·
     no_description)와 그림이 어디 있는지(images)를 준다. 글을 주면 낱말이 모두 든 컷(대사·행동·연기·장소·인물 이름)을 준다. series·episode 로 좁힌다
-    (query 를 '<작품> <회차> <찾을 말>' 로 줘도 된다: '<작품> 1화 v2 <인물 이름>')."""
+    (query 를 '<작품> <회차> <찾을 말>' 로 줘도 된다: '<작품> 1화 v2 <인물 이름>').
+    인물·낱말이 든 컷을 세거나 모아 볼 땐 결과의 total·by_episode·ids_by_episode(걸린 컷 번호 전부, 쉼표)를 그대로 쓴다: list_panels 목록을 눈으로 골라 세지 않는다."""
     q = (query or "").strip()
     if not q:
         return _fail("empty_query")
@@ -797,6 +798,21 @@ def find(query: str, series: str = "", limit: int = 12, episode: str = "") -> st
                                          f"회차 요약 = find('{sname} 1화')(이 MCP 의 도구로 본다)")})
     n = max(1, min(int(limit), 40))
     out = {"query": q, "total": len(hits), "hits": hits[:n]}
+    # 걸린 컷 번호는 전부(hits 는 limit 까지만 자세히): 세기·모아보기(contact_sheet ids)에 그대로 쓰게. limit 에 잘린 번호를 채우려고 list_panels 목록을
+    # 눈으로 골라 세다 틀린 수를 답했다(2026-10-26 외출 1화 '이상수': find total 180 인데 답 244). 회차·판 여럿에 걸치면 회차마다 나눠 준다
+    ids_by_ep = {}
+    for h in hits:
+        ids_by_ep.setdefault(f"{h['series']}/{h['episode']}", []).append(h["panel"])
+    if hits:
+        out["by_episode"] = {k: len(v) for k, v in ids_by_ep.items()}
+        out["ids_by_episode"] = {k: ",".join(v) for k, v in ids_by_ep.items()}
+        notes = []
+        if len(hits) > n:
+            notes.append(f"hits 는 앞 {n}개만, 컷 번호 전체는 ids_by_episode(세기는 by_episode)")
+        if len(ids_by_ep) > 1:
+            notes.append("total 은 모든 회차·판(사본 포함)의 합, 한 회차의 수는 by_episode")
+        if notes:
+            out["note"] = ". ".join(notes)
     if series_hits:
         out["series"] = series_hits
     if cast_hits:
@@ -838,7 +854,8 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
     """그림을 모아 한 장으로 보여 준다(그림 자체 + JSON: sheet 경로·link 원격 링크). 회차 컷이면 series·episode 와 ids(쉼표)·scene(장소 이름),
     아무 그림이면 paths(파일·폴더·* 패턴을 쉼표로): 인물 시트·시안·장소·참고 그림·내보낸 쪽 그림을 볼 때.
 
-    회차 컷: 비우면 새로 그린 컷 전부, folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast).
+    회차 컷: 비우면 새로 그린 컷 전부, folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast). folder 는 그림 폴더를 고르는 칸(비움·vast·vast_restyle)이라
+    인물·장면 이름을 넣는 곳이 아니다: 인물의 컷만 모으려면 find 로 받은 컷 번호를 ids 에, 장소는 scene 에.
     paths 예: series/<작품>/assets/*_sheet.png · series/<작품>/assets/_candidates · series/<작품>/assets/vast_refs/<인물 id>_*.png (이름을 하나씩 적기보다 * 패턴이 오타가 없다).
     한 장에 24개까지(넘으면 앞 24개와 전체 개수를 알린다). 사용자에게는 link 를 준다."""
     if paths.strip():
@@ -915,13 +932,22 @@ def _sheet(items: list, name: str, total: int = 0) -> list:
 @mcp.tool()
 def file_link(paths: str, series: str = "") -> str:
     """작업실 안 그림·PDF 의 원격 링크(사용자가 브라우저로 여는 주소). paths 는 쉼표로 여러 개. 이 PC 의 파일이라 agent app 작업 공간의 도구(ShareFile·cp)로는 못 옮긴다."""
-    out = {}
+    out, busy = {}, {}
     for one in [x.strip() for x in re.split(r"[,\n]+", paths or "") if x.strip()]:
         try:
             f = _existing(one, series, fuzzy=True)
             out[one] = _link(f) or "(link unavailable: not under exports/ or series/, or no public URL)"
+            # 그 회차에 아직 도는 작업(합성·그리기)이 있으면 알린다: 작은 모델이 마지막 job_status 가 running 인데 PDF 링크를 주며
+            # '모든 작업이 끝났습니다' 라고 답했다(2026-10-26 추몽 v9 합성). 링크의 파일이 바뀌는 중일 수 있다
+            ep = next((p for p in f.resolve().parents if p.parent.name == "episodes"), None)
+            job = _running_job(ep) if ep else None
+            if job:
+                busy[job] = ep.name
         except (NotFound, ValueError) as e:
             out[one] = json.loads(str(e)) if str(e).startswith("{") else str(e)
+    if busy:
+        out["running_jobs"] = busy
+        out["note"] = "이 회차에 아직 도는 작업이 있다: 끝났다고 답하기 전에 job_status 로 done 을 본다(링크의 파일이 아직 바뀌는 중일 수 있다)"
     return json.dumps(out, ensure_ascii=False)
 
 

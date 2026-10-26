@@ -96,6 +96,14 @@ def judge(sc: dict, turns: list, seconds: float) -> list:
     for w in ck.get("answer_has", []):
         if w not in last:
             fails.append(f"답에 '{w}' 없음")
+    # 수치 답은 데이터와 대조한다(value 는 series_vars 가 작품 폴더에서 계산한 값, tol 은 허용 오차). 도구 호출은 다 맞았는데 수가 틀린 답이
+    # '통과'로 넘어갔다(2026-10-26 외출 1화 이상수: 데이터 177컷, 답 244 = find 의 total 을 네 판 합째로 읽음)
+    near = ck.get("answer_near")
+    if near and str(near.get("value", "")).isdigit():
+        want, tol = int(near["value"]), int(near.get("tol", 0))
+        nums = [int(x.replace(",", "")) for x in re.findall(r"\d[\d,]*", last)]
+        if not any(abs(n - want) <= tol for n in nums):
+            fails.append(f"답의 숫자 {nums[:8]} 가 데이터의 {want}(±{tol}) 와 다름")
     return fails
 
 
@@ -147,16 +155,21 @@ def snapshot(sc: dict) -> set:
 
 
 def cleanup(sc: dict, before: set):
-    """setup.cleanup 글로브 중 이 시나리오가 새로 만든 것만 지운다(시험 사본 회차·그 내보내기·모아보기).
-    시험이 남긴 사본·PDF 가 작품 폴더와 exports 에 쌓여 사용자가 '보기도 싫다'고 했다(2026-10-24). 전부터 있던 것(개항 화풍시안 등)은 건드리지 않는다."""
+    """setup.cleanup 글로브 중 이 시나리오가 새로 만든 것(시험 사본 회차·그 내보내기·모아보기)을 작품 폴더·exports 에서 치운다.
+    시험이 남긴 사본·PDF 가 작품 폴더와 exports 에 쌓여 사용자가 '보기도 싫다'고 했다(2026-10-24). 전부터 있던 것(개항 화풍시안 등)은 건드리지 않는다.
+    지우지 않고 series/_tmp/studio_test_<시각>/ 로 옮긴다: 검수할 그림·PDF 가 남아야 한다(2026-10-26 추몽 GPU 시나리오의 다시 그린 컷·합성본이
+    지워져 눈으로 못 봤다). _tmp 는 tools/clean_old.py 가 10일 뒤 지운다."""
     import shutil
+    keep = ROOT / "series" / "_tmp" / f"studio_test_{time.strftime('%m%d-%H%M%S')}"
     for g in (sc.get("setup") or {}).get("cleanup", []):
         for p in ROOT.glob(g):
             rp = p.resolve()
             if rp in before or not any((ROOT / r).resolve() in rp.parents for r in CLEAN_ROOTS):
                 continue
-            shutil.rmtree(rp) if rp.is_dir() else rp.unlink()
-            print(f"  치움 {rp.relative_to(ROOT.resolve())}", flush=True)
+            dst = keep / rp.relative_to(ROOT.resolve())
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(rp), str(dst))
+            print(f"  치워 둠 {rp.relative_to(ROOT.resolve())} → {dst.relative_to(ROOT)}", flush=True)
 
 
 def series_vars(sd: Path) -> dict | None:
@@ -168,8 +181,8 @@ def series_vars(sd: Path) -> dict | None:
     eps = sorted(p for p in (sd / "episodes").iterdir() if p.is_dir() and re.fullmatch(r"ep\d{3}", p.name) and (p / "panels.json").exists()) \
         if (sd / "episodes").is_dir() else []
     for ep in eps:
-        panels = [p for p in json.loads((ep / "panels.json").read_text(encoding="utf-8"))
-                  if p.get("chars") and (ep / "panels_hf" / f"{p['id']}.png").exists()]
+        allp = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
+        panels = [p for p in allp if p.get("chars") and (ep / "panels_hf" / f"{p['id']}.png").exists()]
         if len(panels) < 2:
             continue
         used = [int(m.group(1)) for d in (sd / "episodes").iterdir() if (m := re.fullmatch(rf"{ep.name}_v(\d+)", d.name))]
@@ -180,8 +193,10 @@ def series_vars(sd: Path) -> dict | None:
         char = re.sub(r"\s*\(.*?\)", "", str((cast.get(c) or {}).get("ko") or c))
         title = title_of(sd) or sd.name
         # name: 사람이 부르는 짧은 이름(괄호 뗌: '개항(開肛)' → 개항, 'D+18 (힉스필드 판)' → D+18). MCP 가 이 이름으로 작품을 찾는지도 시험이 된다
+        # char_count: 그 회차에서 그 인물이 든 컷 수(컷 설명 chars 기준, 그린 것·안 그린 것 다). 수치 답을 데이터와 대조할 때 쓴다(checks.answer_near)
+        char_count = sum(1 for p in allp if c in (p.get("chars") or []))
         return {"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
-                "copy": f"{ep.name}_v{v}", "copy_v": f"v{v}", "p1": p1["id"], "p2": p2["id"], "char": char}
+                "copy": f"{ep.name}_v{v}", "copy_v": f"v{v}", "p1": p1["id"], "p2": p2["id"], "char": char, "char_id": c, "char_count": char_count}
     return None
 
 

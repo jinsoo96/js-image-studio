@@ -98,6 +98,8 @@
     "repo": "nchapman/Huihui-Qwen3.8-27B-abliterated-W4A16-GPTQ",
     "name": "qwen3.8-27b",
     "vllm_version": "0.31.0",
+    "min_cuda": 13.0,
+    "_min_cuda_why": "vLLM 0.31 의 torch 휠이 요구하는 드라이버. 2026-10-26 CUDA 12.8 드라이버의 A6000 에서 'The NVIDIA driver on your system is too old (found version 12080)' 로 엔진이 죽었다(이미지의 cu128 torch 는 괜찮았음). LLM 역할이 있는 설정의 기계 고르기(vast_cloud.offers)가 search.min_cuda 와 이 값 중 큰 쪽을 쓴다. vllm_version 을 올리면 같이 본다.",
     "gpu_util": 0.53,
     "max_len": 32768,
     "args": "--trust-remote-code --reasoning-parser qwen3 --default-chat-template-kwargs {\"enable_thinking\":false}",

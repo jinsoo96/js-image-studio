@@ -5,6 +5,7 @@
     python tools/vast_cloud.py up        빌려서(멈춰 둔 게 있으면 다시 켜서) 설치하고 ComfyUI 가 GPU 를 잡을 때까지 기다린다. 다 쓰면 stop
     python tools/vast_cloud.py llm       켜 둔 인스턴스에 LLM(설정 llm, vLLM)을 띄운다. GPU 가 둘이면 gpu_split.llm 장에만
     python tools/vast_cloud.py use       모든 도구가 이 서버를 쓰게 스위치 파일을 적는다(unuse 는 지운다)
+    python tools/vast_cloud.py hold [분]  켜진 상자를 N분(기본 20) 동안 '바쁨'으로 붙든다(다른 상자가 뜨길 기다리는 동안 놀았다고 지워지지 않게)
     python tools/vast_cloud.py wake      켜기 버튼(미사일 스튜디오, tools/gpu_wake.py 가 부름): up → use → llm → LLM 이 답할 때까지, '##progress' 줄로 진행
     python tools/vast_cloud.py stop      GPU 과금을 끝낸다(keep_instance 면 멈추고 디스크만 남김, 아니면 지움)
     python tools/vast_cloud.py down      우리 인스턴스(label 이 label_prefix 로 시작)를 전부 지운다(멈춘 것까지, 보관비 0)
@@ -111,6 +112,15 @@ def profile_roles(name: str) -> set:
         return set()
 
 
+def min_cuda(c: dict) -> float:
+    """기계 드라이버의 CUDA 하한: 이미지가 요구하는 search.min_cuda 와, LLM 역할이면 vLLM 휠이 요구하는 llm.min_cuda 중 큰 쪽.
+    (2026-10-26 CUDA 12.8 드라이버 기계에서 vLLM 0.31 이 'NVIDIA driver too old' 로 죽었다. 그림만 올리는 상자는 이미지 기준으로 충분하다)"""
+    need = float(c["search"].get("min_cuda", 0))
+    if "llm" in roles_of(c):
+        need = max(need, float((c.get("llm") or {}).get("min_cuda", 0)))
+    return need
+
+
 def load_state() -> dict:
     return json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
 
@@ -183,7 +193,7 @@ def offers(exclude_machines=()) -> list:
     for o in rows:
         if o.get("machine_id") in exclude_machines:
             continue
-        if (o.get("cuda_max_good") or 0) < float(s.get("min_cuda", 0)):
+        if (o.get("cuda_max_good") or 0) < min_cuda(c):
             continue
         if (o.get("reliability2") or o.get("reliability") or 0) < float(s.get("min_reliability", 0)):
             continue
@@ -218,7 +228,7 @@ def show_offers() -> None:
     c = cfg()
     o = offers()
     s = c["search"]
-    print(f"조건: {s['gpu_name']} x{s['num_gpus']} · CUDA≥{s.get('min_cuda')} · 신뢰도≥{s.get('min_reliability')} · 내려받기≥{s.get('min_inet_down_mbps')}Mbps"
+    print(f"조건: {s['gpu_name']} x{s['num_gpus']} · CUDA≥{min_cuda(c):g} · 신뢰도≥{s.get('min_reliability')} · 내려받기≥{s.get('min_inet_down_mbps')}Mbps"
           f" · 디스크 {c['disk_gb']}GB · 시간당≤${s.get('max_usd_per_hr')} · 뺄 나라 {s.get('avoid_countries')}"
           f" · 다 쓰면 {'멈춤(보관비 월≤$' + str(c.get('max_stopped_usd_per_month')) + ')' if c.get('keep_instance') else '지움(보관비 0)'}")
     if not o:
@@ -977,11 +987,23 @@ def wake() -> int:
         print("LLM 은 이미 올라오는 중: 기다린다", flush=True)
     base = total - e_llm
     deadline = time.time() + 40 * 60
+    iid = load_state().get("instance_id")
     while time.time() < deadline:
         if http_ok(local("llm") + "/v1/models", key):
             _remember("llm", time.time() - t)
             progress(100, 0, "준비 완료")
             return 0
+        if load_state().get("instance_id") != iid:  # 기다리는 사이 상자가 지워졌거나 바뀌었다(down·guard·watchdog): 없는 LLM 을 40분 기다리지 않는다
+            print("인스턴스가 지워졌거나 바뀌어 LLM 기다리기를 멈춘다", flush=True)
+            return 4
+        with contextlib.suppress(Exception):  # vLLM 작업이 죽었으면(드라이버·메모리) 바로 로그 끝을 보이고 끝낸다(2026-10-26 'driver too old' 를 40분 기다릴 뻔)
+            jobs = json.loads(agent("GET", "/jobs") or b"{}")
+            if jobs.get("llm") and not jobs["llm"].get("running") and time.time() - t > 30:
+                tail = agent("GET", "/job_llm.log").decode("utf-8", "replace").splitlines()
+                for line in [ln for ln in tail if "Error" in ln or "error" in ln][-3:] + tail[-3:]:
+                    print("  " + line[:300], flush=True)
+                print(f"LLM 작업이 끝나 버렸다(vLLM 이 죽음): 로그 {local('agent')}/job_llm.log", flush=True)
+                return 3
         frac = min(0.97, (time.time() - t) / e_llm)
         progress(100 * (base + e_llm * frac) / total, max(10, e_llm * (1 - frac)), "언어 모델 올리는 중(vLLM, 처음이면 모델 내려받기 포함)")
         time.sleep(10)
@@ -1014,6 +1036,10 @@ def main() -> None:
             save_state(llm_choice=None if pick == "default" else pick)
         start_llm()
         write_switch()  # 스위치 파일의 모델 이름을 바꾼다(미사일 스튜디오·검수가 이 이름으로 부른다)
+    elif cmd == "hold":
+        # 다른 상자(LLM)가 뜨길 기다리는 동안 이 상자가 '놀았다'고 스스로 지우지 않게 에이전트에 N분짜리 작업을 건다(watchdog 은 돌고 있는 작업을 바쁨으로 센다)
+        minutes = int(args[1]) if len(args) > 1 else 20
+        print(json.loads(agent("POST", "/run", json.dumps({"name": "hold", "cmd": f"sleep {minutes * 60}"}).encode())), f"→ {minutes}분 붙들기")
     elif cmd == "use":
         write_switch()
     elif cmd == "unuse":
