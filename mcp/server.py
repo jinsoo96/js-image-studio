@@ -756,7 +756,9 @@ def find(query: str, series: str = "", limit: int = 12, episode: str = "") -> st
             first = {c: next(p_["id"] for p_ in panels if c in p_.get("characters", [])) for c in chars}
             return json.dumps({"query": query, "series": _series(series).name, "episode": ep.name, "title": board.get("title_card", ""),
                                "cuts": len(panels), "scenes": flow, "characters": chars, "first_appearance": first,
-                               "next": "컷 하나는 panel_info, 그림은 contact_sheet(series, episode, ids=…)"}, ensure_ascii=False)
+                               # 요약 질문에 작은 모델이 panel_info·status·read_doc·list_panels 를 더 뒤졌다(2026-10-26 외출 286컷, 도구 11번): 이 결과로 족하다고 말한다
+                               "next": "회차 요약·컷 수·장면·인물 첫 등장은 이 결과로 충분하다(list_panels 는 컷마다 볼 때). 컷 하나는 panel_info, 그림은 contact_sheet(series, episode, ids=…)"},
+                              ensure_ascii=False)
     key = _pid_key(q) if len(q) <= 6 else None
     toks = [x for x in re.split(r"\s+", q.lower()) if x]
     hits, cast_hits = [], []

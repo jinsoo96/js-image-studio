@@ -223,7 +223,9 @@ def series_vars(sd: Path) -> dict | None:
         # panel_count: 합성(compose)이 "N컷" 으로 알리는 수 = 콘티(storyboard.json)의 컷 수(재사용·합성 컷 포함; panels.json 은 새로 그릴 컷만이라
         # 무대 뒤 131 vs 133, 외출 278 vs 286 으로 어긋난다). 콘티가 없으면 panels.json 수. 작품별_합성_링크의 답과 대조
         board = json.loads((ep / "storyboard.json").read_text(encoding="utf-8")) if (ep / "storyboard.json").exists() else {}
-        return {"panel_count": len(board.get("panels") or allp),"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
+        # char_first: 그 인물이 처음 나오는 컷 번호(panels.json 순서), 회차 요약 답의 "처음 나오는 컷" 과 대조
+        char_first = next((p["id"] for p in allp if c in (p.get("chars") or [])), "")
+        return {"panel_count": len(board.get("panels") or allp), "char_first": char_first,"series": sd.name, "title": title, "name": re.sub(r"\s*[\(（].*?[\)）]", "", title).strip() or title, "ep": ep.name, "ep_n": f"{int(ep.name[2:5])}화",
                 "copy": f"{ep.name}_v{v}", "copy_v": f"v{v}", "p1": p1["id"], "p2": p2["id"], "char": char, "char_id": c, "char_count": char_count}
     return None
 
