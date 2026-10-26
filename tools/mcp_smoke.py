@@ -11,9 +11,12 @@ tools/prompt_dryrun.py 로 작품마다 그리기 지시를 GPU 없이 만들어
 """
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
+
+os.environ.setdefault("COMFY_NO_RETRY", "1")  # 뒤에서 부르는 prompt_dryrun 이 꺼진 서버를 기다리지 않게(vast/comfy_client.req)
 
 import requests
 

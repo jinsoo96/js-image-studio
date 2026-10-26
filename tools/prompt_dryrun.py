@@ -11,10 +11,13 @@
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
+
+os.environ.setdefault("COMFY_NO_RETRY", "1")  # 돈 0 시험: 서버가 꺼져 있으면 요청마다 15초 기다리지 않고 바로 건너뛴다(vast/comfy_client.req)
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))

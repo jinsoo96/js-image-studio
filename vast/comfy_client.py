@@ -114,6 +114,10 @@ class Comfy:
         # vast 프록시가 가끔 한 번 끊기거나 늦는다: 서버에서 다 그린 컷이 결과 묻기(/history) 한 번이 시간 초과라 통째로 실패했다(2026-10-21 외출 p101).
         # 다시 보내도 같은 요청(읽기, 덮어쓰는 그림 올리기)만 세 번까지. 큐에 넣기(/prompt)는 두 번 들어갈 수 있어 다시 보내지 않는다
         tries = 3 if data is None or path.startswith("/upload/") else 1
+        # 돈 0 시험(prompt_dryrun·mcp_smoke)은 서버가 꺼져 있으면 바로 실패해야 한다: 재시도 3번 + 3·6초 대기로 한 번에 15초, 컷마다 여러 번이라
+        # 20분 한도를 넘겼다(2026-10-26). 실제 그리기는 그대로 끈기 있게(터널이 몇 초 끊겼다 돌아오는 일이 있다)
+        if os.environ.get("COMFY_NO_RETRY"):
+            tries = 1
         for k in range(tries):
             try:
                 with urllib.request.urlopen(urllib.request.Request(self.base + path, data=body, headers=h), timeout=timeout) as r:
