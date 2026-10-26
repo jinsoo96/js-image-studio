@@ -106,6 +106,7 @@ idle_min, max_min = int(os.environ.get("IDLE_MIN", 15)), int(os.environ.get("MAX
 pod, key, action = os.environ.get("RUNPOD_POD_ID", ""), os.environ.get("RUNPOD_API_KEY", ""), os.environ.get("ON_IDLE", "terminate")
 agent_mode = os.environ.get("MODE") == "agent"
 llm_tok = [None]
+comfy_last = [None]  # 지난 샘플에서 본 ComfyUI 마지막 프롬프트 번호(/history?max_items=1)
 
 
 def llm_busy():
@@ -157,7 +158,14 @@ while True:
                 or ((jobs.get("llm") or {}).get("running") and not llm_up) or llm_busy())
         if not agent_mode:  # 그림 상자: ComfyUI 큐도 본다(agent 모드엔 ComfyUI 가 없다)
             q = json.loads(urllib.request.urlopen("http://127.0.0.1:8188/queue", timeout=5).read())
-            busy = busy or q.get("queue_running") or q.get("queue_pending")
+            # 1분에 한 번 큐만 보면 30초짜리 turbo 그림은 매번 빈 큐로 보인다: 두 컷을 14분 그리는 동안 '놀았다'고 세어 그리기가 끝난 직후
+            # 상자를 지웠다(2026-10-26 무대 뒤 L40S: 14:17 준비 → 14:32 삭제, 뒤이은 표정 편집이 서버 없음). 지난 1분 사이에 끝난 프롬프트가
+            # 있으면(/history 의 마지막 번호가 바뀜) 바쁨으로 센다
+            h = json.loads(urllib.request.urlopen("http://127.0.0.1:8188/history?max_items=1", timeout=5).read())
+            newest = next(iter(h), None)
+            drew = comfy_last[0] is not None and newest != comfy_last[0]
+            comfy_last[0] = newest
+            busy = busy or q.get("queue_running") or q.get("queue_pending") or drew
         idle = idle + 1 if not busy else 0
     except Exception:
         idle = 0

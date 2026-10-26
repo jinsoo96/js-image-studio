@@ -21,8 +21,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MS = os.environ.get("MS_EXE", r"D:\missile-studio\.venv\Scripts\ms.exe")
-# 끝났다고 단정하는 말끝만('"다 됐어?" 하시면' 처럼 사용자 말을 옮긴 것은 세지 않는다)
-DONE_WORDS = re.compile(r"(다 됐(습니다|어요|다\b)|완료(했|됐|되었)(습니다|어요)|끝났(습니다|어요)|다 나왔(습니다|어요)|다 그렸(습니다|어요))")
+# 끝났다고 단정하는 말끝만('"다 됐어?" 하시면' 처럼 사용자 말을 옮긴 것은 세지 않는다). '거의 끝났습니다'·'거의 다 됐어요' 는 아직이라는 말이다:
+# 합성이 도는 중에 "거의 끝났습니다(기계 점검만 남음)" 라고 바르게 답한 차례가 '다 됐다'로 잡혔다(2026-10-26 무대 뒤 GPU 시나리오)
+DONE_WORDS = re.compile(r"(?<!거의 )(다 됐(습니다|어요|다\b)|완료(했|됐|되었)(습니다|어요)|끝났(습니다|어요)|다 나왔(습니다|어요)|다 그렸(습니다|어요))")
 
 
 def ask(text: str, provider: str = "", conversation: str = "", timeout: int = 1500) -> dict:
@@ -39,13 +40,36 @@ def ask(text: str, provider: str = "", conversation: str = "", timeout: int = 15
     return d
 
 
+def _alive(pid) -> bool:
+    """작업 프로세스가 살아 있나(mcp/server.py _alive 와 같은 셈: Windows 의 os.kill(pid, 0) 은 보기가 아니라 죽이기라 종료 코드로 본다)."""
+    if not pid:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
 def wait_jobs(max_min: float):
-    """웹툰 MCP 작업(state/mcp_jobs)이 더 이상 돌지 않을 때까지(최대 max_min 분) 기다린다."""
+    """웹툰 MCP 작업(state/mcp_jobs)이 더 이상 돌지 않을 때까지(최대 max_min 분) 기다린다.
+    죽은 프로세스가 'running' 으로 남긴 상태 파일은 세지 않는다: 끊긴 LoRA 학습 하나가 남아, 작업이 다 끝난 뒤에도 차례마다 20분·15분을 꽉 채워
+    기다렸다(2026-10-26 무대 뒤 GPU 시나리오 2721초 > 한도 2700. 실제 일은 그리기 14분·합성 5분)."""
     end = time.time() + max_min * 60
     jobs = ROOT / "state" / "mcp_jobs"
     while time.time() < end:
-        running = [f for f in jobs.glob("*.status.json") if time.time() - f.stat().st_mtime < 6 * 3600
-                   and json.loads(f.read_text(encoding="utf-8")).get("state") in ("starting", "running")]
+        states = [json.loads(f.read_text(encoding="utf-8")) for f in jobs.glob("*.status.json") if time.time() - f.stat().st_mtime < 6 * 3600]
+        running = [s for s in states if s.get("state") == "starting" or (s.get("state") == "running" and _alive(s.get("pid")))]
         if not running:
             return
         time.sleep(20)

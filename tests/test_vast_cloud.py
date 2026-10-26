@@ -346,6 +346,57 @@ def test_loading_stuck_on_same_line_gives_up_before_timeout():
         V.get_instance, V.time.time, V.time.sleep = saved
 
 
+def test_watchdog_comfy_box_counts_short_prompts_as_busy():
+    # 그림 상자(MODE 없음): 1분마다 큐만 보면 30초짜리 turbo 그림은 샘플 순간마다 빈 큐라, 두 컷을 14분 그리는 동안 '놀았다'로 세어 그리기 직후
+    # 스스로 지웠다(2026-10-26 무대 뒤 L40S, 14:17 준비 → 14:32 삭제). /history 의 마지막 프롬프트 번호가 샘플 사이에 바뀌면 바쁨이다
+    bs = (ROOT / "cloud" / "runpod_bootstrap.sh").read_text(encoding="utf-8")
+    src = re.search(r"cat > /workspace/watchdog.py <<'PY'\n(.*?)\nPY\n", bs, re.S).group(1)
+
+    class Stop(Exception):
+        pass
+
+    def run(drawing: bool):
+        hits, sleeps, n = [], [], [0]
+
+        def fake_open(req, timeout=None):
+            url = req if isinstance(req, str) else req.full_url
+            if "console.vast.ai" in url:
+                hits.append(req.get_method())
+                return io.BytesIO(b"{}")
+            if url.endswith("/jobs"):
+                return io.BytesIO(b"{}")
+            if url.endswith("/activity"):
+                return io.BytesIO(json.dumps({"ago": 9999}).encode())
+            if url.endswith("/queue"):  # 샘플 순간엔 늘 빈 큐(그림 한 장이 1분 샘플 사이에 끝난다)
+                return io.BytesIO(json.dumps({"queue_running": [], "queue_pending": []}).encode())
+            if "/history" in url:  # 그리는 중이면 샘플마다 새 프롬프트 번호, 멈추면 같은 번호
+                n[0] += 1
+                return io.BytesIO(json.dumps({f"p{n[0]}" if drawing else "p0": {"status": "ok"}}).encode())
+            raise OSError(url)  # 8000(vLLM)은 그림 상자에 없다
+
+        def fake_sleep(s):
+            sleeps.append(s)
+            if len(sleeps) > 8:
+                raise Stop
+
+        saved = (urllib.request.urlopen, time.sleep, dict(os.environ))
+        os.environ.pop("MODE", None)
+        os.environ.update({"IDLE_MIN": "3", "MAX_HOURS": "99", "CONTAINER_ID": "1", "CONTAINER_API_KEY": "k", "ON_IDLE": "terminate"})
+        urllib.request.urlopen, time.sleep = fake_open, fake_sleep
+        try:
+            exec(compile(src, "watchdog.py", "exec"), {"__name__": "wd"})
+        except Stop:
+            pass
+        finally:
+            urllib.request.urlopen, time.sleep = saved[0], saved[1]
+            os.environ.clear()
+            os.environ.update(saved[2])
+        return hits
+
+    assert run(drawing=True) == []          # 그림이 잇달아 끝나는 동안은(빈 큐여도) 지우지 않는다
+    assert "DELETE" in run(drawing=False)   # 그림이 멈추면 IDLE_MIN(3분) 뒤 지움
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):

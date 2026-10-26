@@ -667,13 +667,14 @@ def list_panels(series: str, episode: str, only_missing: bool = False) -> str:
 def _folder(folder: str) -> str:
     """그림 폴더: 비우면 본편 그림(panels_hf), "vast" 면 GPU 서버로 그린 판(panels_hf_vast)."""
     f = (folder or "").strip().lower()
-    if f in ("", "hf", "panels_hf"):
+    # "out"·"main"·"본편" 도 본편: 작은 모델이 list_files 에서 본 out/ 폴더 이름을 그대로 넣어 오류 한 번을 썼다(2026-10-26 무대 뒤 GPU 시나리오)
+    if f in ("", "hf", "panels_hf", "out", "main", "본편", "final"):
         return "panels_hf"
     if f in ("vast", "panels_hf_vast"):
         return "panels_hf_vast"
     if f in ("vast_restyle", "restyle", "panels_hf_vast_restyle"):
         return "panels_hf_vast_restyle"
-    raise ValueError('folder 는 비우거나(본편) "vast" · "vast_restyle"')
+    raise ValueError('folder 는 비우거나(본편; "out"·"main" 도 같음) "vast" · "vast_restyle"')
 
 
 def _ep_dirs(series: str = ""):
@@ -2504,6 +2505,9 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
     if state == "running" and log.exists():  # 로그가 오래 안 늘면 멈춘 것일 수 있다(프로세스가 죽었으면 바로 알린다)
         out["idle_s"] = int(time.time() - log.stat().st_mtime)
         out["stalled"] = out["idle_s"] > STALLED_S or not _alive(st.get("pid"))
+        if not _alive(st.get("pid")):
+            # 끊긴 작업(학습 마무리 스크립트가 죽어 running 으로 남음, 2026-10-26)을 '도는 중'으로 알리면 모델이 기다리고 하네스도 기다린다
+            out["state"] = "lost"
     review = _job_review(spec, st.get("started", ""))
     epd = ep
     drawn = {}
@@ -2575,7 +2579,8 @@ def job_status(job_id: str = "", wait: int = 0, tail_lines: int = 40, series: st
     '아까 시킨 거 어디까지 됐어?' 에 답할 때. wait 를 주면 끝날 때까지 최대 wait 초(50까지) 기다렸다가 답한다: 짧은 작업(컷 몇 장)은 wait=50 으로 부르고,
     같은 작업으로 최대 4번(약 5분)까지. 그래도 running 이면 사용자에게 작업 번호·panels_done/panels_total·eta_s 를 알리고 답을 끝낸다(작업은 대화와 상관없이
     이어 돈다). 한 화 만들기처럼 긴 작업은 기다리지 말고 바로 알린다. wait 없이 몇 초 간격으로 되풀이하지 않는다.
-    state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나 candidates 의 시안을 사용자에게 보여 준다).
+    state: starting · running · done · failed · needs_review(사람 확인이 필요함, 실패 아님: review 의 컷이나 candidates 의 시안을 사용자에게 보여 준다)
+    · lost(프로세스가 죽어 끊김: 돌고 있지 않다. 로그 끝을 보고 다시 시킨다).
     panels_done/panels_total/eta_s = 진행(그리는 작업), stalled = 로그가 오래 안 늘었거나 프로세스가 죽음, gates = 준비 작업의 관문 통과 여부,
     review = 그린 컷 중 검수가 사람 확인으로 남긴 컷(panel·issues·note), drawn · links = 그린 컷·내보낸 파일 링크.
     (예전 job_status(wait=50) 를 여기에 합침, 2026-10-22. 2026-10-16 agent app 시험: 몇 초 간격 되풀이가 반복 방지에 걸려 다 그린 결과를 보고하지 못했다.
@@ -2586,8 +2591,9 @@ def job_status(job_id: str = "", wait: int = 0, tail_lines: int = 40, series: st
         return json.dumps({"error": "bad_job_id"})
     end = time.time() + max(0, min(int(wait or 0), 50))
     while time.time() < end:
-        if (_json(JOBS / f"{job_id}.status.json", None) or {}).get("state") not in (None, "starting", "running"):
-            break
+        st = _json(JOBS / f"{job_id}.status.json", None) or {}
+        if st.get("state") not in (None, "starting", "running") or (st.get("state") == "running" and not _alive(st.get("pid"))):
+            break  # 죽은 프로세스가 running 으로 남긴 작업은 기다리지 않는다(_job_info 가 lost 로 알린다)
         time.sleep(2)
     return json.dumps(_job_info(job_id, tail_lines), ensure_ascii=False)
 
