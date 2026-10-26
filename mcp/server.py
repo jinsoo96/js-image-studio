@@ -632,7 +632,9 @@ def status() -> str:
             pdf = next(ep.glob("out/*.pdf"), None)
             lines.append(f"- {ep.name}: {b.get('title_card', '')} | 컷 {len(panels)} | 새로 그릴 컷 {drawn}/{len(pj)} 그림 | "
                          f"합성 {'있음 ' + pdf.name if pdf else '없음'}")
-    running = [st.name.replace('.status.json', '') for st in JOBS.glob('*.status.json') if (_json(st, {}) or {}).get('state') == 'running']
+    # 프로세스가 죽은 채 running 으로 남은 작업은 도는 것이 아니다(job_status 가 lost 로 알리는 것과 같은 셈, 2026-10-26)
+    running = [st.name.replace('.status.json', '') for st in JOBS.glob('*.status.json')
+               if (_json(st, {}) or {}).get('state') == 'running' and _alive((_json(st, {}) or {}).get('pid'))]
     lines.append(f"\n진행 중인 작업: {', '.join(running) or '없음'}")
     return "\n".join(lines)
 
@@ -812,6 +814,8 @@ def find(query: str, series: str = "", limit: int = 12, episode: str = "") -> st
             notes.append(f"hits 는 앞 {n}개만, 컷 번호 전체는 ids_by_episode(세기는 by_episode)")
         if len(ids_by_ep) > 1:
             notes.append("total 은 모든 회차·판(사본 포함)의 합, 한 회차의 수는 by_episode")
+        if len(hits) > 8:  # 인물 컷 모아보기: 회차 전체를 한 번 모아 보고 다시 인물 컷을 모으는 헛호출이 있었다(2026-10-26 외출 이상수 180컷)
+            notes.append("모아보기는 contact_sheet(series, episode, ids=ids_by_episode 의 값) 한 번으로(24개를 넘으면 도구가 여러 장으로 나눈다)")
         if notes:
             out["note"] = ". ".join(notes)
     if series_hits:
@@ -858,7 +862,8 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
     회차 컷: 비우면 새로 그린 컷 전부, folder="vast" 면 GPU 서버로 그린 컷(panels_hf_vast). folder 는 그림 폴더를 고르는 칸(비움·vast·vast_restyle)이라
     인물·장면 이름을 넣는 곳이 아니다: 인물의 컷만 모으려면 find 로 받은 컷 번호를 ids 에, 장소는 scene 에.
     paths 예: series/<작품>/assets/*_sheet.png · series/<작품>/assets/_candidates · series/<작품>/assets/vast_refs/<인물 id>_*.png (이름을 하나씩 적기보다 * 패턴이 오타가 없다).
-    한 장에 24개까지(넘으면 앞 24개와 전체 개수를 알린다). 사용자에게는 link 를 준다."""
+    한 장에 24개, 넘으면 도구가 여러 장으로 나눠 전부 만든다(JSON pages 에 장마다 sheet·link, 그림은 첫 장만 실린다): 번호를 손으로 쪼개 여러 번
+    부르지 않는다. 사용자에게는 link(여러 장이면 pages 의 link 전부)를 준다."""
     if paths.strip():
         # 회차 컷이 아닌 그림(시트·시안·참고 그림)을 볼 도구가 없어 에이전트가 그림체·생김새를 확인하지 못했다(2026-10-23 사용자:
         # "저장소를 둘러볼 수 있는 쓸모 있는 도구를 골라 쓰게")
@@ -872,7 +877,7 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
         if not found:
             return ["그 경로에 그림(.png .jpg .webp)이 없다. list_files 로 확인"]
         name = re.sub(r"[^\w.-]+", "_", Path(found[0].parent).relative_to(ROOT.resolve()).as_posix())[-60:]
-        return _sheet([(f.name, f) for f in found[:24]], name, total=len(found))
+        return _sheets([(f.name, f) for f in found], name)
     ep = _episode(series, episode)
     sub = _folder(folder)
     pj = _panels_json(ep)
@@ -891,7 +896,28 @@ def contact_sheet(series: str = "", episode: str = "", ids: str = "", scene: str
             items.append((pid, f))
     if not items:
         return "고른 컷 중 그림이 있는 컷이 없다"
-    return _sheet(items[:24], f"{_series(series).name}_{ep.name}", total=len(items))
+    return _sheets(items, f"{_series(series).name}_{ep.name}")
+
+
+SHEET_PER = 24  # 모아보기 한 장의 컷 수(4열 6줄, 1280px 로 줄여도 얼굴이 보이는 크기)
+
+
+def _sheets(items: list, name: str) -> list:
+    """(이름, 그림 경로) 목록을 SHEET_PER 개씩 여러 장으로. 결과 = [JSON(pages 에 장마다 sheet·link·shown, 전체 수), 첫 장 그림].
+    예전엔 앞 24개만 만들고 전체 수를 알렸는데, 180컷짜리 인물(외출 1화 이상수)에서 작은 모델이 번호를 손으로 7번 쪼개 부르며(겹치는 묶음까지)
+    도구 17번·입력 63만 토큰을 썼다(2026-10-26 미사일 스튜디오 시험). 장은 도구가 나누고 모델은 링크만 전한다."""
+    if len(items) <= SHEET_PER:
+        return _sheet(items, name)
+    pages = [items[i:i + SHEET_PER] for i in range(0, len(items), SHEET_PER)]
+    first, made = None, []
+    for k, page in enumerate(pages, 1):
+        r = _sheet(page, f"{name}_{k}of{len(pages)}")
+        info = json.loads(r[0])
+        made.append({k2: info[k2] for k2 in ("sheet", "link", "panels", "shown")})
+        first = first or r[1]
+    out = {"panels": len(items), "sheets": len(pages), "per_sheet": SHEET_PER, "pages": made,
+           "note": f"{len(items)}컷을 {len(pages)}장으로 나눠 모두 만들었다. 그림은 첫 장만 실었고, 사용자에게는 pages 의 link 를 전부 준다"}
+    return [json.dumps(out, ensure_ascii=False), first]
 
 
 def _sheet(items: list, name: str, total: int = 0) -> list:
