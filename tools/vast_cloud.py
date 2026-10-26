@@ -856,6 +856,9 @@ def ensure() -> tuple:
 # ---------- 학습한 LoRA 동기화(서버를 바꿔도 그림체가 따라가게) ----------
 
 LORA_STORE = ROOT / "models" / "loras"  # 이 PC 의 LoRA 보관함(ComfyUI models/loras 와 같은 상대 경로, 깃 밖)
+# 서버에서 LoRA 가 있을 수 있는 자리(ComfyUI 폴더 기준): 올릴 땐 첫째, 내려받을 땐 차례로 찾는다. 학습 노드(SaveLoRA)는 output/loras/ 에 저장하고
+# ComfyUI 는 둘 다 LoRA 목록에 올린다(2026-10-26 무대 뒤 500스텝 파일이 output/loras/webtoon/ 에 있어 models/loras/ 만 보던 내려받기가 못 찾을 뻔)
+LORA_SERVER_DIRS = ("models/loras", "output/loras")
 
 
 def lora_files() -> set:
@@ -888,7 +891,8 @@ def loras_sync(direction: str = "status") -> dict:
     """push: PC 보관함에 있고 서버에 없는 LoRA 를 올린다(켤 때마다). pull: 서버에 있고 PC 에 없는 것을 내려받는다(학습 뒤).
     status: 어디에 있는지만 센다. 대상은 lora_files()(작품 무관). 올린 크기가 다르면 다시 올린다(깨진 LoRA 로 104컷이 회색으로 나온 일, runpod_cloud)."""
     want, have = lora_files(), server_loras()
-    base = comfy_dir().rstrip("/") + "/models/loras/"
+    cdir = comfy_dir().rstrip("/")
+    bases = [f"{cdir}/{d}/" for d in LORA_SERVER_DIRS]
     res = {"pushed": [], "pulled": [], "both": [], "server_only": [], "local_only": [], "missing_everywhere": []}
     for f in sorted(want):
         local_f = LORA_STORE / f
@@ -896,7 +900,7 @@ def loras_sync(direction: str = "status") -> dict:
         if direction == "push" and on_pc and not on_server:
             data = local_f.read_bytes()
             for _ in range(3):
-                got = json.loads(agent("POST", f"/upload?path={urllib.parse.quote(base + f)}", data, timeout=900)).get("bytes")
+                got = json.loads(agent("POST", f"/upload?path={urllib.parse.quote(bases[0] + f)}", data, timeout=900)).get("bytes")
                 if got == len(data):
                     break
                 print(f"  LoRA 올린 크기 불일치({got} != {len(data)}), 다시 올림", flush=True)
@@ -905,7 +909,14 @@ def loras_sync(direction: str = "status") -> dict:
             res["pushed"].append(f)
             print(f"  LoRA 올림: {f} ({len(data) / 2**20:.0f}MB)", flush=True)
         elif direction == "pull" and on_server and not on_pc:
-            data = agent("GET", f"/download?path={urllib.parse.quote(base + f)}", timeout=900)
+            data = None
+            for b in bases:  # 목록엔 있지만 어느 폴더인지는 모른다: 차례로
+                with contextlib.suppress(urllib.error.URLError, OSError, ValueError):
+                    data = agent("GET", f"/download?path={urllib.parse.quote(b + f)}", timeout=900)
+                    if data:
+                        break
+            if not data:
+                raise RuntimeError(f"서버 목록엔 있는데 파일을 못 찾음: {f} ({', '.join(LORA_SERVER_DIRS)} 아래 없음)")
             local_f.parent.mkdir(parents=True, exist_ok=True)
             local_f.write_bytes(data)
             res["pulled"].append(f)

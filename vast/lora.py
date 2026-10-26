@@ -412,6 +412,15 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         ckpts.append({"steps": done, "file": prev})
         log(f"  {done}/{total}스텝 → {prev} ({int(time.time() - t1)}초)")
         if done < total:
+            # 묶음이 저장될 때마다 꺼 둔 채 등록해 둔다: 학습이 중간에 끊겨도(예산·서버) 저장된 묶음을 바로 견주고 쓸 수 있게
+            # (2026-10-26 무대 뒤: 10초/스텝이라 1500 중 500에서 멈춰야 했는데 다 끝나야 등록되던 것을 손으로 등록)
+            if register:
+                old = registry(series).get(who) or {}
+                _key = who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}"
+                if role != "train_lora":
+                    _key = f"{who}@{role.replace('train_lora_', '') or 'base'}"
+                set_entry(series, _key, {"file": prev, "trigger": tg, "model": lmodel, "strength": 0.8, "on": False, "steps": total,
+                                         "checkpoints": ckpts, "partial": f"{done}/{total}", "at": time.strftime("%Y-%m-%d %H:%M")})
             _free(c)
     pick_file = prev
     secs, train_s = int(time.time() - t0), int(time.time() - t1)
@@ -426,7 +435,7 @@ def train(series: Path, who: str, steps=None, rank=None, lr=None, panels: int = 
         key = who if str(old.get("model") or lmodel) == lmodel else f"{who}@{lmodel}"
         if role != "train_lora":  # 다른 바탕에서 학습한 것은 견줄 때까지 따로('<누구>@base' · '@assist', 그리기는 이 칸을 보지 않는다)
             key = f"{who}@{role.replace('train_lora_', '') or 'base'}"
-        set_entry(series, key, entry)
+        set_entry(series, key, entry, remove=("partial",))  # 중간 등록 표시를 지우고 최종으로
     log(f"학습 끝 전체 {secs // 60}분 {secs % 60}초(학습 {train_s}초, 스텝당 {entry['s_per_step']}초) → {pick_file}"
         + ((f" (lora/loras.json {who}, 강도 0.8)" if len(ckpts) == 1 else f" (lora/loras.json {who} 에 꺼 둠: lora_eval.py 로 중간 파일 {len(ckpts)}개를 견줘 고를 것)")
            if register else " (등록 안 함)"))
@@ -444,12 +453,14 @@ def training_block(series: Path) -> str:
         return ""
 
 
-def set_entry(series: Path, who: str, entry: dict) -> dict:
-    """lora/loras.json 의 <인물> 을 고친다(없던 키는 더하고, 준 키만 바꾼다)."""
+def set_entry(series: Path, who: str, entry: dict, remove: tuple = ()) -> dict:
+    """lora/loras.json 의 <인물> 을 고친다(없던 키는 더하고, 준 키만 바꾼다. None 은 '그대로'. remove 의 키는 지운다)."""
     f = series / "lora" / "loras.json"
     reg = _read(f)  # registry() 는 시험용 덮어쓰기가 섞이니 파일 그대로
     cur = reg.get(who) or {}
     cur.update({k: v for k, v in entry.items() if v is not None})
+    for k in remove:
+        cur.pop(k, None)
     reg[who] = cur
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(reg, ensure_ascii=False, indent=1), encoding="utf-8")

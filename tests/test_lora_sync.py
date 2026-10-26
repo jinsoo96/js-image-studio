@@ -37,14 +37,19 @@ class Fake(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
-        loras = Fake.comfy / "models" / "loras"
-        if u.path == "/models/loras":
-            return self._send(200, sorted(p.relative_to(loras).as_posix() for p in loras.rglob("*.safetensors")))
+        if u.path == "/models/loras":  # ComfyUI 는 models/loras 와 학습 노드가 저장하는 output/loras 를 함께 올린다
+            names = set()
+            for sub in ("models/loras", "output/loras"):
+                d = Fake.comfy / sub
+                names |= {p.relative_to(d).as_posix() for p in d.rglob("*.safetensors")} if d.exists() else set()
+            return self._send(200, sorted(names))
         if u.path == "/info":
             return self._send(200, {"comfy_dir": Fake.comfy.as_posix(), "mode": "comfy"})
         if u.path == "/download":
             if self.headers.get("X-Token") != "tok":
                 return self.send_error(403)
+            if not Path(q["path"][0]).is_file():  # 진짜 에이전트는 open 이 터져 응답 없이 끊긴다: 어느 쪽이든 '없음'으로 다뤄야 한다
+                return self.send_error(500)
             return self._send(200, Path(q["path"][0]).read_bytes(), "application/octet-stream")
         self.send_error(404)
 
@@ -67,7 +72,8 @@ def test_loras_push_pull_status_against_fake_server():
         root = Path(d)
         Fake.comfy = root / "server_comfy"
         (Fake.comfy / "models" / "loras" / "webtoon").mkdir(parents=True)
-        (Fake.comfy / "models" / "loras" / "webtoon" / "b.safetensors").write_bytes(b"B" * 5000)  # 서버에만(방금 학습한 것)
+        (Fake.comfy / "output" / "loras" / "webtoon").mkdir(parents=True)
+        (Fake.comfy / "output" / "loras" / "webtoon" / "b.safetensors").write_bytes(b"B" * 5000)  # 서버에만: 학습 노드가 저장하는 output/loras/
         (root / "models" / "loras" / "webtoon").mkdir(parents=True)
         (root / "models" / "loras" / "webtoon" / "a.safetensors").write_bytes(b"A" * 7000)  # PC 에만(지난 서버에서 학습해 둔 것)
         (root / "series" / "w1" / "lora").mkdir(parents=True)
