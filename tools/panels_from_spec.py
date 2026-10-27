@@ -85,10 +85,12 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
     return changed
 
 
-def structure_lint(panels, board) -> list:
+def structure_lint(panels, board, series: Path | None = None) -> list:
     """컷 설명의 구조 검사(글 속 문구가 아니라 칸이 있는지만 본다). 연출 내용(자세·탈것·소품·부정어·연기·공간)은 컷 설명 관문의
-    기준표(skills/panel-spec/judge.json)가 컷 글을 읽고 채점한다."""
-    out = []
+    기준표(skills/panel-spec/judge.json)가 컷 글을 읽고 채점한다. 같은 장면 안 모자·안경·장갑이 씀↔안 씀으로 엇갈리면 여기서 잡는다(outfit_lock)."""
+    from outfit_lock import conflicts, load_rules
+    order = {pid: i for i, pid in enumerate(board)}
+    out = [ln for ln in conflicts(sorted(panels, key=lambda p: order.get(p["id"], 10 ** 6)), load_rules(series))]
     for p in panels:
         lines = [d for d in (board.get(p["id"], {}).get("dialogue") or []) if d.get("type") in ("speech", "thought")]
         if len(p["chars"]) >= 2 and lines and not all(d.get("who") for d in lines):
@@ -164,7 +166,12 @@ def main():
     missing = [p["id"] for p in board["panels"] if p["id"] not in P and p["id"] not in reuse and not p.get("composite")]
     no_act = [p["id"] for p in panels if p["chars"] and "acting" not in p]
     crowded = [p["id"] for p in panels if "close-up" in p["shot"] and len(p["chars"]) > 1 and not p.get("camera")]  # 클로즈업은 한 사람(panel-spec 규칙)
-    lint = structure_lint(panels, {p["id"]: p for p in board["panels"]})
+    # 장면 옷 고정: 모자·안경·장갑 말이 없는 컷은 같은 장면 앞 컷을 이어받는다(말이 없으면 그리기 모델이 시대 규칙대로 씌웠다, 2026-10-27 개항 v4)
+    from outfit_lock import load_rules, lock, looks, order_by_board
+    locked = lock(order_by_board(panels, ep), load_rules(series), looks(series))
+    if locked:
+        print(f"장면 옷 고정: 모자·안경·장갑 구절 {len(locked)}개를 이어받음(예: {locked[0][0]} {locked[0][1]} '{locked[0][3]}')")
+    lint = structure_lint(panels, {p["id"]: p for p in board["panels"]}, series)
     (ep / "panels.json").write_text(json.dumps(panels, ensure_ascii=False, indent=1), encoding="utf-8")
     for line in resolve_balloon_sides(ep, panels, scenes):
         print("말풍선 자리:", line)

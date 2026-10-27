@@ -1,0 +1,96 @@
+{
+  "_why": "장면 옷 고정(tools/outfit_lock.py) 규칙. 그리기 모델이 컷마다 멋대로 더하거나 빼는 소품(모자·안경·장갑)은 컷 설명에 '있다/없다'를 꼭 적는다: 컷 설명에 말이 없으면 작품의 시대 규칙(예: 'men in fedoras')을 따라 씌웠다(2026-10-27 개항 1화 v4 p009·p028 모자, p017a 안경, p059 장갑). 작품마다 더할 말은 series.json 의 outfit_rules 에 같은 꼴로 적으면 합쳐진다.",
+  "categories": {
+    "headwear": {
+      "words": [
+        "hat",
+        "hats",
+        "cap",
+        "caps",
+        "fedora",
+        "beret",
+        "helmet",
+        "hood",
+        "bonnet",
+        "headband",
+        "bandana",
+        "turban",
+        "veil",
+        "gat",
+        "kepi",
+        "beanie",
+        "visor"
+      ],
+      "negatives": [
+        "bare-headed",
+        "bareheaded",
+        "hatless"
+      ],
+      "none": "bare-headed"
+    },
+    "glasses": {
+      "words": [
+        "glasses",
+        "spectacles",
+        "sunglasses",
+        "monocle",
+        "goggles",
+        "eyeglasses"
+      ],
+      "negatives": [],
+      "none": ""
+    },
+    "gloves": {
+      "words": [
+        "glove",
+        "gloves",
+        "mittens"
+      ],
+      "negatives": [
+        "bare-handed",
+        "barehanded"
+      ],
+      "none": ""
+    }
+  },
+  "negation": [
+    "no",
+    "without",
+    "not",
+    "never",
+    "removed",
+    "off"
+  ],
+  "change_verbs": [
+    "takes off",
+    "take off",
+    "took off",
+    "puts on",
+    "put on",
+    "removes",
+    "removed",
+    "pulls off",
+    "pulls on",
+    "dons",
+    "changes into",
+    "changed into",
+    "hands over",
+    "drops",
+    "picks up",
+    "tips his",
+    "tips her",
+    "doffs"
+  ],
+  "_none_why": "'none' 은 긍정꼴로만(bare-headed). 그리기 지시의 부정문('no glasses')은 오히려 그것을 그리게 했다는 보고가 있어, 긍정꼴이 없는 갈래(안경·장갑)는 비워 두고 장면 안 이어받기만 한다.",
+  "held_words": [
+    "in hand",
+    "in his hand",
+    "in her hand",
+    "holding",
+    "holds",
+    "carrying",
+    "carries",
+    "under his arm",
+    "under her arm"
+  ]
+}

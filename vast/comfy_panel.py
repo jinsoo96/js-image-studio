@@ -85,7 +85,7 @@ CLOSEUP_PLACE = ("<image{n}> is the place. This is a close-up, and behind the pe
                  "with its real colors, lights and depth (blurred shapes and lights of the room or street). Never leave a blank or plain wall behind the person.")
 
 
-def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None, control=None):
+def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False, series=None, role=None, refine=False, chars=None, control=None, _retried=False):
     """vast 에 저장된 워크플로우(생성 webtoon_vertical_qwen21 · 편집 webtoon_edit_qwen21)를 불러 입력값만 채운다(saved_workflow.py).
     화면에서 고친 워크플로우가 그대로 돈다. 서버에서 못 불러오면 같은 구성을 코드로 짠다(_graph_code, 경고 한 번).
     edit=True: 첫 참고 그림(<image1>)을 고치는 편집. 캔버스는 그 그림 크기(인코더가 내주는 잠재)를 쓴다(w·h 무시).
@@ -123,6 +123,13 @@ def graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo=False, edit=False
             g[sc]["inputs"]["image"] = control
         return g
     except Exception as e:  # noqa: BLE001
+        # 새로 켠 서버엔 저장 워크플로우가 아직 없을 수 있다(작업실 사본은 models() 가 올린다). 404 면 다시 올리고 한 번 더:
+        # 켜자마자 부른 첫 편집이 404 → 코드 그래프 → 서버 거절(400)로 끝났다(2026-10-27 개항 v4 이어짐 고치기 시험)
+        import urllib.error
+        if not _retried and isinstance(e, urllib.error.HTTPError) and e.code == 404:
+            from saved_workflow import models
+            models(refresh=True)
+            return graph(prompt, ref_names, w, h, seed, steps, ref_res, turbo, edit, series, role, refine, chars, control, _retried=True)
         if not _SAVED_WARNED:
             print(f"[경고] 저장 워크플로우를 못 불러 코드 그래프로 그림: {type(e).__name__}: {e}", file=sys.stderr)
             _SAVED_WARNED = True

@@ -2279,12 +2279,13 @@ FIX_LADDER = ("고치는 순서: ① 예전 판이 더 나았으면 image_versio
 
 
 @mcp.tool()
-def edit_image(series: str, episode: str, panel: str | int, instruction: str, refs: str | list = "", seed: int = -1) -> str:
-    """그린 컷의 일부만 고친다(다시 그리지 않음, GPU 서버, 컷당 약 30초, 작업). 결과는 바로 본편에 들어가고 옛 본편은 panels_hf/_rejected/ 에 남는다.
+def edit_image(series: str, episode: str, panel: str | int, instruction: str, refs: str | list = "", seed: int = -1, box: str = "") -> str:
+    """그린 컷의 일부만 고친다(다시 그리지 않음, GPU 서버, 컷당 약 30초, 작업). box 를 주면 그 상자만 고치고 밖은 픽셀 그대로 둔다. 결과는 바로 본편에 들어가고 옛 본편은 panels_hf/_rejected/ 에 남는다.
 
     인자
     - instruction: 영어로 '무엇을 어떻게 바꾸고 나머지는 그대로'. 예: "In <image1>, remove the man in the grey polo shirt; fill the space with the lobby. Keep everyone else, the place, the light and the framing exactly the same."
-    - refs: 인물 id 나 작품 안 파일(쉼표). 인물 상반신 참고가 <image2> 부터 들어간다. 얼굴이 다른 사람 같으면 그 인물 id 를 준다.
+    - refs: 인물 id·같은 회차 컷 번호·작품 안 파일(쉼표). <image2> 부터 들어간다. 얼굴이 다른 사람 같으면 그 인물 id, 앞 컷과 옷·모자를 맞출 땐 그 컷 번호.
+    - box: 고칠 곳 "x0,y0,x1,y1"(그림 크기 0~1000 비율, image_info 로 자리를 본다). 그 상자만 잘라 키워 고치고 가장자리를 흐려 붙인다. 옷·소품·얼굴 하나처럼 좁은 수정에 쓴다.
     - seed: 결과가 마음에 안 들면 바꾼다.
     주의: 사람 자리 옮기기·카메라 바꾸기는 편집으로 잘 안 된다(draw). 한 사람의 물건을 다른 사람에게 더할 땐 원래 가진 사람도 그대로 둔다고 적는다. 똑같은 얼굴들을 다르게 할 땐 자리마다 머리 모양·얼굴형·장신구를 구체적으로 적는다.
     다음: compare_image 로 전/후를 보여 주고, 합성본에 넣으려면 compose. 되돌리려면 adopt_image(source='version'). 본편을 건드리지 않고 먼저 보려면 preview_image."""
@@ -2296,7 +2297,8 @@ def edit_image(series: str, episode: str, panel: str | int, instruction: str, re
         return _fail("empty_instruction")
     cmd = [PY, str(VAST / "panel_edit.py"), "edit", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
     cmd += ["--seed", str(seed)] if seed >= 0 else []
-    job = _start_job("edit_image", ep, [{"label": f"{pid} 부분 고치기", "cmd": cmd}], instruction[:120])
+    cmd += ["--box", str(box).strip()] if str(box or "").strip() else []
+    job = _start_job("edit_image", ep, [{"label": f"{pid} 부분 고치기" + (" (상자)" if str(box or "").strip() else ""), "cmd": cmd}], instruction[:120])
     return f"작업 시작 {job}(약 30초~1분). job_status('{job}') → 끝나면 compare_image('{series}', '{episode}', '{pid}')"
 
 
@@ -2404,13 +2406,13 @@ def style_check(series: str, episode: str = "", ids: str = "", folder: str = "va
 
 
 @mcp.tool()
-def preview_image(series: str, episode: str, panel: str | int, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1) -> str:
+def preview_image(series: str, episode: str, panel: str | int, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1, box: str = "") -> str:
     """본편은 그대로 두고 한 컷을 바꾼 모습만 미리 본다(GPU 서버, 약 30초, 작업). 결과는 <회차>/review/previews/ 에만 쌓인다.
 
     인자
     - instruction: 영어 편집 지시(edit_image 과 같은 꼴).
     - character, design: 인물 디자인 바꾸기(인물 id + 영어 설명, 예 "short silver-white hair instead of black hair").
-    - refs, seed: edit_image 과 같다.
+    - refs, seed, box: edit_image 과 같다.
     다음: compare_image(what='preview') 로 보여 주고, 고르면 adopt_image(source='preview'). 작품 전체에 쓰려면 add_to_series 와 시안·참고 그림을 다시 만드는 일이 따로 필요하니 사용자에게 묻는다."""
     panel = str(panel)  # 작은 모델이 컷 번호를 숫자(4)로 넘겨 형식 오류가 났다(2026-10-24 개항 v4)
     ep = _episode(series, episode)
@@ -2423,6 +2425,7 @@ def preview_image(series: str, episode: str, panel: str | int, instruction: str 
         label, note = f"{pid} {character} 디자인 미리 보기", design
     elif (instruction or "").strip():
         cmd = [PY, str(VAST / "panel_edit.py"), "preview", str(_series(series)), ep.name, pid, instruction, "--refs", refs]
+        cmd += ["--box", str(box).strip()] if str(box or "").strip() else []
         label, note = f"{pid} 미리 보기", instruction
     else:
         return _fail("empty_instruction", reason="instruction 이나 character+design 을 준다")

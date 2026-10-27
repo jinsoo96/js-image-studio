@@ -236,7 +236,7 @@ def judge_panels(ep: Path) -> dict:
     crit = _criteria("panel-spec")
     panels = json.loads((ep / "panels.json").read_text(encoding="utf-8"))
     board = {p["id"]: p for p in json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))["panels"]}
-    lint = structure_lint(panels, board)
+    lint = structure_lint(panels, board, ep.parents[1])
     scenes = (_json_file(ep / "panels_spec.json").get("scenes") or {})
     # 바뀌지 않았고 지난번에 문제없이 지나간 묶음은 다시 채점하지 않는다: 채점 모델이 돌릴 때마다 손대지 않은 컷에서 새 문제를 집어
     # 대사 한 줄 고치는 일이 관문 왕복 34번이 됐다(2026-10-24 스튜디오 시험). 바뀐 묶음·문제가 있던 묶음만 다시 본다

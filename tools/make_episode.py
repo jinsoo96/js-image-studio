@@ -157,6 +157,8 @@ def main():
     t0 = time.time()
     run([PY, ep / "make_storyboard.py"], "콘티(storyboard.json)", capture=True)
     run([PY, ep / "build_panels.py"], "컷 설명(panels.json)·재사용 컷", capture=True)
+    # 회차의 build_panels.py 가 직접 쓴 panels.json 도 장면 옷 고정을 거친다(panels_from_spec 을 안 쓰는 회차)
+    run([PY, TOOLS / "outfit_lock.py", ep, "--write"], "장면 옷 고정(모자·안경·장갑)", capture=True)
 
     need = audit(series, ep, args.accept_new)
     if need:
@@ -185,7 +187,9 @@ def main():
     if missing:
         raise SystemExit(f"그림이 없는 컷: {','.join(missing)}(다시 부르면 그 컷만 다시 그린다)")
     if new:  # 같은 장면 앞뒤 컷의 이어짐(자세·소품·옷·얼굴·그림체·좌우). 컷 하나씩 보는 연출 확인으로는 못 잡았다(2026-10-18 외출 1화)
-        cc = run([PY, TOOLS / "continuity_check.py", ep, "--only", ",".join(new), "--record"], "장면 이어짐 점검", allow_fail=True, capture=True)
+        # 옷·모자·머리가 바뀐 짝은 그 사람 둘레만 앞 컷에 맞춰 고친다(--fix, 2026-10-27 개항 v4 이어짐 12짝이 기록만 되고 남았다)
+        cc = run([PY, TOOLS / "continuity_check.py", ep, "--only", ",".join(new), "--record", "--fix"], "장면 이어짐 점검·고치기",
+                 allow_fail=True, capture=True)
     if args.until == "draw":
         return
 

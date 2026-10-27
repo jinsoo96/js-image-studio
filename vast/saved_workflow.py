@@ -10,6 +10,7 @@ import copy
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -62,7 +63,9 @@ def models(refresh: bool = False) -> dict:
                     loaded[n] = fu.result()
                 except Exception:  # noqa: BLE001
                     pass
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        # 서버 목록을 못 읽으면 기본 이름으로 간다(작업실 사본도 올리지 못한 채). 까닭을 남긴다: 조용히 빠져 뒤의 404 만 보였다(2026-10-27)
+        print(f"[경고] 서버 워크플로우·모델 목록을 못 읽어 기본 판 이름으로 간다(작업실 사본도 못 올림): {type(e).__name__}: {e}", file=sys.stderr)
         if _models:
             return _models
         return {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}

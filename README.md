@@ -24,9 +24,14 @@ an agent can write and draw a vertical-scroll episode in the art style of an exi
 - **Generate** — `draw` builds the prompt from a structured description plus reference images
   (characters, locations, expressions) and the project's style LoRA, renders on ComfyUI and keeps every
   result beside the original. `draw_models` lists the model presets saved on the server.
-- **Edit and compare** — `edit_image` changes one part of an image and keeps the rest, `preview_image`
+- **Edit and compare** — `edit_image` changes one part of an image and keeps the rest (`box` limits it to one
+  person or rectangle and leaves every pixel outside untouched; `refs` can be another panel to match), `preview_image`
   tries a change without touching the original, `compare_image` shows before and after, `adopt_image`
   promotes a version, `image_versions` rolls back. Nothing is ever deleted.
+- **Continuity** — `tools/outfit_lock.py` carries each person's hat, glasses and gloves through a scene so the
+  model never invents them (rules in `skills/panel-spec/outfit_rules.json`, extendable per series); after
+  drawing, `continuity_check.py --fix` repairs clothes, hats and hair that changed between neighbouring panels,
+  editing only that person and keeping the fix only when the pair checks clean.
 - **Train** — `lora_train` (style or character), `restyle` (an edit LoRA that pulls generated images toward
   the project's look), `lora_compare` (checkpoints × strengths on held-out images, scored). Trained weights
   are kept on this PC and pushed to any new server on wake.

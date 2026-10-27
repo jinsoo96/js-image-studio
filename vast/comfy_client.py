@@ -124,6 +124,11 @@ class Comfy:
                     b = r.read()
                     return b if raw else json.loads(b.decode("utf-8")) if b else None
             except urllib.error.HTTPError as e:
+                if 400 <= e.code < 500 and path.startswith("/prompt"):  # 서버가 그래프를 거절한 까닭(node_errors)을 남긴다: 400 만 보여 원인을 못 봤다
+                    try:
+                        print(f"[ComfyUI 거절 {e.code}] {e.read().decode('utf-8', 'replace')[:1500]}", file=sys.stderr, flush=True)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if e.code not in (502, 503, 504) or k == tries - 1:
                     raise
             except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException):
