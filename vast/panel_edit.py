@@ -1,4 +1,4 @@
-"""그린 컷의 일부만 고치기(MCP edit_panel·preview_panel·adopt_panel 이 부른다. derive·faces 는 2026-10-23 MCP 에서 빼고 손으로만). 다시 그리지 않고 그 판의 '편집' 워크플로우로.
+"""그린 컷의 일부만 고치기(MCP edit_image·preview_image·adopt_image 이 부른다. derive·faces 는 2026-10-23 MCP 에서 빼고 손으로만). 다시 그리지 않고 그 판의 '편집' 워크플로우로.
 (2026-10-20 사용자 "부분부분만 고치는 것도 가능하냐, MCP 도 고도화해서 알아서 컨피 워크플로우를 활용해 작품을 만들어야": 이날 고친 32컷
  (지우기·버스 세우기·폰 쥔 손·얼굴 맞추기·잘 된 옆 컷에서 잘라 다시)은 스크래치 스크립트로 했고 MCP 에는 컷 통째 다시 그리기밖에 없었다)
 
@@ -146,7 +146,7 @@ def edit(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed: in
     warn = []
     if changed:
         warn.append("편집 전엔 시트와 맞던 인물이 달라졌다: " + "; ".join(f"{x['who']}({x['differs']})" for x in changed)
-                    + ". 그 사람을 바꾸려던 게 아니면 adopt_panel(source='version') 으로 되돌리고, 지시에 바꿀 사람을 옷·자리로 더 분명히 적어 다시")
+                    + ". 그 사람을 바꾸려던 게 아니면 adopt_image(source='version') 으로 되돌리고, 지시에 바꿀 사람을 옷·자리로 더 분명히 적어 다시")
     # 복제(얼굴이 똑같은 사람들)는 편집 뒤에도 남는지 다시 본다: '서로 다르게'만 적은 편집이 머리 모양만 조금 바꾸고 '통과'로 끝났다(2026-10-24 개항 v4 p013b·p016b)
     import refine as R
     if R.run_checks(series, v, _spec(ep, pid), only={"clones"}).get("복제"):

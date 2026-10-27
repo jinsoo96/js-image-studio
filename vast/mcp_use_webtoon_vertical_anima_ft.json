@@ -24,7 +24,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "# 세로 웹툰 컷 (Anima)\nwebtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1 과 같은 모델·설정을 서브그래프 없이 펼친 것(기준선은 그대로 둔다).\n\n**Qwen 판과 다른 점**: 글만 받는다(참고 그림 입구가 없다). 인물 생김새는 컷 설명 글에 적는다. 고치기(표정·남는 사람 지우기·검수 편집)는\n작업실 도구가 Qwen UC 편집 워크플로우(webtoon_edit_qwen21_uc)로 한다.\n\n**터보**: \"터보 LoRA\" 켜고 steps 8 · cfg 1(기본). 끄면 steps 30 · cfg 4(기준선 값). 작업실 도구가 켜고 끌 때 cfg 도 같이 바꾼다(extra.webtoon).\n\n**모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2(Civitai 2560840. 예비: anima-turbo-v1.0-extracted-r64, Turbo v1.0 에서 Base 를 뺀 LoRA)\n\n글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."
+    "# 세로 웹툰 컷 (Anima)\nwebtoon-studio 의 Anima 판 컷 그리기. 기준선 image_anima_base_v1 과 같은 모델·설정을 서브그래프 없이 펼친 것(기준선은 그대로 둔다).\n\n**Qwen 판과 다른 점**: 글만 받는다(참고 그림 입구가 없다). 인물 생김새는 컷 설명 글에 적는다. 고치기(표정·남는 사람 지우기·검수 편집)는\n작업실 도구가 Qwen UC 편집 워크플로우(webtoon_edit_qwen21_uc)로 한다.\n\n**터보**: \"터보 LoRA\" 켜고 steps 8 · cfg 1(기본). 끄면 steps 30 · cfg 4(기준선 값). 작업실 도구가 켜고 끌 때 cfg 도 같이 바꾼다(extra.webtoon).\n\n**모델**: diffusion_models/anima-base-v1.0 · text_encoders/qwen_3_06b_base(stable_diffusion) · vae/qwen-image/qwen_image_vae · loras/anima-turbo-lora-v0.2(Civitai 2560840. 예비: anima-turbo-v1.0-extracted-r64, Turbo v1.0 에서 Base 를 뺀 LoRA)\n\n글자·말풍선은 그리지 않는다(합성 단계에서 얹는다)."
    ],
    "title": "사용법"
   },

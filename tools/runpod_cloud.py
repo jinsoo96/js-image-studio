@@ -20,7 +20,7 @@
 
 API 키는 환경변수 RUNPOD_API_KEY. 파드 안 설치·실행은 cloud/runpod_bootstrap.sh, 지금 쓰는 파드 id 는 cloud/pod_state.json.
 설정은 RUNPOD_PROFILE(기본 runpod → cloud/runpod.json). runpod_qwen 이면 vast 와 같은 Qwen Image 2.1 UC 구성(cloud/runpod_qwen.json,
-2026-10-22 회사 vast 가 꺼져 옮김), 파드 상태는 cloud/pod_state_runpod_qwen.json.
+2026-10-22 공용 vast 가 꺼져 옮김), 파드 상태는 cloud/pod_state_runpod_qwen.json.
 """
 import base64
 import secrets
@@ -638,7 +638,7 @@ def main():
         if cmd == "unuse":
             for f in ("comfy_url.txt", "vlm_url.txt", "gpu_cloud.json"):
                 (st / f).unlink(missing_ok=True)
-            print("스위치를 지웠다(도구가 다시 COMFY_URL·vast·사내 게이트웨이를 쓴다)")
+            print("스위치를 지웠다(도구가 다시 COMFY_URL·vast·옛 판정 게이트웨이를 쓴다)")
         else:
             pod_id = load_state()["pod_id"]
             (st / "comfy_url.txt").write_text(proxy_url(pod_id) + "\n", encoding="utf-8")

@@ -1159,7 +1159,7 @@ def main() -> None:
             gc.write_text(json.dumps({"tool": "tools/vast_cloud.py", "profiles": left}, ensure_ascii=False) + "\n", encoding="utf-8")
         else:
             gc.unlink(missing_ok=True)
-        print(f"[{PROFILE}] 스위치를 지웠다({'·'.join(sorted(roles))}: 도구가 다시 COMFY_URL·사내 게이트웨이를 쓴다). 켜기 버튼: {left or 'RunPod'}")
+        print(f"[{PROFILE}] 스위치를 지웠다({'·'.join(sorted(roles))}: 도구가 다시 COMFY_URL·옛 판정 게이트웨이를 쓴다). 켜기 버튼: {left or 'RunPod'}")
     elif cmd == "wake":
         sys.exit(wake())
     elif cmd == "tunnel":

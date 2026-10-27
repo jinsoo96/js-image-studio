@@ -1,5 +1,5 @@
 """한 화 마무리: 합성 재료 컷(phone_ui·repeat·세피아 등) → 합성(compose) → PDF → 점검표. 컷은 미리 그려져 있어야 한다
-(vast_draw·make_episode 로 그리고 place_panels.py 가 panels/ 에 놓음). 그림이 없는 컷은 알리고 자리만 비워 합성한다.
+(draw·make_episode 로 그리고 place_panels.py 가 panels/ 에 놓음). 그림이 없는 컷은 알리고 자리만 비워 합성한다.
 
     python tools/run_episode.py <episode_dir>
 
@@ -72,9 +72,9 @@ class Runner:
 
     def run(self):
         # 예전엔 콘티에 옛 SDXL prompt 칸이 남은 컷(D+18·무대 뒤 1화)이 비면 RunPod 파드를 켜고 옛 ComfyUI 로 그리려 했다.
-        # 그리기는 GPU 서버(vast_draw)의 일이라 여기서는 알리기만 한다(2026-10-27 정리)
+        # 그리기는 GPU 서버(draw)의 일이라 여기서는 알리기만 한다(2026-10-27 정리)
         left = self.missing()
-        self.log(f"그림 없는 컷 {len(left)}" + (f": {', '.join(left[:20])}{' …' if len(left) > 20 else ''} (vast_draw 로 그리고 place_panels.py 로 놓는다)"
+        self.log(f"그림 없는 컷 {len(left)}" + (f": {', '.join(left[:20])}{' …' if len(left) > 20 else ''} (draw 로 그리고 place_panels.py 로 놓는다)"
                                                 if left else "(합성만)"))
         self.make_composites()
         self.log("합성: " + self.tool("compose.py"))

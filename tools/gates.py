@@ -1,5 +1,5 @@
 """관문(하네스의 검증 단계): 콘티·컷 설명을 기준표로 채점하고, 통과해야 그리기로 넘어간다.
-(2026-10-18 사용자 "붙이면 끝, 작업 안내나 검수는 하네스화로". agent platform 하네스 원칙 그대로: 규칙은 에이전트 프롬프트가 아니라 격리 judge 가 강제한다.
+(2026-10-18 사용자 "붙이면 끝, 작업 안내나 검수는 하네스화로". 규칙은 에이전트 프롬프트가 아니라 격리 judge 가 강제한다.
  기준표는 skills/<스킬>/judge.json, 꼴은 하네스 s08 judge_criteria [{name, description, weight, hard}], 합격 0.8.)
 
     .venv/Scripts/python tools/gates.py <회차 폴더> [storyboard|panels|all]

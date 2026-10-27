@@ -62,12 +62,12 @@ def test_wait_jobs_ignores_dead_process():
 
 def test_summarize_clears_running_when_job_status_reports_done():
     ev = [
-        {"type": "tool_call", "name": "webtoon-studio__compose", "arguments": {}},
-        {"type": "tool_result", "name": "webtoon-studio__compose", "text": '{"state": "running", "job": "j1", "result_ready": false}'},
-        {"type": "tool_result", "name": "webtoon-studio__job_status", "text": '{"job": "j1", "kind": "compose", "state": "running"}'},
+        {"type": "tool_call", "name": "imagestudio__compose", "arguments": {}},
+        {"type": "tool_result", "name": "imagestudio__compose", "text": '{"state": "running", "job": "j1", "result_ready": false}'},
+        {"type": "tool_result", "name": "imagestudio__job_status", "text": '{"job": "j1", "kind": "compose", "state": "running"}'},
     ]
     assert S.summarize({"events": ev})["still_running"] is True
-    ev.append({"type": "tool_result", "name": "webtoon-studio__job_status", "text": '{"job": "j1", "kind": "compose", "state": "done", "x": "' + "y" * 400 + '"}'})
+    ev.append({"type": "tool_result", "name": "imagestudio__job_status", "text": '{"job": "j1", "kind": "compose", "state": "done", "x": "' + "y" * 400 + '"}'})
     assert S.summarize({"events": ev})["still_running"] is False
     # 도는 중에 '거의 끝났습니다' 는 거짓 완료가 아니다. '다 됐습니다' 는 맞다
     turns = [{"sum": {"calls": [], "errors": [], "still_running": True, "tokens": [0, 0]}, "text": "합성이 거의 끝났습니다. 기계 점검만 남음"}]

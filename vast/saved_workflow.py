@@ -1,6 +1,6 @@
 """vast ComfyUI 에 저장된 워크플로우(화면용 UI 형식)를 불러 API 형식으로 바꾸고, 그리기 도구가 정하는 입력값만 채운다.
 (2026-10-17 사용자 "vast ComfyUI 에 짜 놓은 워크플로우를 불러서 도구로 쓰는 구조 아닌가": 전에는 같은 구성을 코드로 다시 짰다)
-화면에서 워크플로우를 고치면(모델·LoRA·샘플러·cfg·네거티브, 노드 추가) 작업실 도구(agent app MCP)와 agent platform 카탈로그 등록이 그대로 따른다.
+화면에서 워크플로우를 고치면(모델·LoRA·샘플러·cfg·네거티브, 노드 추가) 작업실 도구(MCP)가 그대로 따른다.
 코드가 채우는 것: 프롬프트 · 참고 그림 · 참고 그림 크기 · 캔버스 크기 · 시드 · 스텝 · 터보 LoRA 켜기/끄기 · 저장 이름.
 
     from saved_workflow import GEN, EDIT, load_ui, to_api, fill
@@ -48,7 +48,7 @@ def models(refresh: bool = False) -> dict:
         from concurrent.futures import ThreadPoolExecutor
         c = _c()
         folders = ("diffusion_models", "loras", "text_encoders", "vae")
-        with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(agent app 호출 한도 60초)
+        with ThreadPoolExecutor(8) as ex:  # vast 프록시는 호출마다 1~4초라 순서대로 읽으면 30초 가까이 걸렸다(클라이언트 호출 한도 60초)
             futs = {f: ex.submit(lambda f=f: set(c.req(f"/models/{f}") or [])) for f in folders}
             names = _list_workflows(c)
             have = {f: fu.result() for f, fu in futs.items()}
@@ -201,7 +201,7 @@ def refs_model() -> str:
 
 MODEL = os.environ.get("WEBTOON_MODEL", "").strip().lower() or None  # 하위 호환(예전엔 이 환경변수로만 골랐다)
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
-# 부르는 쪽이 노드를 찾는 번호. 전에 코드로 짜던 그래프와 같은 번호라 comfy_panel·refine·make_assets·xgen_catalog 는 그대로 쓴다.
+# 부르는 쪽이 노드를 찾는 번호. 전에 코드로 짜던 그래프와 같은 번호라 comfy_panel·refine·make_assets 는 그대로 쓴다.
 # 클래스가 워크플로우에 하나뿐일 때만 붙이고, 화면에서 더한 노드는 u<번호>.
 CANON = {"UNETLoader": "1", "CLIPLoader": "2", "VAELoader": "3", "QwenImage21Cache": "4", "TextEncodeQwenImage21": "5",
          "EmptyLatentImage": "6", "KSampler": "7", "VAEDecode": "8", "SaveImage": "9", "LoraLoaderModelOnly": "10"}

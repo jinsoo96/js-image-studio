@@ -1,5 +1,5 @@
 {
- "_why": "콘티 관문(tools/gates.py)의 평가 기준. agent platform 하네스 s08 judge_criteria 와 같은 꼴 [{name, description, weight, hard}]. 규칙을 프롬프트에 두지 않고 관문이 채점한다(2026-10-18 사용자 \"작업 안내나 검수는 하네스화로\").",
+ "_why": "콘티 관문(tools/gates.py)의 평가 기준. [{name, description, weight, hard}] 꼴. 규칙을 프롬프트에 두지 않고 관문이 채점한다(2026-10-18 사용자 \"작업 안내나 검수는 하네스화로\").",
  "threshold": 0.8,
  "criteria": [
   {

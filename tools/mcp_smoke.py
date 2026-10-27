@@ -4,7 +4,7 @@
 
     .venv/Scripts/python tools/mcp_smoke.py [--url http://127.0.0.1:7440/mcp]
 
-작품마다: read_doc · find(폴더 이름·작품 제목) · 회차마다 list_panels(맨 앞 총계 줄) · 앞 컷 셋 panel_info · panel_versions,
+작품마다: read_doc · find(폴더 이름·작품 제목) · 회차마다 list_panels(맨 앞 총계 줄) · 앞 컷 셋 image_info · image_versions,
 사람이 부르는 이름(작품 제목 + "1화", 판이 있으면 "1화 v2")으로 list_panels. 작품 이름은 박지 않고 series.json·README 제목에서 읽는다.
 끝에 tools/hardcode_scan.py 로 도구 코드·도구 설명에 특정 작품 이름이 박혔는지도 본다(박혔으면 실패),
 tools/prompt_dryrun.py 로 작품마다 그리기 지시를 GPU 없이 만들어 본다(약 1~2분).
@@ -95,9 +95,9 @@ def main():
                 fails.append(f"list_panels {slug} {ep.name}: 맨 앞 총계 줄이 없다")
             ids = [ln.split()[0] for ln in lp.splitlines()[1:] if ln[:1] == "p"][:3] if ok else []
             for pid in ids:
-                t("panel_info", series=slug, episode=ep.name, panel=pid)
+                t("image_info", series=slug, episode=ep.name, panel=pid)
             if ids:
-                t("panel_versions", series=slug, episode=ep.name, panel=ids[-1])
+                t("image_versions", series=slug, episode=ep.name, panel=ids[-1])
         # 사람이 부르는 이름: '<작품 제목> 1화', 판이 있으면 '1화 v2'
         if title and any(e.name == "ep001" for e in eps):
             t("list_panels", series=title, episode="1화")

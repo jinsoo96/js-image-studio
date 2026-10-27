@@ -5,7 +5,7 @@
   refs(참고 그림으로 얼굴·장소를 맞추나) · style(webtoon | anime | realistic, 없으면 label·use_for 글에서 짐작) · strengths(예: text_in_image)
   · 모델 파일이 서버에 다 있나(missing).
 고르는 순서(앞에서 정해지면 그다음 칸이 고친다):
-  1. 이번 작업에 지정(vast_draw model, --model) → 그대로
+  1. 이번 작업에 지정(draw model, --model) → 그대로
   2. 컷 설명에 지정(panels_spec 의 model) → 그대로
   3. 바탕 판: 작품 설정 series.json model → 없거나 "auto" 면 작품 그림체(series.json style_family, 없으면 prompts/style*.txt 글)와 같은 style 의 판 중
      참고 그림을 받는 판(작품 그림체 갈래는 series.json style_family, 없으면 webtoon) → 그림체 LoRA(loras.json _style)가 켜져 있으면 그 LoRA 를 학습한 판(그 그림체를 배운 판)

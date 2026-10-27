@@ -1,5 +1,5 @@
 #!/bin/bash
-# webtoon-studio: RunPod 파드 안에서 ComfyUI 를 띄운다.
+# js-image-studio: GPU 서버(vast·RunPod) 안에서 ComfyUI 를 띄운다.
 # tools/runpod_cloud.py 가 파드를 만들 때 이 파일을 base64(env BOOTSTRAP_B64)로 넘기고 dockerStartCmd 에서 풀어 실행한다.
 #
 # 두 가지 이미지를 받는다.

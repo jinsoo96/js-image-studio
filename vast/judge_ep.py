@@ -1,9 +1,9 @@
 """그림을 보는 모델(judge) 주소 고르기: 첫째 VLM_URL·VLM_MODEL, 안 되면 VLM_FALLBACK 의 후보를 차례로(/v1/models 로 살아 있는지 본다).
-(2026-10-18 외출: 사내 judge 서버가 502 로 죽었는데 검사가 조용히 '통과'로 넘어갔다. 사내 vLLM 은 자주 죽고 죽어도 조용하다)
+(2026-10-18 외출: 판정 서버가 502 로 죽었는데 검사가 조용히 '통과'로 넘어갔다. vLLM 서버는 자주 죽고 죽어도 조용하다)
 
     VLM_URL=https://.../v1  VLM_MODEL=qwen3.8-27b  VLM_API_KEY=(필요하면)
-    VLM_FALLBACK="http://localhost:12361/v1|Qwen3-VL-8B-FP8,https://other/v1|model|key"   쉼표로 여럿, 각 '주소|모델[|키]'
-state/vlm_url.txt('주소|모델', 한 줄)가 있으면 VLM_URL 다음 후보로 둔다(2026-10-22 사내 게이트웨이·vast 가 함께 꺼져 RunPod 파드의 Qwen 3.8 무검열을 씀).
+    VLM_FALLBACK="http://127.0.0.1:8000/v1|<모델>,https://other/v1|<모델>|<키>"   쉼표로 여럿, 각 '주소|모델[|키]'
+state/vlm_url.txt('주소|모델', 한 줄)가 있으면 VLM_URL 다음 후보로 둔다(2026-10-22 판정 게이트웨이·vast 가 함께 꺼져 RunPod 파드의 Qwen 3.8 무검열을 씀).
 아무 곳에도 닿지 않으면 JudgeDown 을 던진다(부르는 쪽이 '검사 못 함'으로 처리, 통과로 넘기지 않는다).
 """
 import json
@@ -14,8 +14,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_URL = "https://judge-gateway.invalid/v1"
-DEFAULT_MODEL = "qwen3.8-27b"
+DEFAULT_MODEL = "qwen3.8-27b"  # VLM_URL 만 주고 모델을 안 준 경우
 POD_FILE = Path(__file__).resolve().parents[1] / "state" / "vlm_url.txt"
 # RunPod 프록시 앞의 Cloudflare 가 파이썬 기본 User-Agent 를 403(1010)으로 막는다
 UA = {"User-Agent": "webtoon-studio/1.0"}
@@ -29,9 +28,9 @@ _picked = None
 
 
 def candidates() -> list:
-    """고를 차례: 환경변수 VLM_URL(준 때만) → state/vlm_url.txt(지금 켠 서버, runpod_cloud use 가 적음) → VLM_FALLBACK → 사내 게이트웨이.
+    """고를 차례: 환경변수 VLM_URL(준 경우만) → state/vlm_url.txt(지금 켠 서버, 서버를 켜는 도구가 적음) → VLM_FALLBACK(준 경우만, '주소|모델|키' 를 쉼표로).
     모델·서버를 갈아끼우려면 state/vlm_url.txt 한 줄('주소|모델|키')만 바꾸면 된다: OpenAI 호환 chat(그림은 image_url)이면 어느 모델이든.
-    (예전엔 사내 게이트웨이가 늘 첫째라, 꺼진 동안 작업마다 그 주소를 먼저 기다렸다. 2026-10-23 사용자 "LLM 모델·서버도 갈아낄 수 있어야")"""
+    (예전엔 옛 판정 게이트웨이가 늘 첫째라, 꺼진 동안 작업마다 그 주소를 먼저 기다렸다. 2026-10-23 사용자 "LLM 모델·서버도 갈아낄 수 있어야")"""
     out = []
     if os.environ.get("VLM_URL"):
         out.append((os.environ["VLM_URL"], os.environ.get("VLM_MODEL", DEFAULT_MODEL), os.environ.get("VLM_API_KEY", "EMPTY")))
@@ -39,9 +38,9 @@ def candidates() -> list:
         parts = [x.strip() for x in POD_FILE.read_text(encoding="utf-8").strip().split("|")]
         if len(parts) >= 2 and parts[0]:
             out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))
-    # 대체 후보를 안 줬으면 이 작업실의 사내 VL 터널(agent app 로컬 MCP 가 쓰는 localhost:12361)을 둔다. 사내 judge 가 502 로 반나절 죽었을 때
-    # 대체가 없어 모든 검사가 '검사불가'로 끝났다(2026-10-20 외출). 대체 모델(8B)은 약해서 job 로그에 고른 주소가 남는다(endpoint)
-    for item in ((os.environ.get("VLM_FALLBACK") or "http://localhost:12361/v1|Qwen3-VL-8B-FP8") + f",{DEFAULT_URL}|{DEFAULT_MODEL}").split(","):
+    # 대체 후보는 VLM_FALLBACK 으로만 준다. 예전엔 다른 판정 서버를 기본 대체로 박아 두어 작업실이 회사 서버에 기댔다(2026-10-27 정리).
+    # 판정 서버가 죽었을 때 대체가 없으면 검사는 '검사불가'로 끝나고(2026-10-20 외출), 고른 주소는 job 로그에 남는다(endpoint)
+    for item in (os.environ.get("VLM_FALLBACK") or "").split(","):
         parts = [x.strip() for x in item.split("|")]
         if len(parts) >= 2 and parts[0]:
             out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else "EMPTY"))

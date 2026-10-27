@@ -1,7 +1,7 @@
 """ComfyUI 서버 도우미(어느 ComfyUI 든). 어디에 붙을지는 환경변수로 정한다(comfy-workflow-mcp 와 같은 이름):
-- COMFY_URL 이 있으면 그 서버(로컬·사내·다른 클라우드). 인증은 COMFY_USER+COMFY_PASSWORD(기본 인증) · COMFY_TOKEN(Bearer) · COMFY_HEADERS(JSON).
+- COMFY_URL 이 있으면 그 서버(로컬·다른 서버). 인증은 COMFY_USER+COMFY_PASSWORD(기본 인증) · COMFY_TOKEN(Bearer) · COMFY_HEADERS(JSON).
 - COMFY_URL 이 없고 state/comfy_url.txt 가 있으면 그 주소(MCP·스크립트를 한 번에 옮기는 스위치. 지우면 vast 로 돌아간다).
-  2026-10-22 회사 vast 가 꺼져 RunPod(tools/runpod_cloud.py, RUNPOD_PROFILE=runpod_qwen)로 옮길 때 생김.
+  2026-10-22 공용 vast 가 꺼져 RunPod(tools/runpod_cloud.py, RUNPOD_PROFILE=runpod_qwen)로 옮길 때 생김.
 - 없으면 vast.ai: 키는 VAST_KEY(또는 VAST_API_KEY) 또는 D:\\.claude\\CREDENTIALS.local.md(vast.ai 절), 출력하지 않는다. VAST_INSTANCE_ID 로 고른다.
   접속 = 기본 인증(vastai / 인스턴스 jupyter_token). 토큰·주소는 vast.ai API 로 매번 읽는다(인스턴스를 다시 만들면 바뀐다).
 (2026-10-18 사용자 "vast 의존이 있나, 비하드코딩으로": 전에는 vast 에만 붙었다)
@@ -147,7 +147,7 @@ class Comfy:
         # 없을 때만 다시 보낸다. 모델을 새로 올리는 첫 컷에서 응답 대기 시간 초과로 컷이 통째로 실패했다(2026-10-21 외출 p101 두 번)
         pid = str(uuid.uuid4())
         body = {"prompt": prompt, "client_id": "webtoon-studio", "prompt_id": pid}
-        if os.environ.get("WEBTOON_QUEUE_FRONT") == "1":  # 사람이 기다리는 작업(agent app 에서 시킨 것)은 큐 앞으로(mcp/server.py ENV)
+        if os.environ.get("WEBTOON_QUEUE_FRONT") == "1":  # 사람이 기다리는 작업(대화에서 시킨 것)은 큐 앞으로(mcp/server.py ENV)
             body["front"] = True
         if workflow:
             body["extra_data"] = {"extra_pnginfo": {"workflow": workflow}}

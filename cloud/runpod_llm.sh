@@ -3,7 +3,7 @@
 # tools/runpod_cloud.py llm 이 파드 에이전트로 이 스크립트를 돌린다. 넘겨받는 env: LLM_REPO, LLM_NAME, VLLM_VERSION, GPU_UTIL, MAX_LEN,
 # LLM_ARGS(모델마다 더 붙일 vllm 인자, 설정 llm.args. 예: 4비트 GPTQ 판은 --trust-remote-code).
 # 프록시 주소는 누구나 닿으니 키를 건다: 파드 에이전트 토큰(AGENT_TOKEN, 파드 env). 로컬은 runpod_cloud.py use 가 같은 값을 state/vlm_url.txt 에 적는다.
-# (2026-10-22 회사 vast·사내 Qwen 게이트웨이가 함께 꺼져, 그림 검수·미사일 스튜디오가 쓸 모델을 RunPod 파드에 같이 둔다)
+# (2026-10-22 공용 vast·판정 게이트웨이가 함께 꺼져, 그림 검수·미사일 스튜디오가 쓸 모델을 RunPod 파드에 같이 둔다)
 # --max-num-seqs: 기본 1024 면 Qwen3.8(선형 어텐션 섞임)의 Mamba 캐시 칸(gpu_util 0.4 에서 130)을 넘어 기동 실패
 set -e
 pkill -f 'vllm serve' 2>/dev/null || true  # 다시 부르면 띄워 둔 것을 내리고 새로

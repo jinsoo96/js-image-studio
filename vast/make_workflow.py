@@ -209,7 +209,7 @@ EDIT_GUIDE = """# 편집: 그린 컷 손보기 (Qwen Image 2.1)
 - 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the empty space with the matching background. Keep everything else in <image1> exactly the same.`
 - 연기: `Make him cry: tears streaming down both cheeks, biting his lower lip. Keep everything else the same.`
 - 옷: `Change only his jacket to a navy padded jacket. Keep everything else the same.`
-작업실에서는 vast/refine.py 가 사내 Qwen 으로 남는 사람·어긋난 연출을 찾아 이 지시를 자동으로 만든다(--fix · --check). 결과는 output/webtoon_studio/edit"""
+작업실에서는 vast/refine.py 가 Qwen 으로 남는 사람·어긋난 연출을 찾아 이 지시를 자동으로 만든다(--fix · --check). 결과는 output/webtoon_studio/edit"""
 
 ASSET_GUIDE = """# 에셋: 표정 은행 · 기본복 (Qwen Image 2.1 편집)
 인물 얼굴(또는 정면 전신)을 `<image1>` 에 넣고 바꿀 것 하나만 바꾼다. 얼굴·머리·그림체는 그대로.
@@ -290,7 +290,7 @@ def library(force=False):
 
 
 ANIMA_GUIDE = """# 세로 웹툰 컷 (Anima)
-webtoon-studio 의 Anima 판 컷 그리기. 회사 기준선 image_anima_base_v1 과 같은 모델·설정을 서브그래프 없이 펼친 것(기준선은 그대로 둔다).
+webtoon-studio 의 Anima 판 컷 그리기. 기준선 image_anima_base_v1 과 같은 모델·설정을 서브그래프 없이 펼친 것(기준선은 그대로 둔다).
 
 **Qwen 판과 다른 점**: 글만 받는다(참고 그림 입구가 없다). 인물 생김새는 컷 설명 글에 적는다. 고치기(표정·남는 사람 지우기·검수 편집)는
 작업실 도구가 Qwen UC 편집 워크플로우(webtoon_edit_qwen21_uc)로 한다.

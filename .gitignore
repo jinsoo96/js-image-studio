@@ -14,6 +14,11 @@ series/*
 # 작품 열람 페이지(작품 제목·컷)와 옛 무대 뒤 그림체 문서·참고 그림도 작품 내용
 reader/index.html
 style/
+# 내부 기록은 공개 레포에 올리지 않는다(2026-10-27): 작업 기록(worklogs/, 계정·장비·작품 이야기), 제작 교훈(LESSONS.md, 작품 내용 메모),
+# 이 PC 의 세션 규칙(CLAUDE.md, 경로·비밀값 위치). 작업 PC 에만 둔다
+worklogs/
+LESSONS.md
+CLAUDE.md
 **/_rejected/
 # 안 쓰게 된 옛 판(_old, 자동으로 안 지움)과 시험용 결과물(_tmp, 10일 뒤 tools/clean_old.py 가 지움)
 **/_old/

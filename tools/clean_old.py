@@ -9,7 +9,7 @@
     python tools/clean_old.py --days 14            기준 날 수 바꾸기
 
 - 대상은 series/<작품>/ · exports/ · worklogs/ 아래 이름이 정확히 '_tmp'·'_old' 인 폴더 안의 파일뿐. _rejected(본편에서 밀려난 판)·
-  _stage1(1단 판)은 컷 되돌리기(panel_versions)가 쓰는 이력이라 건드리지 않는다.
+  _stage1(1단 판)은 컷 되돌리기(image_versions)가 쓰는 이력이라 건드리지 않는다.
 - 옮긴 파일은 고친 시각이 옛날 그대로라 그 시각으론 언제 들어왔는지 모른다. 그래서 장부(state/old_ledger.json)에 처음 본 시각을 적고
   그때부터 센다. MCP move_file 이 옮길 때 바로 적고, 손으로 옮긴 것은 이 스크립트가 처음 본 날로 적는다(그래서 늦어도 10일은 남는다).
 - 지운 파일은 state/logs/clean_old.log 에 남기고, 비게 된 폴더도 치운다(_tmp·_old 자신은 남김).

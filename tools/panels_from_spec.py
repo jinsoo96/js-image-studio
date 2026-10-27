@@ -1,5 +1,5 @@
 """컷 설명 표(panels_spec.json) → panels.json. 작품을 가리지 않는 공용 변환기(회차마다 build_panels.py 를 코드로 쓰지 않아도 되게).
-(2026-10-16 agent app 시험: Qwen 은 콘티는 잘 썼지만 build_panels.py 를 코드로 쓰다 잘리고 없는 함수를 지어냈다 → 표를 채우는 MCP set_panels 로)
+(2026-10-16 시험: Qwen 은 콘티는 잘 썼지만 build_panels.py 를 코드로 쓰다 잘리고 없는 함수를 지어냈다 → 표를 채우는 MCP set_panels 로)
 
     .venv/Scripts/python tools/panels_from_spec.py <회차 폴더>
 
@@ -24,7 +24,7 @@ ASPECT ={"landscape": "3:2", "close": "4:3", "wide": "16:9", "portrait": "2:3"} 
 
 def norm_shot(s: str) -> str:
     """샷 이름을 그리기 코드가 아는 꼴로(close-up · wide shot · medium shot · full shot · insert shot). 낱말로 본다.
-    (2026-10-18 agent app 새 웹툰 생성기 시험: 에이전트가 'close shot' 으로 써서 클로즈업 처리(장소를 뒤로, 배치 문장 빼기)가 안 걸렸다)"""
+    (2026-10-18 새 웹툰 생성기 시험: 에이전트가 'close shot' 으로 써서 클로즈업 처리(장소를 뒤로, 배치 문장 빼기)가 안 걸렸다)"""
     t = (s or "medium shot").lower()
     if "close" in t:
         return "extreme close-up" if "extreme" in t else "close-up"

@@ -1,5 +1,5 @@
 """새 웹툰(작품) 열기: 작품 설정 한 장(series.json)으로 작품 폴더를 만든다. 작품마다 파이썬(make_*_prompts.py)을 따로 쓰지 않는다.
-(2026-10-18 사용자 "agent app 에이전트를 새 웹툰 생성기 · 이어 그리기 둘로". 전에는 새 작품을 손으로 열었다)
+(2026-10-18 사용자 "에이전트를 새 웹툰 생성기 · 이어 그리기 둘로". 전에는 새 작품을 손으로 열었다)
 
     .venv/Scripts/python tools/new_series.py <spec.json>                  series/<slug>-hf 를 새로 만든다(있으면 멈춤)
     .venv/Scripts/python tools/new_series.py <series_dir> --prompts       series.json 을 고친 뒤 cast.json·프롬프트를 다시 쓴다

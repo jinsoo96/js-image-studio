@@ -24,7 +24,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "**모델만 바꾼 사본**: abenzerps/Qwen-Image-2.1-Uncensored-Quantized 의 UC fp8. 나머지(글 인코더·VAE·터보 LoRA·편집 구성)는 webtoon_edit_qwen21 과 같다.\n\n# 편집: 그린 컷 손보기 (Qwen Image 2.1)\n고칠 그림을 `<image1>` 에 넣고, 지시는 짧게 고칠 것만 쓴다. 긴 지시는 엉뚱한 곳을 바꾼다(LESSONS 16).\n- 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the empty space with the matching background. Keep everything else in <image1> exactly the same.`\n- 연기: `Make him cry: tears streaming down both cheeks, biting his lower lip. Keep everything else the same.`\n- 옷: `Change only his jacket to a navy padded jacket. Keep everything else the same.`\n작업실에서는 vast/refine.py 가 사내 Qwen 으로 남는 사람·어긋난 연출을 찾아 이 지시를 자동으로 만든다(--fix · --check). 결과는 output/webtoon_studio/edit"
+    "**모델만 바꾼 사본**: abenzerps/Qwen-Image-2.1-Uncensored-Quantized 의 UC fp8. 나머지(글 인코더·VAE·터보 LoRA·편집 구성)는 webtoon_edit_qwen21 과 같다.\n\n# 편집: 그린 컷 손보기 (Qwen Image 2.1)\n고칠 그림을 `<image1>` 에 넣고, 지시는 짧게 고칠 것만 쓴다. 긴 지시는 엉뚱한 곳을 바꾼다(LESSONS 16).\n- 남는 사람 지우기: `Remove the young man in the light blue shirt behind the table. Fill the empty space with the matching background. Keep everything else in <image1> exactly the same.`\n- 연기: `Make him cry: tears streaming down both cheeks, biting his lower lip. Keep everything else the same.`\n- 옷: `Change only his jacket to a navy padded jacket. Keep everything else the same.`\n작업실에서는 vast/refine.py 가 Qwen 으로 남는 사람·어긋난 연출을 찾아 이 지시를 자동으로 만든다(--fix · --check). 결과는 output/webtoon_studio/edit"
    ],
    "title": "사용법"
   },

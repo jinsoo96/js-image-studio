@@ -196,7 +196,7 @@ def lift_dark(path: Path, log=print) -> bool:
 
 
 def pick_expr(series, cid, name, text):
-    """컷 연기 글에 가장 가까운 표정 칸 번호(1~12)를 사내 Qwen 이 고른다. 이 인물 얘기가 없거나 맞는 칸이 없으면 None.
+    """컷 연기 글에 가장 가까운 표정 칸 번호(1~12)를 Qwen 이 고른다. 이 인물 얘기가 없거나 맞는 칸이 없으면 None.
     (2026-10-15 사용자 "연기 강도 강하게": Qwen Image 는 참고 얼굴의 표정을 그대로 따라 그린다 → 맞는 칸을 넣으면 그 연기가 나온다)"""
     jf = series / "assets" / "vast_refs" / f"{cid}_expr.json"
     if not jf.exists() or not text:
@@ -223,7 +223,7 @@ def pick_expr(series, cid, name, text):
              "restrained acting choose a matching quiet expression if the list has one, never a strong or exaggerated one; otherwise answer 0.")
     # 2026-10-18 추몽: "조용히 듣기만" 에 눈물 칸을 골라 은주·재석이 울었다(p059·p069). 2026-10-19 외출: 센 표정만 있어 "calm and confident" 에
     # 우쭐한 미소(smug smirk)가 골라졌다 → 잔잔한 표정 묶음(make_assets.py subtle)이 있으면 그걸 고르게 했다
-    # 주소는 judge_ep 가 고른다(사내가 죽으면 RunPod 파드 등 대체 후보로. 2026-10-22 전엔 사내 주소만 불러 표정 고르기가 조용히 빠졌다)
+    # 주소는 judge_ep 가 고른다(판정 서버가 죽으면 RunPod 파드 등 대체 후보로. 2026-10-22 전엔 옛 주소만 불러 표정 고르기가 조용히 빠졌다)
     from judge_ep import chat
     try:
         m = re.search(r"\d+", chat([{"type": "text", "text": ask}], max_tokens=8, timeout=60))
@@ -590,8 +590,8 @@ def main():
     ap.add_argument("--aspect", help="모든 컷을 이 비율로(세로 웹툰 시안은 2:3·9:16). 없으면 컷 설명의 aspect")
     ap.add_argument("--steps", type=int, help="기본 40(공식 40~50, euler), --turbo 면 8")
     ap.add_argument("--turbo", action="store_true", help="Turbo LoRA 8스텝 시안(빠름)")
-    ap.add_argument("--expr", action="store_true", help="연기에 맞는 표정 칸(표정 시트)을 얼굴 참고로(사내 Qwen 이 고름)")
-    ap.add_argument("--fix", action="store_true", help="그린 뒤 남는 사람(중복·낯선 사람)을 그림 보는 사내 Qwen 이 찾아 편집으로 지움(원본은 _stage1/)")
+    ap.add_argument("--expr", action="store_true", help="연기에 맞는 표정 칸(표정 시트)을 얼굴 참고로(Qwen 이 고름)")
+    ap.add_argument("--fix", action="store_true", help="그린 뒤 남는 사람(중복·낯선 사람)을 그림 보는 Qwen 이 찾아 편집으로 지움(원본은 _stage1/)")
     ap.add_argument("--check", action="store_true", help="연출 확인: 그림 검수(인원·좌우시선·옷·표정연기·배경)로 보고, 표정·옷만 틀리면 편집, "
                                                          "좌우·시선·배경·인원이 틀리면 시드를 바꿔 다시(나은 쪽을 남김)")
     ap.add_argument("--retries", type=int, default=1, help="--check 에서 다시 그리는 횟수")

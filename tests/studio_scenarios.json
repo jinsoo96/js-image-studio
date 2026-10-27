@@ -23,7 +23,7 @@
   "prompt": "개항 1화 v3 의 p023i 컷 설명이랑 그림 링크 알려줘.",
   "checks": {
    "must_call": [
-    "panel_info"
+    "image_info"
    ],
    "max_tool_errors": 1,
    "max_seconds": 180,
@@ -172,7 +172,7 @@
   ],
   "checks": {
    "must_call": [
-    "preview_panel"
+    "preview_image"
    ],
    "max_tool_errors": 2,
    "max_seconds": 1200
@@ -204,7 +204,7 @@
   ],
   "checks": {
    "must_call": [
-    "vast_draw"
+    "draw"
    ],
    "max_tool_errors": 3,
    "max_seconds": 2700,
@@ -264,8 +264,8 @@
   ],
   "checks": {
    "must_call": [
-    "vast_draw",
-    "adopt_panel",
+    "draw",
+    "adopt_image",
     "compose"
    ],
    "max_tool_errors": 2,
@@ -381,9 +381,9 @@
   ],
   "checks": {
    "must_call": [
-    "vast_draw",
-    "adopt_panel",
-    "edit_panel",
+    "draw",
+    "adopt_image",
+    "edit_image",
     "compose"
    ],
    "max_tool_errors": 3,
@@ -446,9 +446,9 @@
   ],
   "checks": {
    "must_call": [
-    "vast_draw",
-    "adopt_panel",
-    "edit_panel",
+    "draw",
+    "adopt_image",
+    "edit_image",
     "compose"
    ],
    "max_tool_errors": 3,
@@ -519,7 +519,7 @@
   "prompt": "{name} {ep_n} 의 {p1} 컷 설명이랑 그림 링크 알려줘.",
   "checks": {
    "must_call": [
-    "panel_info"
+    "image_info"
    ],
    "max_tool_errors": 1,
    "max_seconds": 180,
@@ -528,7 +528,7 @@
     "http"
    ]
   },
-  "why": "버전_회차_이름(개항 v3 p023i 고정)의 작품별 판: 컷 하나의 설명·링크를 어느 작품에서도 panel_info 로 바로 답하는지(2026-10-26)."
+  "why": "버전_회차_이름(개항 v3 p023i 고정)의 작품별 판: 컷 하나의 설명·링크를 어느 작품에서도 image_info 로 바로 답하는지(2026-10-26)."
  },
  {
   "name": "작품별_없는_판_묻기",

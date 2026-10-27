@@ -1,5 +1,5 @@
 {
- "_why": "컷 설명 관문(tools/gates.py)의 평가 기준. agent platform 하네스 s08 judge_criteria 와 같은 꼴. 연출 규칙은 여기(데이터)에 두고 judge 가 컷 글을 읽고 채점한다: 글 속 문구를 정규식으로 찾던 경고(자세·탈것·잔·부정어·서운한데 웃음·발표 장면)는 표현이 조금만 달라도 놓치거나 잘못 걸어 여기로 옮겼다(2026-10-19 사용자 \"특정 문구를 정규식으로 찾는 건 땜질\"). 코드는 칸이 있는지 같은 구조만 본다(panels_from_spec.structure_lint). judge 의 오탐은 두 번째 judge 가 거른다(gates._verify).",
+ "_why": "컷 설명 관문(tools/gates.py)의 평가 기준. [{name, description, weight, hard}] 꼴. 연출 규칙은 여기(데이터)에 두고 judge 가 컷 글을 읽고 채점한다: 글 속 문구를 정규식으로 찾던 경고(자세·탈것·잔·부정어·서운한데 웃음·발표 장면)는 표현이 조금만 달라도 놓치거나 잘못 걸어 여기로 옮겼다(2026-10-19 사용자 \"특정 문구를 정규식으로 찾는 건 땜질\"). 코드는 칸이 있는지 같은 구조만 본다(panels_from_spec.structure_lint). judge 의 오탐은 두 번째 judge 가 거른다(gates._verify).",
  "threshold": 0.8,
  "criteria": [
   {

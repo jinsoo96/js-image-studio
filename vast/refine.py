@@ -56,7 +56,7 @@ def refine_prompt(series, p, expr=True):
 
 
 def find_extras(img_path: Path, series, p, hint: str = "") -> list:
-    """그림을 보는 사내 Qwen 에게 컷 설명에 없는 사람을 옷·자리로 짧게 묘사하게 한다. 없으면 [].
+    """그림을 보는 Qwen 에게 컷 설명에 없는 사람을 옷·자리로 짧게 묘사하게 한다. 없으면 [].
     hint: 앞선 검수(연출 확인)가 적은 인원 문제. 두 검사가 따로 보니 검수는 '같은 사람 둘'이라 하고 여기서는 '없음'이라 해서 아무것도 안 지웠다."""
     import base64
     import io
@@ -250,7 +250,7 @@ def absent_cast(series, ep_dir: Path, pid: str, img_path: Path | None = None) ->
     nm = names(Path(series))
     img = img_path or Path(ep_dir) / "panels_hf" / f"{pid}.png"
     out = []
-    # 글 설명만 주고 물으면 그림 보는 모델(사내 Qwen3-VL-8B)이 한가운데 선 박 과장도 '없다'고 했다 → 그 인물의 상반신 참고 그림을 같이 보여 주고 한 명씩
+    # 글 설명만 주고 물으면 그림 보는 모델(Qwen3-VL-8B)이 한가운데 선 박 과장도 '없다'고 했다 → 그 인물의 상반신 참고 그림을 같이 보여 주고 한 명씩
     for c in others:
         ref = Path(series) / "assets" / "vast_refs" / f"{c}_bust.png"
         if not ref.exists():

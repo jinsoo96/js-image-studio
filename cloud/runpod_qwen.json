@@ -1,5 +1,5 @@
 {
-  "_why": "2026-10-22 회사 공용 vast(5090)가 꺼져 사용자 개인 RunPod 로 옮김. vast 와 같은 구성(ComfyUI 0.42.1 + Qwen Image 2.1 UC + 우리 학습 노드·패치 + mcp_use_ 워크플로우). RUNPOD_PROFILE=runpod_qwen 으로 고른다. allowed_cuda 는 비움: 걸면 재고가 있어도 파드가 안 잡혔다(2026-10-22). RTX PRO 6000(Blackwell)은 드라이버가 늘 12.8 이상. 2026-10-23 사용자 '쓸데없는 모델 빼고 스펙 낮춘 걸로': RTX PRO 6000 96GB($2.49/h) → L40S 48GB($1.09/h, 없으면 같은 Ada 48GB 인 L40·RTX 6000 Ada). 그림 모델 Qwen Image 2.1 은 7B(fp8 6.6GB)라 그림만은 약 22GB, 96GB 는 LLM 27B FP8 때문이었다. 쓰지 않던 MOSS·Anima·Noct-Q(10-15 이후 작업 0번)와 그 노드를 빼고 볼륨 200→100GB, 놀면 멈춤 30→15분.",
+  "_why": "2026-10-22 공용 vast(5090)가 꺼져 사용자 개인 RunPod 로 옮김. vast 와 같은 구성(ComfyUI 0.42.1 + Qwen Image 2.1 UC + 우리 학습 노드·패치 + mcp_use_ 워크플로우). RUNPOD_PROFILE=runpod_qwen 으로 고른다. allowed_cuda 는 비움: 걸면 재고가 있어도 파드가 안 잡혔다(2026-10-22). RTX PRO 6000(Blackwell)은 드라이버가 늘 12.8 이상. 2026-10-23 사용자 '쓸데없는 모델 빼고 스펙 낮춘 걸로': RTX PRO 6000 96GB($2.49/h) → L40S 48GB($1.09/h, 없으면 같은 Ada 48GB 인 L40·RTX 6000 Ada). 그림 모델 Qwen Image 2.1 은 7B(fp8 6.6GB)라 그림만은 약 22GB, 96GB 는 LLM 27B FP8 때문이었다. 쓰지 않던 MOSS·Anima·Noct-Q(10-15 이후 작업 0번)와 그 노드를 빼고 볼륨 200→100GB, 놀면 멈춤 30→15분.",
   "image": "runpod/pytorch:1.4.1-cu1281-torch2121-ubuntu2404",
   "gpu_types": [
     "NVIDIA RTX PRO 6000 Blackwell Server Edition",
