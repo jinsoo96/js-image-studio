@@ -759,6 +759,11 @@ def wait_ready(timeout_min: float) -> str:
             if not any(d.get("type") == "cuda" for d in devices):
                 raise RuntimeError(f"ComfyUI 는 떴는데 GPU 가 없다: {[d.get('name') for d in devices]}")
             print(f"ComfyUI 준비됨: {url} ({devices[0].get('name')}, {(time.time() - t0) / 60:.1f}분)", flush=True)
+            with contextlib.suppress(Exception):  # 받지 못한 모델(부트스트랩 logs/models_failed.txt): 그 모델을 쓰는 저장 워크플로우는 서버에 안 올라간다
+                failed = agent("GET", "/models_failed.txt").decode("utf-8", "replace").split()
+                if failed:
+                    print(f"[경고] 받지 못한 모델 {len(failed)}개: {', '.join(failed)} — 이 모델을 쓰는 워크플로우는 이 서버에서 못 쓴다"
+                          " (stack 의 extra_models 저장소·주소를 확인)", flush=True)
             return url
         ensure_tunnel()
         got = boot_log()

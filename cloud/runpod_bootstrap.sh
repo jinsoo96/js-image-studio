@@ -262,15 +262,25 @@ for n in json.loads(os.environ.get("CUSTOM_NODES") or "[]"):
         subprocess.run(["git", "clone", "-q", n["url"], d], check=True)
         subprocess.run(["git", "-C", d, "checkout", "-q", n["ref"]], check=True)
     print(f"[boot] node {n['dir']} ok", flush=True)
+# 하나가 실패해도 나머지는 받는다: 캐릭터 시트 LoRA 저장소가 401 로 막히자 그 뒤의 텍스트 인코더까지 안 받아 uc 판 전체가
+# 서버에 못 올라갔다(2026-10-27). 실패한 것은 logs/models_failed.txt 에 남겨 켜기(vast_cloud wait_ready)가 알린다
+failed = []
 for m in json.loads(os.environ.get("EXTRA_MODELS") or "[]"):
     dest = f"{base}/models/{m['dest']}"
     if not (os.path.exists(dest) and os.path.getsize(dest) > 0):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        if m.get("url"):
-            fetch(m, dest)
-        else:
-            shutil.move(hf_hub_download(m["repo"], m["file"], local_dir="/workspace/hf_tmp"), dest)
+        try:
+            if m.get("url"):
+                fetch(m, dest)
+            else:
+                shutil.move(hf_hub_download(m["repo"], m["file"], local_dir="/workspace/hf_tmp"), dest)
+        except Exception as e:  # noqa: BLE001
+            failed.append(m["dest"])
+            print(f"[boot] model {m['dest']} FAILED: {type(e).__name__}: {str(e)[:200]}", flush=True)
+            continue
     print(f"[boot] model {m['dest']} ok", flush=True)
+with open("/workspace/logs/models_failed.txt", "w") as f:
+    f.write("\n".join(failed))
 PY
 fi
 

@@ -36,6 +36,7 @@ SIGMAS_ENV = os.environ.get("WEBTOON_SIGMAS", "").strip()
 TURBO_BYPASS = os.environ.get("WEBTOON_TURBO_BYPASS", "0") == "1"
 _models, _models_at = {}, 0.0
 MODELS_TTL = 60.0
+_NO_BOARD_WARNED = False
 
 
 def models(refresh: bool = False) -> dict:
@@ -103,6 +104,15 @@ def models(refresh: bool = False) -> dict:
                 v["roles"].setdefault(role, wf)
             v["edit"] = v["roles"].get("edit")
         _models, _models_at = out, time.time()
+    elif not _models:
+        # 서버는 읽었는데 판(생성 워크플로우)이 하나도 없다: 기본 이름으로 가면 뒤에서 404 만 보인다. 까닭(못 올린 사본)을 한 번 남긴다
+        # (2026-10-27 텍스트 인코더를 못 받은 서버에서 uc 사본이 전부 조용히 빠져 이어짐 고치기가 '편집 워크플로우 404'로 건너뜀)
+        global _NO_BOARD_WARNED
+        if not _NO_BOARD_WARNED:
+            _NO_BOARD_WARNED = True
+            why = "; ".join(f"{n}: {r}" for n, r in sorted(PUSH_SKIPPED.items()) if n in {g for pair in OFFLINE.values() for g in pair}) \
+                or "; ".join(f"{n}: {r}" for n, r in sorted(PUSH_SKIPPED.items())[:3]) or "작업실 사본도 없다"
+            print(f"[경고] 서버에 그리는 판(webtoon_vertical_*)이 하나도 없어 기본 판 이름으로 간다: {why}", file=sys.stderr)
     return _models or {k: {"gen": g, "edit": e, "roles": {"vertical": g, "edit": e}, "refs": True, "label": k, "use_for": "", "default": k == "uc", "models": {}, "missing": []}
                        for k, (g, e) in OFFLINE.items()}
 
@@ -132,6 +142,7 @@ def _list_workflows(c) -> list:
 
 
 LOCAL_DIR = Path(__file__).resolve().parent  # 저장 워크플로우의 작업실 사본(vast/mcp_use_webtoon_*.json)
+PUSH_SKIPPED: dict = {}  # 올리지 않은 작업실 사본 → 까닭(판이 하나도 안 잡힐 때 알린다)
 
 
 def _push_local(c, names: set, have: dict) -> list:
@@ -148,12 +159,17 @@ def _push_local(c, names: set, have: dict) -> list:
             ui = json.loads(f.read_text(encoding="utf-8"))
         except ValueError:
             continue
-        if any(v not in have.get(k, set()) for k, vs in _used_models(ui).items() for v in vs):
+        miss = [f"{k}/{v}" for k, vs in _used_models(ui).items() for v in vs if v not in have.get(k, set())]
+        if miss:
+            PUSH_SKIPPED[f.name] = "서버에 없는 모델 " + ", ".join(miss)
             continue
         try:
             c.req("/api/userdata/" + urllib.parse.quote("workflows/" + f.name, safe="") + "?overwrite=false", f.read_bytes())
             out.append(f.name)
-        except urllib.error.HTTPError:  # 동시에 다른 작업이 올렸으면(409) 그대로 둔다
+            PUSH_SKIPPED.pop(f.name, None)
+        except urllib.error.HTTPError as e:  # 동시에 다른 작업이 올렸으면(409) 그대로 둔다
+            if e.code != 409:
+                PUSH_SKIPPED[f.name] = f"올리기 HTTP {e.code}"
             continue
     return out
 
