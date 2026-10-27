@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import load_json, load_style  # noqa: E402
+from common import load_json, load_style  # noqa: E402
 from compose import Fonts  # noqa: E402
 
 COLS, ROWS = 4, 3

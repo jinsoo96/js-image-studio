@@ -66,7 +66,7 @@ def main():
     only = set(a.only.split(",")) if a.only else None
     todo = [x for x in pairs(ep) if not only or x[0]["id"] in only or x[2]["id"] in only]
 
-    from hf_panel import names
+    from common import names
     nm = names(ep.parents[1])
 
     def one(x):

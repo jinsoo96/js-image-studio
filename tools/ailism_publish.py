@@ -30,7 +30,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from comfy import load_style  # noqa: E402
+from common import load_style  # noqa: E402
 from to_pdf import cut_points, gap_rows  # noqa: E402
 
 API = "https://api.ailism.team/v1/original"

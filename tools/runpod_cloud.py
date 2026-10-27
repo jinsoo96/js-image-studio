@@ -2,7 +2,7 @@
 
     python tools/runpod_cloud.py run -- <명령...>
         파드를 켜고 ComfyUI 가 준비되면 COMFY_URL 을 넣어 <명령>을 실행한 뒤, 성공하든 실패하든 파드를 내린다.
-        예) python tools/runpod_cloud.py run -- python tools/render.py episode series/mudae-dwi/episodes/ep001 --only p003
+        예) python tools/runpod_cloud.py run -- python vast/comfy_panel.py series/<작품> series/<작품>/episodes/ep001/panels.json --only p003
     python tools/runpod_cloud.py up        파드를 켜고 준비될 때까지 기다려 URL 을 출력한다(다 쓰면 stop 필수)
     python tools/runpod_cloud.py stop      켜져 있는 파드를 내린다(keep_pod 면 멈추고, 아니면 지운다)
     python tools/runpod_cloud.py down      우리 파드(이름이 name_prefix 로 시작)를 전부 지운다(멈춰 둔 것까지)

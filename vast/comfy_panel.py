@@ -1,4 +1,4 @@
-"""vast.ai ComfyUI(Qwen Image 2.1)로 컷 그리기. 힉스필드 판(tools/hf_panel.py)과 같은 컷 설명(panels.json)을 쓴다(크레딧 0, GPU 시간만).
+"""GPU 서버 ComfyUI(Qwen Image 2.1)로 컷 그리기. 컷 설명(panels.json)으로 프롬프트·참고 그림을 만든다(GPU 시간만).
 (2026-10-15 사용자 "vastai 에서 이정도 이미지 수준의 웹툰 만들게 워크플로우 세로로"). 힉스필드 결과는 건드리지 않게 panels_hf_vast/ 에 따로 그린다.
 
     .venv/Scripts/python vast/comfy_panel.py <series_hf_dir> <panels.json> [--episode ep002_v2] [--only p003,p008] [--aspect 2:3] [--turbo]
@@ -398,7 +398,7 @@ def qwen_refs(series, p, episode=None, front=False, expr=False, turned=False, te
     - 앞 컷(refs_extra)을 넣으면 그 컷 구도를 통째로 가져와 사람이 늘어난다(p008) → 넣지 않는다
     - 장소를 맨 앞 <image1>(결과 구도가 첫 그림을 따른다)
     - 글 속 이름 옆에 그림 번호를 붙여 묶는다. 시드에 따라 한 명이 더 생기는 판이 있으니(p003 시드 1234) 이상하면 시드만 바꿔 다시"""
-    from hf_panel import names
+    from common import names
     NAMES = names(series)
     refs, lines = [], []
     # 클로즈업은 장소를 맨 뒤로: 맨 앞에 두면 그 방 구도를 따라 넓은 컷이 되고 인물이 한 번 더 나왔다(p079 얼굴 꽉 찬 컷이 방 전경 + 재민 둘)
@@ -666,7 +666,7 @@ def main():
             steps = args.steps or (8 if args.turbo else 40)
             first = cont and not turned and not note  # 다시 그리기(연출 확인에서 걸림)는 보통 방식으로: 같은 앞 컷을 또 베끼지 않게
             if first and cont[0] == "next_scene":
-                from hf_panel import names as _names
+                from common import names as _names
                 cid = p["chars"][0]
                 face = series / "assets" / "vast_refs" / f"{cid}_bust.png"
                 nm = re.sub(r"\s*\(.*?\)", "", _names(series).get(cid, cid))

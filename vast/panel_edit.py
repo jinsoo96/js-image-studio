@@ -115,7 +115,7 @@ def drift(series: Path, ep: Path, pid: str, before: bytes, after: Path) -> list:
     """편집 전엔 시트(상반신 참고 그림)와 맞던 인물이 편집 뒤 달라졌나. [{"who", "differs"}].
     미즈시마 머리만 회색으로 하라는 편집이 옆의 금수 머리를 은발로 바꿨고, 에이전트는 전후 비교를 보고도 넘겼다(2026-10-24 개항 v4 p047)."""
     import refine as R
-    from hf_panel import names
+    from common import names
     p = _spec(ep, pid)
     nm = names(series)
     chars = [c for c in p.get("chars") or [] if (series / "assets" / "vast_refs" / f"{c}_bust.png").exists()]
@@ -176,7 +176,7 @@ def preview(series: Path, ep: Path, pid: str, prompt: str, refs: str = "", seed:
 
 def design(series: Path, ep: Path, pid: str, who: str, change: str, seed: int = 0) -> dict:
     """인물 디자인(머리·옷·소품 등)을 바꾸면 어떻게 보일지 그 인물이 나오는 한 컷으로 미리 본다. 시트·본편은 그대로."""
-    from hf_panel import names
+    from common import names
     name = re.sub(r"\s*\(.*?\)", "", names(series).get(who, who))
     prompt = (f"In <image1>, change {name}'s design: {change}. Keep {name}'s face, expression, pose and hands, and keep everything else "
               "(the other people, the place, the light, the framing and the art style) exactly the same.")

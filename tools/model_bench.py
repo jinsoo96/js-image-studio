@@ -143,7 +143,7 @@ def score(series: Path, episode: str, ids: list):
     ks = sorted(refs)
     rd = differences(features([refs[k] for k in ks])) if len(ks) > 1 else None
     near = {k: float(min(rd[i, j] for j in range(len(ks)) if j != i)) for i, k in enumerate(ks)} if rd is not None else {}
-    from hf_panel import names as _names
+    from common import names as _names
     names = {k: re.sub(r"\s*\(.*?\)", "", v) for k, v in _names(series).items()}
     for name, *_ in VARIANTS:
         for pid in ids:

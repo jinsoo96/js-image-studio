@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import load_json, load_style  # noqa: E402
+from common import load_json, load_style  # noqa: E402
 from compose import Fonts, draw_lines  # noqa: E402
 
 W, H = 800, 1400

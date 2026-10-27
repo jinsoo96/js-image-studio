@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import ROOT, load_json  # noqa: E402
+from common import ROOT, load_json  # noqa: E402
 from to_epub import series_name  # noqa: E402
 
 W, H, FPS = 720, 1280, 30

@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import load_style  # noqa: E402
+from common import load_style  # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None  # 한 화 전체가 1억 픽셀을 넘는다
 

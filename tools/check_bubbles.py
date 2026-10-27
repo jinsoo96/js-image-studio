@@ -11,7 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lettering as lt  # noqa: E402
-from comfy import load_json, load_style  # noqa: E402
+from common import load_json, load_style  # noqa: E402
 
 W = 800
 
@@ -22,7 +22,7 @@ def main():
     ap.add_argument("--min", type=float, default=0.02)
     args = ap.parse_args()
     ep = Path(args.episode_dir)
-    style = load_style(ep.parent.parent)
+    style = load_style()
     lt.set_style((style.get("lettering") or {}).get("bubble_style", "inside"))
     bad = 0
     for p in load_json(ep / "storyboard.json")["panels"]:

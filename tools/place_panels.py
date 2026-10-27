@@ -1,7 +1,7 @@
-"""힉스필드 판: panels_hf/<id>.png 를 합성용 panels/<id>.png 로(가로 1600). 합성 재료(TV 화면 속 무대 등, id 가 콘티에 없고 parts/<id>.png 로 쓰이는 것)는 parts/ 로.
+"""본편 컷 panels_hf/<id>.png 를 합성용 panels/<id>.png 로(가로 1600). 합성 재료(TV 화면 속 무대 등, id 가 콘티에 없고 parts/<id>.png 로 쓰이는 것)는 parts/ 로.
 이미 놓인 시험 컷·장소 컷은 panels.json 에 없어 건드리지 않는다.
 
-    python tools/hf_place.py <episode_dir>
+    python tools/place_panels.py <episode_dir>
 """
 import json
 import sys

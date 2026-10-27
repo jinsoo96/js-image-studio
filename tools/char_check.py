@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import ROOT, load_json  # noqa: E402
+from common import ROOT, load_json  # noqa: E402
 
 MODEL = ROOT / "models" / "detect" / "ccip"
 _feat = _metr = None

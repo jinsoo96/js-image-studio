@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import load_json, load_style  # noqa: E402
+from common import load_json, load_style  # noqa: E402
 
 # oversized 는 주인공 체형을 부풀린 적이 있지만(태식) 여자 숙소 옷의 오버핏은 의도라 금지 목록에서 뺐다 → 체형은 눈으로 본다
 BANNED_TAGS = ["large breasts", "huge breasts", "curvy", "voluptuous", "hourglass", "cute face", "sparkling eyes",
@@ -119,7 +119,7 @@ def lint_board(ep):
 
 def bubble_warns(ep):
     import lettering as lt
-    style = load_style(ep.parent.parent)
+    style = load_style()
     lt.set_style((style.get("lettering") or {}).get("bubble_style", "inside"))
     warns = []
     for p in load_json(ep / "storyboard.json")["panels"]:

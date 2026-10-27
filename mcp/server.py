@@ -9,8 +9,8 @@ https://webtoon.js-96.com/mcp + Access(서비스 토큰 헤더) 로 연다. WEBT
 
 원칙
 - 한 번 호출은 30초 안에 끝낸다(agent platform 브리지 시간 제한). 작화·합성·내보내기는 작업(job)으로 띄우고 job_status 로 본다.
-- 그리기는 GPU 서버(ComfyUI; state/comfy_url.txt 가 가리키는 곳, 지금은 RunPod 파드) 하나로 크레딧 없이 한다. 힉스필드(유료) 도구는 뺐다(2026-10-22 사용자,
-  손으로 쓸 땐 tools/hf_panel.py). 그리는 판은 그 서버에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다는 series.json model,
+- 그리기는 GPU 서버(ComfyUI; state/comfy_url.txt 가 가리키는 곳, 지금은 vast 그림 상자) 하나로 한다. 힉스필드(유료)는 쓰지 않는다(2026-10-22 사용자,
+  도구는 2026-10-27 지움). 그리는 판은 그 서버에 저장된 웹툰 워크플로우가 정한다(draw_models 로 목록·모델 확인), 작품마다는 series.json model,
   한 번만 바꿀 땐 vast_draw 의 model. 한 번에 80컷까지, 인스턴스를 켜고 끄는 도구는 없다.
 - 지우는 도구는 없다. 다시 그릴 컷의 원본은 panels_hf/_rejected/ 로 옮긴다.
 - stdout 은 MCP 전송로다. 출력은 전부 반환값으로만(print 금지). 무거운 import 는 맨 위에서(Windows 워커 스레드 데드락).
@@ -87,7 +87,8 @@ _register_tool = mcp.tool
 # 도구 성질을 MCP 표준 annotations 로 알린다: 붙는 쪽(미사일 스튜디오·agent app)이 읽기 도구는 묻지 않고, 덮어쓰기·바깥 게시는 묻게 스스로 정한다.
 # 없을 땐 모든 도구가 '물어봄'이라 이름을 하나씩 허용 목록에 적어야 했고, 새 도구(style_compare)는 비대화 실행에서 막혔다(2026-10-23).
 READ_ONLY = {"guide", "read_doc", "status", "list_panels", "find", "panel_info", "contact_sheet", "file_link", "list_files", "read_file",
-             "draw_models", "panel_versions", "compare_panel", "job_status", "tool_help", "ailism_works"}
+             "draw_models", "panel_versions", "compare_panel", "job_status", "tool_help", "ailism_works",
+             "style_check"}  # 작품을 바꾸지 않고 점수 보고서·캐시만 남긴다(contact_sheet 가 모아보기 그림을 남기는 것과 같은 결). 빠졌을 땐 새 도구라 묻다가 막혔다(2026-10-27)
 DESTRUCTIVE = {"write_file", "edit_file", "move_file", "copy_file", "adopt_panel", "publish_ailism", "ailism_work", "comfy_server", "loras"}
 OPEN_WORLD = {"publish_ailism", "ailism_work"}
 
@@ -1937,10 +1938,17 @@ def vast_draw(series: str, episode: str, ids: str = "", turbo: bool = True, expr
             return _fail("no_restyle_lora", given=sd.name, reason="이 작품의 Restyle LoRA 가 없다: restyle(series, action='pairs'→'dataset'→'train') 먼저")
         steps.append({"label": "Restyle 마무리", "cmd": [PY, str(VAST / "restyle.py"), "apply", str(sd), ep.name, ",".join(want),
                                                        "--src", "panels_hf_vast", "--variant", "vast_restyle"]})
+    # 그린 뒤 그림체 닮음(이 PC CPU, GPU 시간 아님): 걸린 컷이 있으면 needs_review. 점수를 못 내도(가중치 없는 PC) 그리기 결과는 그대로 쓴다.
+    # 그동안 시험은 도구 호출·숫자만 재고 그림이 원작 그림체를 닮았는지는 아무도 재지 않았다(2026-10-27)
+    drawn = ep / ("panels_hf_vast_restyle" if restyle else "panels_hf_vast")
+    steps.append({"label": "그림체 닮음 점수", "allow_fail": True, "review_codes": [2],
+                  "cmd": [PY, str(TOOLS / "style_fidelity.py"), "score", str(sd), *[str(drawn / f"{p}.png") for p in want],
+                          "--json-out", str(ep / "review" / f"style_{time.strftime('%m%d-%H%M%S')}.json"), "--review-exit"]})
     job = _start_job("vast_draw", ep, steps)
     per = (30 if turbo else 120) + (40 if check else 0) + ((30 if turbo else 60) if refine else 0) + (40 if restyle else 0)
     return (f"작업 시작 {job}: {len(want)}컷, 크레딧 0, 약 {max(1, len(want) * per // 60)}분(공용 큐가 붐비면 더). "
-            f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast'). 그림체 LoRA: {_style_lora_state(sd)}")
+            f"job_status('{job}') → 끝나면 contact_sheet(series, episode, folder='vast'). 그린 뒤 그림체 닮음 점수가 붙는다(job_status 의 style). "
+            f"그림체 LoRA: {_style_lora_state(sd)}")
 
 
 def _style_lora_state(sd: Path) -> str:
@@ -2197,7 +2205,7 @@ def adopt_panel(series: str, episode: str, ids: str, source: str = "vast", name:
         if cur.exists():
             shutil.move(str(cur), str(rej / f"{i}_{stamp}_before_vast.png"))
         shutil.copy2(ep / "panels_hf_vast" / f"{i}.png", cur)
-    job = _start_job("vast_adopt", ep, [{"label": "합성용으로 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]}], reason)
+    job = _start_job("vast_adopt", ep, [{"label": "합성용으로 놓기", "cmd": [PY, str(TOOLS / "place_panels.py"), str(ep)]}], reason)
     return f"{len(want)}컷을 vast 그림으로 바꿨다(원본은 panels_hf/_rejected/*_before_vast.png). 놓기 작업 {job} → 끝나면 compose"
 
 
@@ -2293,6 +2301,35 @@ def compare_panel(series: str, episode: str, panel: str | int, what: str = "fix"
 
 
 @mcp.tool()
+def style_check(series: str, episode: str = "", ids: str = "", folder: str = "vast", paths: str = "", floor: float = 10.0) -> str:
+    """그린 그림이 그 작품 원작 그림체를 얼마나 닮았나(작업, GPU 없음: 이 PC 의 CPU 로 장당 약 2초, 처음엔 원작 특징을 뽑느라 몇 분).
+    결과는 job_status 로그: 그림마다 '원작끼리 닮음 분포의 몇 백분위'와 통과(floor 백분위 이상)·걸림. 회차 컷이면 series·episode·ids(쉼표, 비우면 그 폴더 전부)·
+    folder(기본 "vast" = GPU 서버로 새로 그린 판, 비우면 본편), 아무 그림이면 paths(파일·폴더·* 패턴, 쉼표).
+    진단에서 그 작품을 다른 작품과 구별하지 못한 지표면 판정하지 않는다고 로그에 적는다. vast_draw 는 그린 뒤 이 점수를 스스로 붙이니
+    따로 부르지 않는다: 예전 그림·다른 판·LoRA 를 켠 그림을 견줄 때 쓴다. 걸린 그림은 compare_panel 로 원작과 나란히 보여 준다."""
+    sd = _series(series)
+    target = sd
+    if paths.strip():
+        files = []
+        for one in [x.strip() for x in re.split(r"[,\n]+", paths) if x.strip()]:
+            for p in _matches(one, series, fuzzy=True):
+                files += sorted(c for c in p.iterdir() if c.suffix.lower() in IMG_EXT) if p.is_dir() else [p] if p.suffix.lower() in IMG_EXT else []
+    else:
+        target = _episode(series, episode)
+        sub = target / _folder(folder)
+        want = _pids(target, ids, "any") if ids.strip() else sorted(f.stem for f in sub.glob("*.png"))
+        files = [sub / f"{pid}.png" for pid in want if (sub / f"{pid}.png").exists()]
+    if not files:
+        return _fail("no_images", series=sd.name, folder=folder, ids=ids, paths=paths, how="그림이 있는 폴더·컷 번호를 list_files 로 확인")
+    out = target / "review" / f"style_{time.strftime('%m%d-%H%M%S')}.json"
+    job = _start_job("style_check", target, [{"label": f"그림체 닮음 {len(files)}장", "review_codes": [2],
+                                              "cmd": [PY, str(TOOLS / "style_fidelity.py"), "score", str(sd), *map(str, files),
+                                                      "--floor", f"{floor:g}", "--json-out", str(out), "--review-exit"]}])
+    return (f"작업 시작 {job}: {len(files)}장(GPU 없음). job_status('{job}', wait=50) → 로그에 그림마다 백분위·통과/걸림 "
+            f"(needs_review = 걸린 그림이 있음, 실패 아님). 전체 결과 {out.relative_to(ROOT).as_posix()}")
+
+
+@mcp.tool()
 def preview_panel(series: str, episode: str, panel: str | int, instruction: str = "", refs: str | list = "", character: str = "", design: str = "", seed: int = -1) -> str:
     """본편은 그대로 두고 한 컷을 바꾼 모습만 미리 본다(크레딧 0, 약 30초): '이 컷 이렇게 바꾸면 어때, 보여줘'. instruction(영어, edit_panel 과 같은 지시)
     또는 인물 디자인 바꾸기 character(인물 id) + design(영어, 예 "short silver-white hair instead of black hair"). 끝나면 compare_panel(what='preview').
@@ -2361,7 +2398,7 @@ def compose(series: str, episode: str) -> str:
     if _already(ep, "compose"):
         return _already(ep, "compose")
     _ensure_idle(ep)
-    steps = [{"label": "컷 놓기", "cmd": [PY, str(TOOLS / "hf_place.py"), str(ep)]},
+    steps = [{"label": "컷 놓기", "cmd": [PY, str(TOOLS / "place_panels.py"), str(ep)]},
              {"label": "합성·PDF", "cmd": [PY, str(TOOLS / "run_episode.py"), str(ep)]},
              {"label": "기계 점검", "cmd": [PY, str(TOOLS / "qa_gate.py"), str(ep)], "allow_fail": True},
              {"label": "말풍선 점검", "cmd": [PY, str(TOOLS / "check_bubbles.py"), str(ep)], "allow_fail": True}]
@@ -2378,7 +2415,7 @@ def _review_left(ep: Path) -> str:
     structural = set((_json(ROOT / "skills" / "staging-review" / "checks.json", {}) or {}).get("structural", []))
     groups = {}
     for pid, v in sorted(cur.items(), key=lambda x: _pid_key(x[0])):
-        # 그린·고친 판(panels_hf_vast)만 본다: panels_hf 는 합성 때 컷 놓기(hf_place)가 늘 다시 써서 매번 '바뀜'이 된다
+        # 그린·고친 판(panels_hf_vast)만 본다: panels_hf 는 합성 때 컷 놓기(place_panels)가 늘 다시 써서 매번 '바뀜'이 된다
         f = ep / "panels_hf_vast" / f"{pid}.png"
         newer = f.exists() and time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime)) > v.get("at", "")
         groups.setdefault(_review_level(v.get("issues", []), structural), []).append(
@@ -2605,6 +2642,13 @@ def _job_info(job_id: str, tail_lines: int = 40) -> dict:
         out["partial"] = {"done": partial.split(":", 1)[1].split("(")[0].strip(), "failed": failed_line.split(":", 1)[1].strip() if failed_line else ""}
         out["next"] = (f"일부만 실패. 끝난 컷({out['partial']['done']})은 지금 compare_panel·adopt_panel 로 이어가고, "
                        f"실패한 컷({out['partial']['failed']})만 같은 도구로 다시 그린다. 사용자가 시킨 다음 단계(채택·고치기·합성)를 끝난 컷으로 먼저 진행한다")
+    # 그림체 닮음 점수 줄(tools/style_fidelity.py: "  p043.png: 62백분위 통과  (경로)")을 칸으로: 긴 로그 끝에서 잘려 모델이 못 보는 일을 막는다
+    style = [m.groups() for ln in lines for m in [re.match(r"^\s+(\S+?)\.\w+: (\d+)백분위 (통과|걸림)", ln)] if m]
+    if style:
+        out["style"] = {"pct": {pid: int(p) for pid, p, _ in style}, "failed": [pid for pid, _, v in style if v == "걸림"]}
+        if out["state"] == "needs_review" and out["style"]["failed"] and not partial:
+            out["next"] = (f"그림은 다 그렸지만 원작 그림체와 덜 닮은 컷이 있다({', '.join(out['style']['failed'])}): compare_panel 로 원작과 나란히 보여 주고 "
+                           "다시 그릴지 사용자에게 묻는다. 나머지 컷은 사용자가 시킨 다음 단계로 이어간다")
     out["log_tail"] = "\n".join(lines[-tail_lines:]) if tail_lines else ""
     return out
 

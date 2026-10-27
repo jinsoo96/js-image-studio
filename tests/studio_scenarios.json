@@ -452,7 +452,11 @@
     "compose"
    ],
    "max_tool_errors": 3,
-   "max_seconds": 2700
+   "max_seconds": 2700,
+   "style_near": {
+    "floor": 10,
+    "_why": "그린 컷이 그 작품 원작 그림체 분포의 하위 10백분위 이상인가(tools/style_fidelity.py). 진단에서 구별 못 한 작품은 채점 안 함(2026-10-27)"
+   }
   },
   "setup": {
    "copy": [
@@ -556,5 +560,27 @@
    }
   },
   "why": "회차_요약(개항 v3·사에코·113 고정)의 작품별 판: 컷 수와 인물 첫 등장 컷을 데이터와 대조(2026-10-26)."
+ },
+ {
+  "name": "작품별_그림체_점수",
+  "each_series": true,
+  "prompt": "{name} {ep_n} 본편 {p1}·{p2} 컷이 원작 그림체를 얼마나 닮았는지 점수로 확인해 줘.",
+  "then": [
+   {
+    "say": "결과 나왔어? 컷마다 백분위랑 통과했는지 알려 줘.",
+    "wait_jobs_min": 10
+   }
+  ],
+  "checks": {
+   "must_call": [
+    "style_check"
+   ],
+   "max_tool_errors": 1,
+   "max_seconds": 900,
+   "answer_has": [
+    "백분위"
+   ]
+  },
+  "why": "2026-10-27 그림체 닮음 점수(MCP style_check)를 작품마다 고르고 결과(백분위·통과)를 그대로 전하는지. GPU 없음(이 PC CPU)."
  }
 ]

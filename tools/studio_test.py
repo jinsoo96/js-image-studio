@@ -171,6 +171,35 @@ def set_aside(sc: dict):
         print(f"  떠 둠 {src_rel} → {dst_rel}", flush=True)
 
 
+def _score_files(series: Path, files: list, floor: float) -> dict:
+    """tools/style_fidelity.py score 를 .venv 파이썬으로(그림체 모델은 torch 가 있는 .venv 에만 있다). 결과 JSON."""
+    py = ROOT / ".venv" / "Scripts" / "python.exe"
+    out = ROOT / "state" / "style" / f"studio_test_{time.strftime('%H%M%S')}.json"
+    subprocess.run([str(py if py.exists() else sys.executable), str(ROOT / "tools" / "style_fidelity.py"), "score", str(series),
+                    *map(str, files), "--floor", f"{floor:g}", "--json-out", str(out)], cwd=ROOT, check=False,
+                   env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    return json.loads(out.read_text(encoding="utf-8")) if out.exists() else {"error": "그림체 점수를 내지 못했다"}
+
+
+def style_near(sc: dict, since: float, scorer=_score_files) -> list:
+    """checks.style_near {"floor": 백분위}: 시나리오가 새로 그린 그림(시험 사본 회차의 panels_hf_vast, 시작 뒤 생긴 것)이 원작 그림체 통과선을 넘나.
+    도구 호출·숫자·정직성만 재던 시험이 그림이 원작을 닮았는지도 채점한다(2026-10-27). 진단에서 그 작품을 구별하지 못한 지표면 채점하지 않는다."""
+    near = (sc.get("checks") or {}).get("style_near")
+    if not near:
+        return []
+    copies = [ROOT / dst for _, dst in (sc.get("setup") or {}).get("copy", [])]
+    files = [f for d in copies for f in sorted((d / "panels_hf_vast").glob("*.png")) if f.stat().st_mtime >= since]
+    if not files:
+        return ["style_near: 이 시나리오가 새로 그린 그림이 없다"]
+    r = scorer(copies[0].parents[1], files, float(near.get("floor", 10)))
+    if r.get("error"):
+        return [f"style_near: {r['error']}"]
+    if not r.get("trusted"):
+        return []
+    bad = [f"{Path(it['file']).stem} {it['pct']:.0f}" for it in r["items"] if not it["pass"]]
+    return [f"그림체가 원작과 덜 닮음(통과선 {r['floor']:g}백분위): {', '.join(bad)}"] if bad else []
+
+
 CLEAN_ROOTS = ("series", "exports")
 
 
@@ -291,7 +320,7 @@ def main():
             conv = d.get("conversation_id") or conv
             turns.append({"text": d.get("text", ""), "sum": summarize(d), "error": d.get("error", "")})
         secs = time.time() - t0
-        fails = judge(sc, turns, secs)
+        fails = judge(sc, turns, secs) + style_near(sc, t0)
         wait_jobs(float((sc.get("setup") or {}).get("cleanup_wait_min", 20)) if (sc.get("setup") or {}).get("cleanup") else 0)
         cleanup(sc, before)
         passed += not fails

@@ -1,0 +1,26 @@
+Proprietary License
+
+Copyright (c) 2026 Jinsoo Kim (github.com/jinsoo96). All rights reserved.
+
+This repository and everything in it (source code, prompts, workflows, skills,
+documentation and configuration; together, the "Software") is the private,
+proprietary work of the copyright holder.
+
+No license is granted. Without the copyright holder's prior written permission,
+no person or organization may use, run, copy, modify, merge, publish, distribute,
+sublicense, sell, host as a service, or create derivative works of the Software,
+in whole or in part, or use it to train, fine-tune or evaluate machine learning
+models. Having access to this repository (for example as a collaborator, through
+a fork, a mirror or a leak) does not grant any of these rights.
+
+Third-party material keeps its own license and is not covered by this notice:
+- fonts/ — SIL Open Font License 1.1 (see fonts/OFL.txt)
+- Model weights fetched at run time and not stored in this repository
+  (Qwen-Image 2.1 and its LoRAs, CSD-ViT-L, CCIP and others) — under the
+  licenses published by their authors.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+For permission requests, contact the copyright holder through GitHub.

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vast"))
 sys.path.insert(0, str(ROOT / "tools"))
 import refine as R  # noqa: E402
-from hf_panel import names  # noqa: E402
+from common import names  # noqa: E402
 from judge_ep import endpoint  # noqa: E402
 
 CASES = ROOT / "skills" / "staging-review" / "regression_cases.json"

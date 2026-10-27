@@ -41,7 +41,7 @@ def main():
         rej.mkdir(parents=True, exist_ok=True)
         shutil.copy2(dst, rej / f"{a.pid}_before_blend_{time.strftime('%m%d%H%M')}.png")
     blend(base, over, a.alpha, a.soft).save(dst)
-    for stale in (ep / "panels" / f"{a.pid}.png",):  # 놓은 그림은 다시 놓게 지운다(hf_place 가 panels_hf 에서 다시 만든다)
+    for stale in (ep / "panels" / f"{a.pid}.png",):  # 놓은 그림은 다시 놓게 지운다(place_panels 가 panels_hf 에서 다시 만든다)
         if stale.exists():
             stale.unlink()
     print("겹침", dst, f"alpha {a.alpha} soft {a.soft}")

@@ -5,7 +5,7 @@
     .venv/Scripts/python tools/sync_vast.py <회차 폴더> [--only p005,p436] [--all-newer]
 
 --only: 그 컷들을 넣는다(다시 그리는 도구가 컷마다 부른다). --all-newer: vast 판이 본편보다 새로운 컷을 모두.
-합성용 panels/ 는 hf_place.py(합성 단계)가 본편이 더 새로우면 다시 만든다.
+합성용 panels/ 는 place_panels.py(합성 단계)가 본편이 더 새로우면 다시 만든다.
 """
 import argparse
 import shutil

@@ -189,7 +189,7 @@ def main():
     if args.until == "draw":
         return
 
-    run([PY, TOOLS / "hf_place.py", ep], "컷 놓기", capture=True)
+    run([PY, TOOLS / "place_panels.py", ep], "컷 놓기", capture=True)
     run([PY, TOOLS / "run_episode.py", ep], "말풍선 합성·PDF", capture=True)
     qa = run([PY, TOOLS / "qa_gate.py", ep], "기계 점검", allow_fail=True, capture=True)
     run([PY, TOOLS / "check_bubbles.py", ep], "말풍선 점검", allow_fail=True, capture=True)

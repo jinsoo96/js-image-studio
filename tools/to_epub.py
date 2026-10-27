@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy import load_json, load_style  # noqa: E402
+from common import load_json, load_style  # noqa: E402
 from to_pdf import cut_points, gap_rows  # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None

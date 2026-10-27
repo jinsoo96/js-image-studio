@@ -57,7 +57,7 @@ def main():
     print(f"{dst.name}: 컷 {len(ids) - len(missing)}/{len(ids)}" + (f", {a.fill_from} 로 채움 {len(filled)}" if filled else ""), flush=True)
     if missing:
         raise SystemExit(f"그림이 없는 컷: {','.join(missing)}(그 폴더에 그린 뒤 다시 부르거나 --fill-from)")
-    run([PY, TOOLS / "hf_place.py", dst], "컷 놓기", capture=True)
+    run([PY, TOOLS / "place_panels.py", dst], "컷 놓기", capture=True)
     run([PY, TOOLS / "run_episode.py", dst], "말풍선 합성·PDF", capture=True)
     run([PY, TOOLS / "qa_gate.py", dst], "기계 점검", allow_fail=True, capture=True)
     run([PY, TOOLS / "check_bubbles.py", dst], "말풍선 점검", allow_fail=True, capture=True)

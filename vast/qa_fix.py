@@ -36,7 +36,7 @@ def quick_check(series: Path, ep: Path, img: Path, pid: str, only: set) -> tuple
     """기준표 항목 중 only 만(비교형 감정·입·신은 것·몸 방향 등) + 같은 사람이 둘인지. 전체 검사(staging_check)는 시선 각도 같은 사소한 것까지
     잡아 거의 모든 컷이 걸렸다(2026-10-20). (걸린 항목, 메모)"""
     import re
-    from hf_panel import names
+    from common import names
     from scene_plate import _doubled
     p = _panels(ep)[pid]
     board = json.loads((ep / "storyboard.json").read_text(encoding="utf-8"))

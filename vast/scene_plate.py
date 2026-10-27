@@ -367,7 +367,7 @@ def plate_without(c, cache, series: Path, plate_path: Path, boxes: dict, keep: s
 
 def derive(series: Path, ep: Path, run: dict, only=None, log=print, force_gen=None) -> list:
     """묶음의 컷(인물이 있는 것)을 기준판에서 잘라 다시 그린다. 컷의 view 에 맞는 기준판(front · reverse)이 없으면 그 컷은 건너뛴다."""
-    from hf_panel import names
+    from common import names
     NAMES = names(series)
     c, cache = Comfy(), {}
     vr = series / "assets" / "vast_refs"

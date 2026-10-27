@@ -140,6 +140,37 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(out, quality=86)
     print(out)
+    pick_by_score(series, who, picks, cols, out.with_suffix(".json"))
+
+
+def pick_by_score(series: Path, who: str, picks: list, cols: list, out: Path) -> None:
+    """비교표에 그림체 점수를 붙여 고른다(tools/style_fidelity.py): 칸마다 원작 대비 백분위 중앙값, 'LoRA 끔' 대비 같은 컷끼리 차이.
+    끔보다 확실히 나은(차이 구간 하한 > 0) 칸 중 가장 높은 것을 권하고, 없으면 켜지 말라고 한다. 눈대중으로만 고르던 것을 숫자로(2026-10-27).
+    점수를 못 내면(가중치 없는 PC) 비교표만 남긴다."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import style_fidelity as SF
+        groups = {}
+        for var, f, s in cols:
+            name = "LoRA 끔" if f is None else f"{Path(f).stem}@{s:g}"
+            groups[name] = [p for ep, pn in picks for p in [series / "episodes" / ep / f"panels_hf_{var}" / f"{pn['id']}.png"] if p.exists()]
+        r = SF.compare(series, groups, SF.csd())
+    except SystemExit as e:
+        print(f"그림체 점수를 못 냈다: {e}")
+        return
+    if r.get("error"):
+        print(f"그림체 점수를 못 냈다: {r['error']}")
+        return
+    for row in r["rows"]:
+        vs = f" · 끔 대비 {row['vs_base']:+.0f} [{row['vs_lo']:+.0f}, {row['vs_hi']:+.0f}]" if row.get("vs_base") is not None else ""
+        print(f"  {row['group']}: 그림체 {row['median']:.0f}백분위 [{row['lo']:.0f}, {row['hi']:.0f}]{vs}")
+    best = next(((f, s) for var, f, s in cols if f and f"{Path(f).stem}@{s:g}" == r["best"]), None)
+    note = "" if r["trusted"] else " (진단에서 이 작품을 구별하지 못한 지표라 참고만)"
+    if best:
+        print(f"권함: {r['best']}{note} → lora.py set {series} {who} --file {best[0]} --strength {best[1]:g}")
+    else:
+        print(f"권함: 켜지 않는다(끔보다 확실히 나은 칸이 없다){note}")
+    out.write_text(json.dumps(r, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

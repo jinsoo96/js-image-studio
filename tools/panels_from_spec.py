@@ -47,7 +47,7 @@ def resolve_balloon_sides(ep: Path, panels: list, scenes: dict) -> list:
     글 속 'LEFT/RIGHT' 를 정규식으로 찾던 방식은 표현이 조금만 달라도 못 찾았다(2026-10-19 사용자 "문구 정규식은 땜질"). 바꾼 대사 목록을 돌려준다."""
     sys.path.insert(0, str(ROOT_DIR / "tools"))
     sys.path.insert(0, str(ROOT_DIR / "vast"))
-    from hf_panel import names
+    from common import names
     sb = ep / "storyboard.json"
     board = json.loads(sb.read_text(encoding="utf-8"))
     NAMES = names(ep.parents[1])

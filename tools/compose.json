@@ -1,0 +1,63 @@
+{
+ "_why": "합성(compose·lettering)·내보내기·점검표가 읽는 설정. 옛 style/style.json 에서 지금 쓰는 칸만 옮김(2026-10-27). fonts 의 상대 경로는 작업실 기준, 없으면 다음 글꼴로.",
+ "lettering": {
+  "width": 800,
+  "gap": 200,
+  "scene_gap": 480,
+  "background": "#ffffff",
+  "slice_height": 1600,
+  "font_size": 26,
+  "fonts": {
+   "speech": [
+    "fonts/NanumBarunGothicBold.ttf",
+    "C:/Windows/Fonts/malgunbd.ttf"
+   ],
+   "shout": [
+    "fonts/BlackHanSans-Regular.ttf",
+    "C:/Windows/Fonts/malgunbd.ttf"
+   ],
+   "thought": [
+    "fonts/GowunDodum-Regular.ttf",
+    "C:/Windows/Fonts/malgun.ttf"
+   ],
+   "narration": [
+    "fonts/NanumMyeongjo-Bold.ttf",
+    "C:/Windows/Fonts/malgun.ttf"
+   ],
+   "sfx": [
+    "fonts/BlackHanSans-Regular.ttf",
+    "C:/Windows/Fonts/malgunbd.ttf"
+   ]
+  },
+  "color_harmonize": 0.55,
+  "gap_after_scale": 1.5,
+  "portrait_display_width": 560,
+  "bubble_style": "inside"
+ },
+ "sizes": {
+  "portrait": [
+   832,
+   1216
+  ],
+  "landscape": [
+   1216,
+   832
+  ],
+  "square": [
+   1024,
+   1024
+  ],
+  "tall": [
+   768,
+   1344
+  ],
+  "close": [
+   1152,
+   896
+  ],
+  "wide": [
+   1344,
+   768
+  ]
+ }
+}

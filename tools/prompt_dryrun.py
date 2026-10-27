@@ -34,7 +34,7 @@ def main():
         pass
     import comfy_panel as C
     import hardcode_scan
-    from hf_panel import names
+    from common import names
 
     series = sorted(p for p in (ROOT / "series").iterdir() if p.is_dir() and not p.name.startswith("_"))
     own = {sd.name: hardcode_scan.names_of(sd) for sd in series}

@@ -20,7 +20,7 @@ from comfy_panel import graph, panel_text, pick_expr, upload  # noqa: E402
 
 def refine_prompt(series, p, expr=True):
     """컷 설명에서 다듬기 지시를 만든다. <image1> = 1단 그림, <image2>… = 인물 얼굴(표정 칸이 있으면 그 표정)."""
-    from hf_panel import names
+    from common import names
     NAMES = names(series)
     vr = series / "assets" / "vast_refs"
     refs, faces = [], []
@@ -62,7 +62,7 @@ def find_extras(img_path: Path, series, p, hint: str = "") -> list:
     import io
     import urllib.request
     from PIL import Image
-    from hf_panel import names
+    from common import names
     NAMES = names(series)
     chars = p.get("chars", [])
     wear = {c: o for c, o in (p.get("outfit") or {}).items()}
@@ -184,7 +184,7 @@ Answer JSON only: {{"vanished": ["name of each person whose own spot is visible 
 
 def where_now(series, ep_dir: Path, pid: str, who: list) -> str:
     """앞뒤 컷의 컷 설명에서 그 사람의 자리를 말하는 문장을 모은다(장면 인원 검사에 넘긴다)."""
-    from hf_panel import names
+    from common import names
     nm = names(series)
     spec = {p["id"]: p for p in json.loads((ep_dir / "panels.json").read_text(encoding="utf-8"))}
     order = [b["id"] for b in json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8"))["panels"] if b["id"] in spec]
@@ -246,7 +246,7 @@ def absent_cast(series, ep_dir: Path, pid: str, img_path: Path | None = None) ->
     for q in same:
         for c, o in (q.get("outfit") or {}).items():
             wear.setdefault(c, o)
-    from hf_panel import names
+    from common import names
     nm = names(Path(series))
     img = img_path or Path(ep_dir) / "panels_hf" / f"{pid}.png"
     out = []
@@ -267,7 +267,7 @@ CHECKS = ROOT / "skills" / "staging-review" / "checks.json"
 
 def _looks(series, p) -> str:
     """검사에 넘길 인물 생김새(이름 · 작품 설정의 생김새 첫 문장 · 이 컷의 옷). 그림 속 누가 누구인지 판정 모델이 알아보게."""
-    from hf_panel import names
+    from common import names
     series = Path(series)
     nm = names(series)
     sj = series / "series.json"
@@ -311,7 +311,7 @@ def _kind_check(c: dict, fill: dict, img_path: Path, series, p: dict) -> list:
     tools/harness_selftest.py). facts: 글에서 꼭 보여야 할 사실을 예/아니오 질문으로 뽑아 하나씩 · count_each: 인물마다 그 생김새인 사람 수 ·
     fixed: 고정 질문 하나(field 가 양수면 걸림) · each: 사람마다 한 질문(expect 가 'no' 인 사람이 bad_value 면 걸림) ·
     ref_each: 사람마다 참고 그림과 나란히 한 질문(found 인데 same_kind 가 아니면 걸림)."""
-    from hf_panel import names
+    from common import names
     nm = names(Path(series))
     out = []
     kind = c["kind"]
@@ -381,7 +381,7 @@ def run_checks(series, img_path: Path, p: dict, layout: str = "", speakers: str 
     n = len(p.get("chars") or [])
     fill = {"text": panel_text(p), "layout": layout or "(none)", "looks": _looks(series, p) or "(none)",
             "era": f" Objects must fit this period: {era}" if era else "", "common": spec.get("common", "")}
-    from hf_panel import names
+    from common import names
     nm = names(Path(series))
     fill["names"] = ", ".join(re.sub(r"\s*\(.*?\)", "", nm.get(c, c)) for c in p.get("chars") or [])
     fill["speakers"] = speakers or "(not given)"
@@ -501,7 +501,7 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
     layout = (json.loads(sc.read_text(encoding="utf-8")).get("scenes", {}).get(p.get("scene") or p.get("location") or "", "") if sc.exists() else "")
     absent = scene_present(ep_dir, pid)
     if absent:
-        from hf_panel import names
+        from common import names
         nm = names(series)
         vanished = _vlm([img_path], PRESENCE_ASK.format(who=", ".join(nm.get(c, c) for c in absent),
                                                        where=where_now(series, ep_dir, pid, absent) or layout[:300], this=panel_text(p))).get("vanished", [])
@@ -516,7 +516,7 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
         notes.append("인원: 이 순간 없어야 할 인물이 보인다(" + "; ".join(f"{x['name']}: {x.get('where', '')}" for x in seen) + ")")
     board = json.loads((ep_dir / "storyboard.json").read_text(encoding="utf-8")) if (ep_dir / "storyboard.json").exists() else {}
     bp = next((x for x in (board.get("panels") or []) if x.get("id") == pid), {})
-    from hf_panel import names as _nm
+    from common import names as _nm
     nmap = _nm(series)
     spk = sorted({d.get("who") for d in bp.get("dialogue") or [] if d.get("who") and d.get("type") not in ("monologue", "narration", "caption", "sfx")})
     speakers = ", ".join(re.sub(r"\s*\(.*?\)", "", nmap.get(w, w)) for w in spk) or "nobody (only narration, no one speaks aloud)"
@@ -532,7 +532,7 @@ def staging_check(series, ep_dir: Path, img_path: Path, pid: str):
 
 def staging_edit_prompt(series, p, r, probs) -> str:
     """편집으로 고칠 수 있는 항목(EDITABLE)을 그 컷의 글에 맞추는 편집 지시. 고칠 내용은 검수가 적은 걸린 점과 컷의 글에서 온다."""
-    from hf_panel import names
+    from common import names
     NAMES = names(series)
     parts = []
     if "표정연기" in probs:
@@ -763,7 +763,7 @@ IDENT_FIX = ("<image2> is {name}'s reference portrait. In <image1>, redraw only 
 def fix_identity(c, cache, dst: Path, series, p, seed, log=print) -> bool:
     """참고 그림과 다른 모습으로 그려진 인물(생김새)만 그 인물 상반신 참고 그림을 <image2> 로 준 머리·얼굴 편집으로 맞춘다(qa_fix.FACE 와 같은 꼴).
     다시 그려도 고양이 수인이 사람 얼굴로 나왔다(2026-10-24 등불 상점 4판 p002). 생김새가 다 풀리면 True, 아니면 원본으로 되돌리고 False."""
-    from hf_panel import names
+    from common import names
     nm = names(Path(series))
     probs = run_checks(series, dst, p, only={"identity_each"}).get("생김새", [])
     if not probs:

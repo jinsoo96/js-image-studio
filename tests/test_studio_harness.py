@@ -76,6 +76,39 @@ def test_summarize_clears_running_when_job_status_reports_done():
     assert any("다 됐다" in f for f in S.judge({"checks": {"max_seconds": 999}}, turns, 1.0))
 
 
+def test_style_near_scores_only_new_drawings_and_respects_trust():
+    import time as _t
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        drawn = root / "series" / "w" / "episodes" / "ep001_v9" / "panels_hf_vast"
+        drawn.mkdir(parents=True)
+        old = drawn / "p001.png"
+        old.write_bytes(b"x")
+        os.utime(old, (1, 1))  # 시나리오 전부터 있던 그림
+        since = _t.time() - 1
+        (drawn / "p002.png").write_bytes(b"x")
+        sc = {"checks": {"style_near": {"floor": 10}}, "setup": {"copy": [["a", "series/w/episodes/ep001_v9"]]}}
+        seen = {}
+
+        def scorer(series, files, floor, trusted=True, pct=4):
+            seen["series"], seen["files"] = series, [f.name for f in files]
+            return {"trusted": trusted, "floor": floor, "items": [{"file": str(f), "pct": pct, "pass": pct >= floor} for f in files]}
+
+        real = S.ROOT
+        S.ROOT = root
+        try:
+            fails = S.style_near(sc, since, scorer)
+            assert seen["files"] == ["p002.png"] and seen["series"] == root / "series" / "w"   # 새로 그린 것만, 사본의 작품 폴더로
+            assert fails and "p002 4" in fails[0]
+            assert S.style_near(sc, since, lambda s_, f_, fl: scorer(s_, f_, fl, pct=55)) == []           # 통과
+            assert S.style_near(sc, since, lambda s_, f_, fl: scorer(s_, f_, fl, trusted=False)) == []   # 구별 못 한 작품은 채점 안 함
+            assert S.style_near({"checks": {}}, since, scorer) == []                                       # 체크가 없으면 안 봄
+            os.utime(drawn / "p002.png", (1, 1))
+            assert "새로 그린 그림이 없다" in S.style_near(sc, since, scorer)[0]
+        finally:
+            S.ROOT = real
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
