@@ -2,6 +2,7 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,19 @@ ok = [sys.executable, "-c", "print('준비 완료')"]
 bad = [sys.executable, "-c", "print('컨테이너 로그 \\u2717'); raise SystemExit('이미지에 SSH 호스트 키가 없다')"]
 sys.exit(gpu_wake.run_merged({{"img": ok, "llm": bad}}, {{**os.environ, "PYTHONIOENCODING": "utf-8"}}))
 """
+
+
+def test_first_ready_box_is_held_until_others_are_up():
+    # 먼저 뜬 상자는 나머지를 기다리는 동안 붙들고(놀면 지우는 지킴이), 다 뜨면 더 붙들지 않는다. 늦게 뜬 상자는 붙들 일이 없다
+    sys.path.insert(0, str(ROOT / "tools"))
+    import gpu_wake
+    held = []
+    fast = [sys.executable, "-c", "print('준비 완료')"]
+    slow = [sys.executable, "-c", "import time; time.sleep(3); print('준비 완료')"]
+    code = gpu_wake.run_merged({"llm": fast, "img": slow}, {**os.environ, "PYTHONIOENCODING": "utf-8"},
+                               keep_alive=lambda n: held.append((n, time.time())), every=1)
+    assert code == 0 and held and {n for n, _ in held} == {"llm"}
+    assert len(held) >= 2  # 기다리는 내내 다시 붙든다(한 번 걸고 끝나면 붙들기가 먼저 풀린다)
 
 
 def test_one_failed_box_fails_wake_even_on_cp949_console():
