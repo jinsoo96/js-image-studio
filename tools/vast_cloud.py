@@ -133,7 +133,7 @@ def save_state(**kw) -> None:
 
 def clear_state() -> None:
     """인스턴스 기록만 지운다. 못 뜬 기계 목록(bad_machines)·올린 SSH 공개키는 다음 빌리기에도 쓴다."""
-    keep = {k: v for k, v in load_state().items() if k in ("bad_machines", "ssh_key_pub")}
+    keep = {k: v for k, v in load_state().items() if k in ("bad_machines", "ssh_key_pub", "ok_images")}
     STATE.unlink(missing_ok=True)
     if keep:
         save_state(**keep)
@@ -493,6 +493,7 @@ def wait_running(iid, timeout_min: float) -> dict:
             up_at = up_at or time.time()
             with contextlib.suppress(Exception):
                 if ssh_run(inst, "true", timeout=40).returncode == 0:
+                    save_state(ok_images=sorted(set(load_state().get("ok_images") or []) | {cfg()["image"]}))
                     return inst
             # running 인데 3분 넘게 SSH 가 안 받으면 컨테이너 로그를 한 번 본다(sshd 가 죽었으면 기다려도 안 뜬다)
             if not looked and time.time() - up_at > 180:
@@ -500,6 +501,10 @@ def wait_running(iid, timeout_min: float) -> dict:
                 text = container_log(iid)
                 for pat, why in IMAGE_PROBLEMS.items():
                     if pat in text:
+                        # 같은 이미지가 SSH 까지 뜬 적이 있으면 이미지가 아니라 이 기계(onstart 가 안 돎·느림): 다른 기계로 다시 빌린다.
+                        # 2026-10-27 vast_llm 이 18:47 엔 떴는데 21:10 다른 기계에서 이 줄로 바로 멈춰 LLM 없이 뒤 단계가 돌았다
+                        if cfg()["image"] in (load_state().get("ok_images") or []):
+                            raise RuntimeError(f"{why} — 같은 이미지가 다른 기계에선 떴다: 이 기계 문제로 보고 다른 기계로")
                         raise ImageProblem(f"{why}. 컨테이너 로그 끝: {text[-600:]}")
         time.sleep(15)
     raise TimeoutError(f"인스턴스가 {timeout_min}분 안에 뜨지 않았다: {iid}")

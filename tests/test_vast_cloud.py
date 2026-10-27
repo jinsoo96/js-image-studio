@@ -213,20 +213,32 @@ def test_onstart_revives_sshd_and_image_problem_stops():
     assert "ssh-keygen -A" in V.ONSTART and "/usr/sbin/sshd" in V.ONSTART and len(V.ONSTART) < 4048
     # running 인데 SSH 가 안 받고 로그에 sshd 가 죽은 줄이 있으면 다른 기계로 다시 빌리지 않고 ImageProblem
     clock = iter(range(0, 10**6, 100))
-    saved = (V.get_instance, V.ssh_run, V.container_log, V.time.time, V.time.sleep)
+    saved, saved_state = (V.get_instance, V.ssh_run, V.container_log, V.time.time, V.time.sleep), V.load_state
     try:
         V.get_instance = lambda iid: {"id": iid, "actual_status": "running", "ssh_host": "ssh1.vast.ai", "ssh_port": 1}
         V.ssh_run = lambda inst, cmd, timeout=0: subprocess.CompletedProcess([], 255, b"", b"reset")
         V.container_log = lambda iid, tail=120: "sshd: no hostkeys available -- exiting.\nconnect_to localhost port 22: failed."
         V.time.time = lambda: next(clock)
         V.time.sleep = lambda s: None
+        V.load_state = lambda: {}
         try:
             V.wait_running(7, 60)
             raise AssertionError("ImageProblem 이 나야 한다")
         except V.ImageProblem as e:
             assert "호스트 키" in str(e)
+        # 같은 이미지가 SSH 까지 뜬 적이 있으면 이미지가 아니라 기계 문제: ImageProblem 이 아닌 오류로 다른 기계를 빌리게 한다
+        V.load_state = lambda: {"ok_images": [V.cfg()["image"]]}
+        clock = iter(range(0, 10**6, 100))
+        try:
+            V.wait_running(7, 60)
+            raise AssertionError("오류가 나야 한다")
+        except V.ImageProblem:
+            raise AssertionError("뜬 적 있는 이미지인데 ImageProblem 으로 멈췄다")
+        except RuntimeError as e:
+            assert "다른 기계" in str(e)
     finally:
         V.get_instance, V.ssh_run, V.container_log, V.time.time, V.time.sleep = saved
+        V.load_state = saved_state
 
 
 def test_launch_returns_while_relay_keeps_running():
