@@ -18,7 +18,9 @@ job = Path(sys.argv[1])
 spec = json.loads(job.read_text(encoding="utf-8"))
 log = job.with_suffix(".log")
 status_file = job.with_name(job.stem + ".status.json")
-env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+# 단계 출력이 파일이라 파이썬은 블록 버퍼링한다: flush 없는 print 가 몇 KB 쌓일 때까지 로그에 안 내려가 지킴이가 일하는 단계를 끊었다
+# (2026-10-27 개항 review_panels deep: 검사·거르기는 계속 도는데 로그가 [76/92] 에서 멈춰 30분 뒤 -9).
+env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
 STALL_MIN = float(os.environ.get("WEBTOON_STALL_MIN", "30"))
 
 
