@@ -7,27 +7,18 @@ __pycache__/
 models/
 exports/
 state/
-series/*/episodes/*/panels_hf/
-series/*/episodes/*/panels_hf_*/
-series/*/assets/vast_refs/
-series/*/prompts/panels/*/vast*/
-series/*/episodes/*_vast/
-series/*/episodes/*/panels/
-series/*/episodes/*/parts/
-series/*/episodes/*/out/
-series/*/episodes/*/review/
-series/*/episodes/*/render_run.log
-series/*/episodes/*/render_status.json
-# 인물 LoRA 학습 데이터(그린 컷·에셋 사본)와 손실 그래프. 캡션 목록 data.json 만 올린다
-series/*/lora/*/data/
-series/*/lora/*/loss.png
+# 작품 내용은 레포에 올리지 않는다(2026-10-27 사용자 지시): series/ 의 작품 폴더 전부(콘티·컷 설명·인물·대사·에셋·프롬프트·LoRA 설정·원작 원고)는
+# 작업 PC 의 D: 에만. 레포에는 만드는 법(도구·MCP·스킬·워크플로우)만 두고, 작품 폴더 구성 설명 series/README.md 하나만 올린다
+series/*
+!series/README.md
+# 작품 열람 페이지(작품 제목·컷)와 옛 무대 뒤 그림체 문서·참고 그림도 작품 내용
+reader/index.html
+style/
 **/_rejected/
 # 안 쓰게 된 옛 판(_old, 자동으로 안 지움)과 시험용 결과물(_tmp, 10일 뒤 tools/clean_old.py 가 지움)
 **/_old/
 **/_tmp/
 **/_candidates/
-# 원작 원고(남의 글): 콘티 관문이 장면 목록(beats.json)과 대조하는 정본. 작업 PC 에만
-series/*/source/*.md
 reader/*/
 
 # 비밀값은 어디에도 두지 않는다

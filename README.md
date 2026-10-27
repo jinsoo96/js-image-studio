@@ -12,7 +12,7 @@
 CLAUDE.md                 세션 첫 장(읽는 순서·지킬 것)
 README.md                 이 파일
 LESSONS.md                교훈집(그리기 전에 반드시)
-series\
+series\                   작품 폴더. 작업 PC 에만(깃에 안 올림, series\README.md)
   d-plus-18-hf\           D+18(지금 작품). README.md 부터
   mudae-dwi-hf\           무대 뒤(지금 작품). README.md 부터
   _legacy\                옛 ComfyUI 판 글 자료(참고만)
@@ -23,11 +23,12 @@ vast\                     회사 vast.ai GPU 의 ComfyUI(Qwen Image 2.1)로 컷 
 requirements.txt          파이썬 패키지(정확한 버전)
 state\                    hf_uploads\(힉스필드에 올린 참고 그림 id, 계정별) · mcp_jobs\·mcp_sheets\(MCP 작업 기록·모아보기). 깃에 안 올림
 exports\<날짜>\           사용자에게 넘긴 PDF·epub·예고편
-reader\index.html         열람 페이지 원본(올리는 법은 reader\README.md)
+reader\index.html         열람 페이지 원본(올리는 법은 reader\README.md). 작품 내용이라 깃에 안 올림
 worklogs\                 OPEN-ISSUES.md · 2026-10-history.md(지난 기록) · 날짜 메모 · acting\GUIDE.md(연기 쓰는 법)
 fonts\                    식자 글꼴(OFL)
 models\                   detect\(말풍선용 얼굴 찾기)·u2net\(배경 지우기)은 지금도 씀. lora*\ 는 쉬는 ComfyUI 판
-cloud\ style\ workflows\  쉬는 ComfyUI·RunPod 설정(쓰지 않음)
+cloud\                    vast 두 상자·RunPod 설정(cloudast_img.json·vast_llm.json)
+style\ workflows\         쉬는 ComfyUI 판(style\ 은 옛 무대 뒤 그림체라 깃에 안 올림)
 .venv\                    파이썬(pillow·numpy·rembg·onnxruntime)
 ```
 
